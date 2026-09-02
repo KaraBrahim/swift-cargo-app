@@ -1,0 +1,653 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Shell, popovers, charts and dashboard — built on Tailwind utilities via
+   @apply so the whole app shares one scale. Colour always comes from a token.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* ── App shell ─────────────────────────────────────────────────── */
+  /* relative + z-1 so the fixed particle canvas (z-0) paints behind the UI. */
+  .app-shell { @apply relative z-[1] flex min-h-screen; }
+  .sidebar {
+    @apply sticky top-0 flex h-screen shrink-0 flex-col px-2.5 py-4;
+    width: var(--sidebar-w);
+    background: linear-gradient(180deg, var(--sidebar-1), var(--sidebar-2));
+    backdrop-filter: blur(12px);
+    border-right: 1px solid var(--border);
+    transition: width 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .sb-brand { @apply flex items-center gap-2 px-2 pb-3 pt-1; }
+  .sb-emblem {
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[10px] text-[0.86rem] font-extrabold;
+    background: linear-gradient(145deg, var(--gold-hi), var(--gold) 60%, var(--gold-2));
+    color: #221806; font-family: var(--font-display); box-shadow: var(--shadow-sm);
+  }
+  .sb-brand-name { @apply text-[0.78rem] font-bold tracking-[1.5px]; font-family: var(--font-display); }
+  .sb-brand-sub { @apply text-[0.56rem] uppercase tracking-[1.5px]; color: var(--muted); }
+  .sb-nav { @apply mt-0.5 flex flex-1 flex-col gap-px overflow-y-auto overflow-x-hidden; }
+  .sb-group-label { @apply px-2.5 pb-0.5 pt-2.5 text-[0.56rem] font-bold uppercase tracking-[1.1px]; color: var(--muted); }
+  .sb-link {
+    @apply relative flex items-center gap-2.5 rounded-[var(--radius-soft)] px-2.5 py-1.5 text-[0.8rem] font-medium
+           transition-all duration-150;
+    color: var(--text-2);
+  }
+  .sb-link:hover { background: var(--surface-2); color: var(--text); }
+  .sb-link.active { background: linear-gradient(90deg, var(--brand-tint-strong), transparent); color: var(--brand-text); }
+  .sb-link.active::before {
+    content: ''; @apply absolute bottom-1.5 top-1.5 w-[3px] rounded-r-[3px];
+    left: 0; background: var(--brand);
+  }
+  /* A wider family must never push the nav past the fixed sidebar width —
+     the label clips instead of overflowing. See theme/fonts.css. */
+  .sb-link span { @apply min-w-0 truncate; }
+  .sb-user-info { @apply min-w-0; }
+  .sb-user-name, .sb-user-role { @apply block truncate; }
+
+  .sb-link svg { @apply h-4 w-4 shrink-0 opacity-80; }
+  .sb-link.active svg { @apply opacity-100; }
+
+  .sb-foot { @apply mt-1.5 flex flex-col gap-1.5; }
+  .sb-user { @apply flex items-center gap-2 rounded-[var(--radius-soft)] px-2 py-1.5; background: var(--surface-2); border: 1px solid var(--border); }
+  .sb-avatar {
+    @apply grid h-7 w-7 shrink-0 place-items-center rounded-[9px] text-[0.72rem] font-bold;
+    background: var(--surface-3); color: var(--brand-text); border: 1px solid var(--brand-deep);
+  }
+  .sb-user-name { @apply text-[0.78rem] font-semibold; }
+  .sb-user-role { @apply text-[0.62rem]; color: var(--muted); }
+  .sb-logout { @apply ml-auto grid cursor-pointer place-items-center rounded-lg p-1.5 transition-all duration-150; background: none; border: none; color: var(--muted); }
+  .sb-logout:hover { color: var(--red); background: var(--surface-3); }
+  .sb-logout svg { @apply h-4 w-4; }
+  .sb-collapse { @apply flex cursor-pointer items-center justify-center rounded-[var(--radius-soft)] p-1.5 transition-all duration-150; background: none; border: 1px solid transparent; color: var(--muted); }
+  .sb-collapse:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+  .sb-collapse svg { @apply h-4 w-4; }
+
+  .app-shell.collapsed .sidebar { width: var(--sidebar-w-collapsed); @apply px-2; }
+  .app-shell.collapsed :is(.sb-brand-text, .sb-group-label, .sb-link span, .sb-user-info, .sb-logout, .sync-info) { @apply hidden; }
+  .app-shell.collapsed .sb-brand { @apply justify-center px-0; }
+  .app-shell.collapsed .sb-link { @apply justify-center px-0; }
+  .app-shell.collapsed .sb-link.active::before { left: 0; }
+  .app-shell.collapsed .sb-user { @apply justify-center p-2; }
+  .app-shell.collapsed .sync-chip { @apply justify-center px-0; }
+
+  .main { @apply flex min-w-0 flex-1 flex-col; }
+  /* Opacity-only entrance: a transform here would become the containing block
+     for the sticky .page-head and drag it out of alignment with the top bar. */
+  .content { @apply mx-auto w-full px-5 pb-1 pt-2.5; max-width: 1480px; animation: contentIn 0.3s ease; }
+
+  /* ── Top bar ───────────────────────────────────────────────────── */
+  .topbar {
+    @apply sticky top-0 z-30 flex shrink-0 items-center gap-3 px-5;
+    height: var(--topbar-h);
+    background: color-mix(in srgb, var(--bg) 84%, transparent);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar-burger { @apply hidden; }
+  .topbar-actions { @apply ml-auto flex items-center gap-2; }
+
+  .search-trigger {
+    @apply flex flex-1 cursor-pointer items-center gap-2.5 rounded-full px-3.5 py-2 text-left text-[0.84rem]
+           transition-all duration-150;
+    max-width: 440px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-family: var(--font-sans);
+  }
+  .search-trigger:hover { border-color: var(--border-strong); background: var(--surface-3); }
+  .search-trigger svg { @apply h-4 w-4 shrink-0; }
+  .search-trigger span { @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap; }
+  kbd { @apply whitespace-nowrap rounded-md px-1.5 py-0.5 text-[0.66rem] font-semibold; background: var(--surface-3); border: 1px solid var(--border); color: var(--muted); font-family: var(--font-sans); }
+
+  .icon-btn {
+    @apply relative inline-flex h-9 w-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-soft)]
+           transition-all duration-150;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
+  }
+  .icon-btn:hover, .icon-btn.active { background: var(--surface-3); color: var(--brand-text); border-color: var(--brand-deep); }
+  .icon-btn svg { @apply h-[17px] w-[17px]; }
+  .badge-count {
+    @apply absolute grid h-4 min-w-4 place-items-center rounded-full px-1 text-[0.6rem] font-bold tabular-nums;
+    top: -4px; right: -4px; background: var(--c-alert); color: #fff; border: 2px solid var(--bg);
+  }
+
+  .user-btn {
+    @apply flex cursor-pointer items-center gap-2.5 rounded-full py-1 pl-1 pr-2.5 transition-all duration-150;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-family: var(--font-sans);
+  }
+  .user-btn:hover, .user-btn.active { border-color: var(--brand-deep); background: var(--surface-3); }
+  .user-btn-id { @apply flex flex-col items-start leading-tight; }
+  .user-btn-name { @apply text-[0.82rem] font-semibold; }
+  .user-btn-role { @apply text-[0.66rem]; color: var(--muted); }
+  .user-btn-caret { @apply h-3.5 w-3.5; color: var(--muted); }
+
+  /* ── Popovers ──────────────────────────────────────────────────── */
+  .pop-wrap { @apply relative; }
+  .pop {
+    @apply absolute right-0 z-[60] overflow-hidden rounded-[var(--radius-card)];
+    top: calc(100% + 8px); min-width: 280px;
+    background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+    animation: popIn 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .pop-head { @apply flex items-center justify-between px-4 py-2.5 text-[0.85rem] font-semibold; border-bottom: 1px solid var(--border); }
+  .pop-x { @apply grid cursor-pointer place-items-center rounded-md p-1; background: none; border: none; color: var(--muted); }
+  .pop-x:hover { color: var(--text); background: var(--surface-3); }
+  .pop-x svg { @apply h-3.5 w-3.5; }
+  .pop-section { @apply px-4 pb-4 pt-3; }
+  .pop-section-title { @apply mb-2.5 text-[0.64rem] font-bold uppercase tracking-[1px]; color: var(--muted); }
+  .pop-list { @apply max-h-80 overflow-y-auto; }
+  /* Print format menu (PrintButton). */
+  .pop-print { width: 264px; right: 0; }
+  .print-opt {
+    @apply flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left;
+    background: none; border: none; color: var(--text); font-family: var(--font-sans);
+    transition: background .14s;
+  }
+  .print-opt:hover { background: var(--surface-2); }
+  .print-opt-label { @apply flex items-center gap-1.5 text-[0.86rem] font-semibold; }
+  .print-opt-label svg { @apply h-3.5 w-3.5; }
+  .print-opt-hint { @apply text-[0.7rem]; color: var(--muted); }
+  /* The real printer, set apart from the browser fallbacks below it. */
+  .print-opt-direct { background: var(--surface-2); border: 1px solid var(--border); }
+  .print-opt-direct:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-hover); }
+  .print-opt-direct:disabled { @apply cursor-not-allowed opacity-60; }
+  /* Reachability of the configured printer, checked when the menu opens. */
+  .dot { @apply inline-block h-1.5 w-1.5 rounded-full; }
+  .dot-ok { background: var(--green); }
+  .dot-warn { background: var(--amber); }
+
+  .pop-empty { @apply flex items-center justify-center gap-2 px-5 py-7 text-[0.84rem]; color: var(--muted); }
+  .pop-empty svg { @apply h-4 w-4; color: var(--green); }
+  .pop-item {
+    @apply flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-left text-[0.84rem];
+    background: none; border: none; color: var(--text); border-top: 1px solid var(--border); font-family: var(--font-sans);
+  }
+  .pop-item:hover { background: var(--surface-2); }
+  .pop-item svg { @apply h-4 w-4; color: var(--muted); }
+  .pop-item.danger:hover, .pop-item.danger:hover svg { color: var(--red); }
+  .pop-user { min-width: 240px; }
+  .pop-user-head { @apply flex items-center gap-3 p-4; }
+  .pop-user-name { @apply text-[0.88rem] font-semibold; }
+  .pop-user-sub { @apply mt-0.5 text-[0.72rem]; color: var(--muted); }
+
+  .pop-alerts { min-width: 348px; }
+  .alert-row {
+    @apply flex w-full cursor-pointer items-start gap-2.5 px-4 py-3 text-left;
+    background: none; border: none; border-bottom: 1px solid var(--border); color: var(--text); font-family: var(--font-sans);
+  }
+  .alert-row:last-child { border-bottom: none; }
+  .alert-row:hover { background: var(--surface-2); }
+  .alert-dot { @apply mt-1.5 h-2 w-2 shrink-0 rounded-full; background: var(--muted); }
+  .alert-dot.sev-critical { background: var(--red); }
+  .alert-dot.sev-warn { background: var(--amber); }
+  .alert-dot.sev-info { background: var(--blue); }
+  .alert-body { @apply flex min-w-0 flex-1 flex-col gap-0.5; }
+  .alert-label { @apply text-[0.84rem] font-semibold; }
+  .alert-detail { @apply whitespace-normal text-[0.74rem]; color: var(--muted); }
+  .alert-sev { @apply text-[0.62rem] uppercase tracking-wide; color: var(--muted); }
+  .alert-count { @apply shrink-0 text-[0.95rem] font-bold tabular-nums; color: var(--brand-text); font-family: var(--font-display); }
+
+  /* Notifications (colleagues' activity) */
+  .notif-row {
+    @apply flex w-full cursor-pointer items-start gap-2.5 px-4 py-2.5 text-left;
+    background: none; border: none; border-bottom: 1px solid var(--border); color: var(--text); font-family: var(--font-sans);
+  }
+  .notif-row:last-child { border-bottom: none; }
+  .notif-row:hover { background: var(--surface-2); }
+  .notif-row.unread { background: var(--brand-tint); }
+  .notif-ico { @apply grid h-7 w-7 shrink-0 place-items-center rounded-lg; background: var(--surface-2); color: var(--brand-text); border: 1px solid var(--border); }
+  .notif-ico svg { @apply h-3.5 w-3.5; }
+  .notif-body { @apply flex min-w-0 flex-1 flex-col gap-px; }
+  .notif-label { @apply text-[0.83rem] font-semibold; }
+  .notif-meta { @apply overflow-hidden text-ellipsis whitespace-nowrap text-[0.73rem]; color: var(--muted); }
+  .notif-time { @apply shrink-0 whitespace-nowrap text-[0.69rem]; color: var(--muted); }
+
+  /* ── Theme picker ──────────────────────────────────────────────── */
+  /* Theme + font together outgrow a short screen, so the body scrolls under a
+     pinned header instead of the popover running off the viewport. */
+  .pop-settings { @apply flex flex-col; min-width: 316px; max-height: min(78vh, 660px); }
+  .pop-settings > .pop-head { @apply shrink-0; }
+  .pop-scroll { @apply min-h-0 flex-1 overflow-y-auto; }
+  .theme-grid { @apply grid grid-cols-2 gap-2; }
+  .theme-card {
+    @apply flex cursor-pointer flex-col gap-0.5 rounded-[var(--radius-soft)] p-2 text-left transition-all duration-150;
+    background: var(--surface-2); border: 1.5px solid var(--border); font-family: var(--font-sans);
+  }
+  .theme-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+  .theme-card.active { border-color: var(--brand); background: var(--brand-tint); }
+  .theme-preview { @apply relative mb-1 flex h-8 overflow-hidden rounded-lg; border: 1px solid var(--border); }
+  .theme-dot { @apply flex-1; }
+  .theme-check { @apply absolute inset-0 grid place-items-center; background: rgba(0, 0, 0, 0.42); }
+  .theme-check svg { @apply h-4 w-4; color: #fff; }
+  .theme-name { @apply text-[0.79rem] font-semibold; color: var(--text); }
+  .theme-hint { @apply text-[0.65rem]; color: var(--muted); }
+  .theme-grid-wide { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .theme-grid-wide .theme-preview { @apply h-11; }
+
+  /* ── Font picker ───────────────────────────────────────────────── */
+  .font-grid { @apply grid grid-cols-2 gap-2; }
+  .font-card {
+    @apply flex cursor-pointer flex-col gap-0.5 rounded-[var(--radius-soft)] p-2 text-left transition-all duration-150;
+    background: var(--surface-2); border: 1.5px solid var(--border); color: var(--text);
+    letter-spacing: normal; /* the card previews the family, not the app's tracking */
+  }
+  .font-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+  .font-card.active { border-color: var(--brand); background: var(--brand-tint); }
+  .font-sample {
+    @apply mb-1 flex flex-col justify-center gap-0.5 overflow-hidden rounded-lg px-2.5 py-2;
+    background: var(--surface-1); border: 1px solid var(--border);
+  }
+  .font-sample-a { @apply truncate text-[0.86rem] font-bold; color: var(--text); }
+  .font-sample-b { @apply truncate text-[0.78rem] font-medium tabular-nums; color: var(--brand-text); }
+  .font-card-foot { @apply flex items-center justify-between gap-1.5; }
+  .font-name { @apply truncate text-[0.79rem] font-semibold; color: var(--text); }
+  .font-check { @apply grid h-4 w-4 shrink-0 place-items-center rounded-full; background: var(--brand); }
+  .font-check svg { @apply h-2.5 w-2.5; color: var(--brand-ink); }
+  .font-hint { @apply truncate text-[0.65rem]; color: var(--muted); }
+  .font-grid-wide { grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); }
+  .font-grid-wide .font-sample { @apply px-3 py-2.5; }
+  /* On the settings page the line under the name says what the family is for,
+     so it wraps to a second line rather than ellipsising. The popover's
+     narrow cards keep the truncate. */
+  .font-grid-wide .font-hint {
+    @apply overflow-visible whitespace-normal leading-snug;
+    text-overflow: clip;
+    min-height: 2.1em;
+  }
+
+  /* ── Command palette ───────────────────────────────────────────── */
+  .cmd-backdrop {
+    @apply fixed inset-0 z-[200] flex justify-center px-5 pb-5;
+    padding-top: 12vh; background: color-mix(in srgb, var(--bg) 72%, transparent);
+    backdrop-filter: blur(4px); animation: fade 0.14s ease;
+  }
+  .cmd {
+    @apply flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl;
+    max-height: 70vh; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+    animation: popIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .cmd-input { @apply flex items-center gap-3 px-4 py-3.5; border-bottom: 1px solid var(--border); }
+  .cmd-input svg { @apply h-[18px] w-[18px] shrink-0; color: var(--muted); }
+  .cmd-input input { @apply flex-1 text-[0.95rem] outline-none; background: none; border: none; color: var(--text); font-family: var(--font-sans); }
+  .cmd-input input::placeholder { color: var(--placeholder); }
+  .cmd-results { @apply overflow-y-auto p-2; }
+  .cmd-hint { @apply px-5 py-7 text-center text-[0.85rem]; color: var(--muted); }
+  .cmd-group { @apply mb-1.5; }
+  .cmd-group-label { @apply px-3 pb-1 pt-2 text-[0.62rem] font-bold uppercase tracking-[1px]; color: var(--muted); }
+  .cmd-row { @apply flex w-full cursor-pointer items-center gap-2.5 rounded-[var(--radius-soft)] px-3 py-2.5 text-left text-[0.87rem]; background: none; border: none; color: var(--text); font-family: var(--font-sans); }
+  .cmd-row.active { background: var(--surface-3); }
+  .cmd-ico { @apply grid h-7 w-7 shrink-0 place-items-center rounded-lg; background: var(--surface-2); color: var(--brand-text); }
+  .cmd-ico svg { @apply h-3.5 w-3.5; }
+  .cmd-title { @apply whitespace-nowrap font-semibold; }
+  .cmd-sub { @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.78rem]; color: var(--muted); }
+  .cmd-go { @apply h-3.5 w-3.5 shrink-0; color: var(--muted); }
+
+  /* ── Sync chip ─────────────────────────────────────────────────── */
+  .sync-chip { @apply flex items-center gap-2.5 rounded-[var(--radius-card)] px-3 py-2.5; background: var(--surface-2); border: 1px solid var(--border); }
+  .sync-dot { @apply h-2 w-2 shrink-0 rounded-full; background: var(--green); }
+  .sync-chip.off .sync-dot { background: var(--red); }
+  .sync-site { @apply text-[0.76rem] font-semibold; }
+  .sync-sub { @apply text-[0.64rem]; color: var(--muted); }
+
+  .sync-pill { @apply inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[0.72rem] font-semibold; background: var(--surface-2); border: 1px solid var(--border); }
+  .sync-pill .sync-dot { background: var(--muted); }
+  .sync-pill.sync-on { color: var(--green); border-color: var(--green-border); }
+  .sync-pill.sync-on .sync-dot { background: var(--green); }
+  .sync-pill.sync-off { color: var(--red); border-color: var(--red-border); }
+  .sync-pill.sync-off .sync-dot { background: var(--red); }
+  .sync-pill.sync-hub { color: var(--brand-text); border-color: var(--brand-deep); }
+  .sync-pill.sync-hub .sync-dot { background: var(--brand); }
+  .sync-grid { @apply mb-2.5 grid gap-2; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); }
+  .sync-cell { @apply rounded-[var(--radius-soft)] px-2.5 py-2; background: var(--surface-2); border: 1px solid var(--border); }
+  .sync-k { @apply text-[0.66rem] font-semibold uppercase tracking-wide; color: var(--muted); }
+  .sync-v { @apply mt-0.5 text-[0.85rem] font-semibold tabular-nums; }
+  .sync-v.warn { color: var(--amber); }
+  .sync-since { @apply text-[0.72rem] font-normal; color: var(--muted); }
+  .sync-meta { @apply mb-2.5 text-[0.71rem]; color: var(--muted); }
+  .sync-err { @apply mb-2.5 rounded-[var(--radius-soft)] px-3 py-2 text-[0.78rem]; background: var(--red-bg); border: 1px solid var(--red-border); color: var(--red-text); }
+
+  /* ── Dashboard : stat tiles ────────────────────────────────────── */
+  .stat-grid { @apply mb-2.5 grid gap-2.5; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); }
+  /* No overflow-hidden here: it would clip the 3-dots period dropdown against
+     the card's bottom edge. The accent bar is rounded to follow the corners
+     instead, and an open card is raised above its neighbours via :has(). */
+  .stat {
+    @apply relative rounded-[var(--radius-card)] p-3 transition-all duration-150;
+    background: linear-gradient(160deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--border);
+  }
+  .stat::before {
+    content: ''; @apply absolute inset-x-0 top-0 h-0.5 opacity-80;
+    background: var(--accent, var(--brand));
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+  }
+  .stat:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+  .stat:has(.pop-period) { z-index: 20; }
+  .stat-top { @apply mb-1.5 flex items-center gap-2; }
+  .stat-ico {
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[10px];
+    background: color-mix(in srgb, var(--accent, var(--brand)) 15%, transparent);
+    color: var(--accent, var(--brand-text));
+  }
+  .stat-ico svg { @apply h-4 w-4; }
+  .stat-top .stat-label { @apply m-0 flex-1 text-[0.77rem] font-medium; color: var(--text-2); }
+  .stat-more { @apply flex cursor-pointer flex-col items-center gap-[2.5px] rounded-md p-1.5; background: none; border: none; }
+  .stat-more span { @apply block h-[3px] w-[3px] rounded-full; background: var(--muted); }
+  .stat-more:hover, .stat-more.active { background: var(--surface-3); }
+  .stat-more:hover span, .stat-more.active span { background: var(--brand-text); }
+
+  /* Per-card period dropdown */
+  .pop-period { min-width: 168px; @apply p-1.5; }
+  .period-item {
+    @apply flex w-full cursor-pointer items-center justify-between rounded-[var(--radius-soft)] px-3 py-2 text-left text-[0.82rem];
+    background: none; border: none; color: var(--text); font-family: var(--font-sans);
+  }
+  .period-item:hover { background: var(--surface-2); }
+  .period-item.active { color: var(--brand-text); font-weight: 600; }
+  .period-item svg { @apply h-3.5 w-3.5; }
+  .stat-val { @apply text-[1.2rem] font-bold tabular-nums; font-family: var(--font-display); letter-spacing: -0.5px; }
+  .stat-unit { @apply ml-1 text-[0.76rem] font-medium; color: var(--muted); font-family: var(--font-sans); }
+  .stat-label { @apply mt-0.5 text-[0.75rem]; color: var(--muted); }
+  .stat-foot { @apply mt-1.5 flex min-h-6 items-end justify-between gap-2.5; }
+  .stat-link { @apply text-[0.76rem] font-semibold underline underline-offset-2; color: var(--c-alert); }
+  .stat-gold { border-color: var(--brand-deep); background: linear-gradient(160deg, var(--brand-tint), var(--surface-1)); }
+  .stat-gold .stat-val { color: var(--brand-text); }
+  .spark { @apply shrink-0 overflow-visible; }
+
+  .trend { @apply inline-flex items-center gap-1 whitespace-nowrap text-[0.72rem] font-semibold; }
+  .trend-up { color: var(--green); }
+  .trend-down { color: var(--red); }
+  .trend-flat { color: var(--muted); }
+
+  .ca-switch { @apply inline-flex gap-0.5 rounded-lg p-0.5; background: var(--surface-3); }
+  .ca-switch button { @apply cursor-pointer rounded-md px-2 py-1 text-[0.69rem] font-semibold; background: none; border: none; color: var(--muted); font-family: var(--font-sans); }
+  .ca-switch button.active { background: var(--surface-1); color: var(--brand-text); }
+
+  .qty-grid { @apply grid gap-3; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .qty-cell { @apply flex flex-col gap-0.5 rounded-[var(--radius-soft)] px-4 py-3; background: var(--surface-2); border: 1px solid var(--border); }
+  .qty-v { @apply text-[1.15rem] font-bold tabular-nums; font-family: var(--font-display); }
+  .qty-k { @apply text-[0.7rem]; color: var(--muted); }
+
+  .period-select {
+    @apply cursor-pointer rounded-[var(--radius-soft)] px-3 py-1.5 text-[0.8rem] font-semibold outline-none;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-family: var(--font-sans);
+  }
+  .period-select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-glow); }
+
+  /* ── Financial rows ────────────────────────────────────────────── */
+  .fin-row {
+    @apply mb-1.5 flex items-center gap-3 rounded-[var(--radius-soft)] px-3 py-2;
+    background: color-mix(in srgb, var(--accent, var(--brand)) 7%, var(--surface-2));
+    border: 1px solid var(--border);
+  }
+  .fin-row:last-child { @apply mb-0; }
+  .fin-ico {
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[10px];
+    background: color-mix(in srgb, var(--accent, var(--brand)) 16%, transparent);
+    color: var(--accent, var(--brand-text));
+  }
+  .fin-ico svg { @apply h-4 w-4; }
+  .fin-id { @apply flex min-w-0 flex-1 flex-col items-start gap-px; }
+  .fin-line { @apply flex flex-wrap items-baseline gap-2; }
+  .fin-label { @apply text-[0.73rem]; color: var(--muted); }
+  .fin-val { @apply text-[1.05rem] font-bold tabular-nums; font-family: var(--font-display); letter-spacing: -0.3px; }
+  .fin-cur { @apply text-[0.7rem] font-medium; color: var(--muted); font-family: var(--font-sans); }
+
+  /* ── Pipeline ──────────────────────────────────────────────────── */
+  .pipe { @apply m-0 mb-2 flex list-none p-0; }
+  .pipe-step { @apply relative flex flex-1 flex-col items-center gap-0.5 text-center; }
+  .pipe-track { @apply absolute h-0.5 w-full; top: 13px; right: 50%; background: var(--border-strong); }
+  .pipe-step:first-child .pipe-track { @apply hidden; }
+  .pipe-step.done .pipe-track, .pipe-step.current .pipe-track { background: var(--brand); }
+  .pipe-node {
+    @apply z-[1] grid h-7 w-7 place-items-center rounded-full text-[0.85rem] font-bold transition-all duration-200;
+    background: var(--surface-2); border: 2px solid var(--border-strong); color: var(--muted); font-family: var(--font-display);
+  }
+  .pipe-step.done .pipe-node { border-color: var(--brand); color: var(--brand-text); }
+  .pipe-step.current .pipe-node {
+    background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2));
+    border-color: var(--brand); color: var(--brand-ink); box-shadow: 0 0 0 4px var(--brand-glow);
+  }
+  .pipe-label { @apply text-[0.73rem]; color: var(--text-2); }
+  .pipe-count { @apply text-[1.15rem] font-bold tabular-nums; font-family: var(--font-display); }
+  .pipe-pct { @apply min-h-[1em] text-[0.7rem] font-semibold; color: var(--brand-text); }
+
+  /* ── Route map ─────────────────────────────────────────────────── */
+  .routemap { @apply relative; }
+  .routemap-svg { @apply block h-auto w-full; max-height: 86px; }
+  .routemap-ends { @apply -mt-2.5 flex items-center justify-between gap-3; }
+  .rm-end { @apply inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[0.76rem] font-bold tracking-wide; background: var(--surface-2); border: 1px solid var(--border); }
+  .rm-flag { @apply grid h-5 w-5 shrink-0 place-items-center rounded-full text-[0.56rem] font-extrabold tracking-normal; background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--brand-text); }
+  .rm-transit { @apply text-center text-[0.74rem]; color: var(--muted); }
+
+  /* ── Donut ─────────────────────────────────────────────────────── */
+  .donut-row { @apply flex flex-wrap items-center gap-4; }
+  .donut-wrap { @apply relative shrink-0; }
+  .donut-center { @apply absolute inset-0 grid place-content-center text-center; }
+  .donut-total { @apply text-[1.15rem] font-bold tabular-nums; font-family: var(--font-display); letter-spacing: -0.5px; }
+  .donut-total-label { @apply text-[0.7rem]; color: var(--muted); }
+  .donut-legend { @apply flex min-w-36 flex-1 flex-col gap-1.5; }
+  .dl-item { @apply flex items-center justify-between gap-2 text-[0.78rem]; }
+  .dl-dot { @apply h-2.5 w-2.5 shrink-0 rounded; }
+  .dl-name { @apply flex-1; color: var(--text-2); }
+  .dl-pct { @apply font-semibold tabular-nums; color: var(--text); }
+
+  /* ── Activity feed ─────────────────────────────────────────────── */
+  .feed { @apply m-0 list-none p-0; }
+  .feed-row { @apply flex items-start gap-2.5 py-1; border-bottom: 1px solid var(--surface-2); }
+  .feed-row:last-child { border-bottom: none; }
+  .feed-ico { @apply grid h-6 w-6 shrink-0 place-items-center rounded-lg; background: var(--surface-2); color: var(--brand-text); border: 1px solid var(--border); }
+  .feed-ico svg { @apply h-3.5 w-3.5; }
+  .feed-body { @apply flex min-w-0 flex-1 flex-col gap-px; }
+  .feed-label { @apply text-[0.8rem] font-medium; }
+  .feed-sub { @apply overflow-hidden text-ellipsis text-[0.73rem]; color: var(--muted); }
+  .feed-time { @apply shrink-0 whitespace-nowrap text-[0.69rem]; color: var(--muted); }
+
+  .panel-foot-link {
+    @apply mt-2 flex items-center justify-center gap-1.5 rounded-[var(--radius-soft)] p-1.5 text-[0.78rem] font-semibold
+           transition-all duration-150;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
+  }
+  .panel-foot-link:hover { color: var(--brand-text); border-color: var(--brand-deep); }
+  .panel-foot-link svg { @apply h-3.5 w-3.5; }
+
+  /* ── Dashboard grids ───────────────────────────────────────────── */
+  .dash-cols { @apply mb-3 grid items-start gap-3; grid-template-columns: 1.45fr 1.05fr 0.85fr; }
+  .dash-cols > .panel { @apply mb-0; }
+  .dash-cols-3 { @apply grid items-start gap-3; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  .dash-cols-3 > .panel { @apply mb-0; }
+  @media (max-width: 1400px) { .dash-cols { grid-template-columns: 1.4fr 1fr; } }
+  @media (max-width: 1000px) { .dash-cols { grid-template-columns: 1fr; } }
+
+  .status-breakdown { @apply grid grid-cols-2 gap-3; }
+  .sb-stat { @apply flex flex-col gap-2.5 rounded-[var(--radius-soft)] p-4 transition-all duration-150; background: var(--surface-2); border: 1px solid var(--border); }
+  .sb-stat:hover { border-color: var(--brand-deep); transform: translateY(-2px); }
+  .sb-stat-val { @apply text-[1.7rem] font-bold tabular-nums; font-family: var(--font-display); }
+
+  /* ── Impressions : document picker ─────────────────────────────── */
+  .doc-grid { @apply grid gap-3; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .doc-card {
+    @apply flex cursor-pointer flex-col gap-1 rounded-[var(--radius-soft)] p-3.5 text-left transition-all duration-150;
+    background: var(--surface-2); border: 1.5px solid var(--border); font-family: var(--font-sans);
+  }
+  .doc-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+  .doc-card.active { border-color: var(--brand); background: var(--brand-tint); }
+  .doc-ico { @apply mb-1 grid h-8 w-8 place-items-center rounded-[10px]; background: var(--surface-3); color: var(--brand-text); }
+  .doc-ico svg { @apply h-4 w-4; }
+  .doc-name { @apply text-[0.85rem] font-semibold; }
+  .doc-hint { @apply text-[0.7rem]; color: var(--muted); }
+
+  .print-only { @apply hidden; }
+  .print-head h2 { @apply mb-0.5; }
+
+  /* ── Charts (legacy CSS bars, still used by some pages) ────────── */
+  .chart-bars { @apply flex h-40 items-end gap-2.5 pt-2.5; }
+  .cb-col { @apply flex h-full flex-1 flex-col items-center justify-end gap-2; }
+  .cb-bar { @apply w-full max-w-11 rounded-t-md; background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-3)); min-height: 3px; transition: height 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .cb-label { @apply whitespace-nowrap text-[0.68rem]; color: var(--muted); }
+  .cb-val { @apply text-[0.7rem] font-semibold tabular-nums; }
+}
+
+@media print { .print-only { display: block !important; } }
+
+/* ── Mobile ────────────────────────────────────────────────────────── */
+@media (max-width: 860px) {
+  .app-shell { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: static; flex-direction: row; align-items: center; padding: 10px 14px; overflow-x: auto; }
+  .sb-brand { padding: 0 14px 0 4px; }
+  .sb-brand-sub, .sb-group-label, .sb-user-role, .sync-info { display: none; }
+  .sb-nav { flex-direction: row; margin-top: 0; }
+  .sb-link { padding: 8px 10px; }
+  .sb-link span { display: none; }
+  .sb-link.active::before { display: none; }
+  .sb-foot { flex-direction: row; margin-top: 0; margin-left: auto; align-items: center; }
+  .sb-collapse { display: none; }
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar-burger { display: inline-flex; }
+  .search-trigger span, .search-trigger kbd { display: none; }
+  .search-trigger { flex: 0 0 auto; width: 36px; height: 36px; justify-content: center; padding: 0; border-radius: 10px; }
+  .user-btn-id, .user-btn-caret { display: none; }
+  .pop { right: -8px; min-width: min(340px, calc(100vw - 24px)); }
+  .pop-alerts { min-width: min(360px, calc(100vw - 24px)); }
+  .pipe { overflow-x: auto; gap: 10px; }
+  .pipe-step { min-width: 72px; }
+  .content { padding: 14px 14px 24px; }
+  /* Match the narrower content padding so the pinned bar still bleeds edge to
+     edge, and keep it shallow so it doesn't eat a small screen. */
+  .page-head { margin-inline: -14px; padding: 10px 14px; gap: 8px; }
+  .page-head h1 { font-size: 1.15rem; }
+  .page-head p { display: none; }        /* subtitle is context, not navigation */
+  .btn-back { padding: 8px 14px; font-size: 0.82rem; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Bon line editor + article autocomplete
+   ═══════════════════════════════════════════════════════════════════ */
+.line-editor {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
+  padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--surface-2);
+}
+.line-editor:first-of-type { border-top: none; margin-top: 6px; }
+.line-article { flex: 1 1 260px; min-width: 200px; }
+.line-measure { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Shared input look for the editor's own controls. */
+.article-input input, .line-value, .line-unit, .article-cat {
+  background: var(--input-bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius-soft); font-family: var(--font-sans); font-size: 0.86rem;
+  padding: 9px 11px; outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.article-input input:focus, .line-value:focus, .line-unit:focus, .article-cat:focus {
+  border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-glow);
+}
+.article-input input::placeholder { color: var(--placeholder); }
+
+.article-field { position: relative; }
+.article-input { position: relative; display: flex; align-items: center; }
+.article-input input { width: 100%; padding-right: 30px; }
+.article-tag {
+  position: absolute; right: 8px; display: grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 50%; font-size: 0.72rem; font-weight: 700;
+  background: var(--green-bg); color: var(--green);
+}
+.article-tag.new { background: var(--brand-tint); color: var(--brand-text); }
+.article-tag svg { width: 12px; height: 12px; }
+
+.article-menu {
+  position: absolute; z-index: 50; top: calc(100% + 4px); left: 0; right: 0;
+  max-height: 264px; overflow-y: auto; padding: 5px;
+  background: var(--surface-1); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-soft); box-shadow: var(--shadow);
+  animation: popIn .14s cubic-bezier(.2,.8,.2,1);
+}
+.article-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding: 8px 11px; border: none; background: none; cursor: pointer; text-align: left;
+  color: var(--text); font-family: var(--font-sans); font-size: 0.86rem; border-radius: 8px;
+}
+.article-opt.active { background: var(--surface-3); }
+.article-opt-name { font-weight: 500; }
+.article-opt-cat {
+  font-size: 0.68rem; color: var(--muted); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 20px; padding: 2px 8px; white-space: nowrap;
+}
+.article-create { color: var(--brand-text); font-weight: 600; justify-content: flex-start; gap: 8px; border-top: 1px solid var(--border); margin-top: 3px; padding-top: 10px; }
+.article-create svg { width: 14px; height: 14px; }
+.article-cat { margin-top: 6px; width: 100%; cursor: pointer; }
+
+.line-value { width: 84px; text-align: right; }
+.line-unit { cursor: pointer; }
+.line-remove { align-self: center; }
+.line-price { display: inline-flex; align-items: center; gap: 5px; }
+.line-per { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.line-total { margin-top: 5px; text-align: right; font-size: 0.8rem; font-weight: 700; color: var(--brand-text); }
+.line-hint { margin: 2px 0 8px; font-size: 0.74rem; line-height: 1.5; }
+
+/* KPI cards that double as navigation into the catalogue. */
+.kpi-row { display: grid; gap: 14px; margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.kpi-card {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px;
+  border-radius: var(--radius-card); background: var(--surface-1);
+  border: 1px solid var(--border); color: var(--text);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+a.kpi-card:hover { transform: translateY(-2px); border-color: var(--accent, var(--brand)); }
+a.kpi-card > svg:last-child { margin-left: auto; width: 18px; height: 18px; color: var(--muted); }
+.kpi-static { cursor: default; }
+.kpi-ico {
+  display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--accent, var(--brand-text));
+}
+.kpi-ico svg { width: 20px; height: 20px; }
+.kpi-val { font-size: 1.45rem; font-weight: 800; line-height: 1.1; }
+.kpi-label { font-size: 0.78rem; font-weight: 600; color: var(--text); }
+.kpi-sub { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+
+/* Compact icon action inside table rows. */
+.icon-btn {
+  display: inline-grid; place-items: center; width: 32px; height: 32px; margin-left: 4px;
+  border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--muted); cursor: pointer; transition: all 0.14s ease; vertical-align: middle;
+}
+.icon-btn svg { width: 15px; height: 15px; }
+.icon-btn:hover:not(:disabled) { color: var(--brand-text); border-color: var(--brand); background: var(--surface-3); }
+.icon-btn.danger:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.row-muted td { opacity: 0.55; }
+.line-margin { color: var(--muted); font-weight: 600; }
+
+/* Cash direction: who pays whom, stated before the amount fields. */
+.money-block + .money-block { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.money-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; font-size: 0.86rem; }
+.money-dir {
+  display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.money-dir.in { background: var(--green-bg); color: var(--green-text); border: 1px solid var(--green-border); }
+.money-dir.out { background: var(--red-bg); color: var(--red-text); border: 1px solid var(--red-border); }
+/* Keep an amount glued to the label it belongs to: the badge and its figure form
+   one unit, and the units sit side by side rather than being pushed apart. */
+.money-stat { display: inline-flex; align-items: center; gap: 8px; }
+.money-stat strong { font-size: 1.02rem; white-space: nowrap; }
+.money-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; }
+.debt-total { display: inline-flex; gap: 10px; align-items: baseline; }
+.debt-total strong { font-size: 1.02rem; }
+/* Only the trailing total in a one-line head is pushed to the right. */
+.money-head > .debt-total:last-child { margin-left: auto; }
+.clickable-cell { cursor: pointer; }
+.form-total-sub { margin-top: 6px; background: none; padding-top: 0; padding-bottom: 0; font-size: 0.84rem; }
+.form-total-sub strong { font-size: 0.92rem; }
+.form-total { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin-top: 12px; padding: 10px 14px; border-radius: var(--radius-soft); background: var(--surface-3); }
+.form-total strong { font-size: 1.05rem; color: var(--brand-text); }
+
+.seg-measure button { white-space: nowrap; }
+
+/* Compact segmented control (measure chooser). */
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-soft); background: var(--surface-3); }
+.seg button {
+  border: none; background: none; cursor: pointer; font-family: var(--font-sans);
+  padding: 5px 9px; border-radius: 7px; font-size: 0.74rem; font-weight: 600; color: var(--muted);
+}
+.seg button:hover { color: var(--text); }
+.seg button.active { background: var(--surface-1); color: var(--brand-text); }
+
+.line-avail { display: block; margin-top: 4px; font-size: 0.7rem; color: var(--muted); }

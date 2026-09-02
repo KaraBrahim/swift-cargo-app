@@ -1,0 +1,6 @@
+node_modules/
+.pgdata/
+.spike-pgdata/
+.test-pgdata*/
+*.log
+.env

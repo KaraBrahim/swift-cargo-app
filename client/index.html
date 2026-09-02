@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08080a" />
+    <title>Swift Cargo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Every family the settings screen offers. Google only ships the woff2
+         files a rendered element actually asks for, so the inactive families
+         cost one small stylesheet and no font download. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&family=Bitter:wght@400..800&family=Inter:wght@400..800&family=Nunito:wght@400..800&family=Plus+Jakarta+Sans:wght@400..800&family=Sora:wght@400..800&family=Space+Grotesk:wght@400..700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Apply the saved theme before first paint, so the app never flashes the
+         wrong one. Kept in sync with theme/ThemeContext.jsx. -->
+    <script>
+      (function () {
+        var MODES = {
+          'clair-dore': ['light', 'sober'],
+          'clair-prisme': ['light', 'vivid'],
+          'nuit-doree': ['dark', 'sober'],
+          'nuit-prisme': ['dark', 'vivid'],
+        };
+        var id = 'nuit-doree';
+        try { id = localStorage.getItem('sc_theme') || id; } catch (e) {}
+        var t = MODES[id] || MODES['nuit-doree'];
+        document.documentElement.setAttribute('data-mode', t[0]);
+        document.documentElement.setAttribute('data-palette', t[1]);
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', t[0] === 'dark' ? '#07070a' : '#f4f5f8');
+
+        // Same idea for the font. Kept in sync with theme/fonts.js; the
+        // families themselves live in theme/fonts.css.
+        var FONTS = ['jakarta', 'grotesk', 'bitter', 'nunito', 'barlow', 'inter', 'systeme'];
+        var f = 'jakarta';
+        try {
+          var saved = localStorage.getItem('sc_font');
+          if (FONTS.indexOf(saved) !== -1) f = saved;
+        } catch (e) {}
+        document.documentElement.setAttribute('data-font', f);
+      })();
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

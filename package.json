@@ -1,0 +1,13 @@
+{
+  "name": "swift-cargo",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Swift Cargo — gestion des envois Chine → Algérie",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "npm --prefix client ci && npm --prefix client run build && npm --prefix server ci",
+    "start": "npm --prefix server start",
+    "dev": "npm --prefix server run dev",
+    "test": "npm --prefix server test"
+  }
+}

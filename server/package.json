@@ -1,0 +1,36 @@
+{
+  "name": "swift-cargo-server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/db/migrate.js",
+    "seed": "node src/db/seed.js",
+    "test": "node scripts/run-tests.js",
+    "smoke": "node scripts/smoke.js",
+    "smoke:mvp": "node scripts/smoke-mvp.js",
+    "smoke:orders": "node scripts/smoke-orders.js",
+    "smoke:sync": "node scripts/smoke-sync.js",
+    "smoke:transfers": "node scripts/smoke-transfers.js",
+    "smoke:dashboard": "node scripts/smoke-dashboard.js",
+    "smoke:admin": "node scripts/smoke-admin.js",
+    "demo:bon": "node scripts/demo-bon.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "decimal.js": "^10.4.3",
+    "dotenv": "^16.4.5",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "express": "^4.21.2",
+    "node-thermal-printer": "^4.6.1",
+    "pg": "^8.22.0",
+    "zod": "^3.23.8"
+  }
+}

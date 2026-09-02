@@ -1,0 +1,146 @@
+// One print control, reused by every screen.
+//
+// Every document in the app can go out in four shapes, and the choice is the
+// user's, not the page's:
+//   * Direct     — straight to the thermal printer wired to this desk's server.
+//                  No window, no dialog: click, paper. This is the everyday one
+//                  once Paramètres → Impression is filled in.
+//   * A4         — the filing / e-mail copy; "Enregistrer au format PDF" in the
+//                  print dialog is the PDF export (no extra dependency).
+//   * 80 / 58 mm — the same roll ticket, but rendered by the browser. The way
+//                  to print from a laptop that is not the machine holding the
+//                  printer, and the fallback when the printer is unreachable.
+//
+// A page supplies the data once, through `a4`, `ticket` and `direct`, and this
+// component handles the format menu, the company header and the failure cases
+// (popup blocked, printer offline) that would otherwise fail silently.
+import { useState, useRef, useEffect } from 'react';
+import { api } from '../api/client.js';
+import { useApi } from '../api/useApi.js';
+import { IconEl } from './icons.jsx';
+import { useToast, errorMessage } from './ui.jsx';
+import { openPrintWindow } from './printDocument.js';
+import { openTicketWindow } from './printTicket.js';
+
+const BROWSER_FORMATS = [
+  { key: 'a4', label: 'A4 / PDF', hint: 'Document classique, pour archive ou e-mail' },
+  { key: '80', label: 'Ticket 80 mm', hint: 'Via le navigateur — rouleau standard' },
+  { key: '58', label: 'Ticket 58 mm', hint: 'Via le navigateur — rouleau compact' },
+];
+
+export function PrintButton({
+  title,          // window/document title
+  docTitle,       // heading printed on the A4 document
+  subtitle,
+  a4,             // () => html string (A4 body)
+  ticket,         // (societe) => html string (roll body); omit to hide roll options
+  direct,         // '/print/bon/42' — API path that prints on the real printer
+  label = 'Imprimer',
+  className = 'btn btn-ghost',
+  disabled = false,
+}) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef(null);
+  const settings = useApi('/settings');
+  // Only asked for when the page actually offers direct printing.
+  const status = useApi(direct ? '/print/status' : null);
+  const societe = settings.data?.settings?.societe;
+  const printer = status.data;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const runBrowser = (format) => {
+    setOpen(false);
+    try {
+      const ok = format === 'a4'
+        ? openPrintWindow({ title, societe, docTitle: docTitle || title, subtitle, body: a4() })
+        : openTicketWindow({ title, mm: Number(format), body: ticket(societe) });
+      // window.open returning null is the popup blocker — say so, because
+      // otherwise nothing happens and it looks like the button is broken.
+      if (!ok) toast.error('Fenêtre d’impression bloquée. Autorisez les pop-ups pour ce site.');
+    } catch (err) {
+      toast.error(`Impression impossible : ${err.message}`);
+    }
+  };
+
+  const runDirect = async () => {
+    setOpen(false);
+    setBusy(true);
+    try {
+      const res = await api(direct, { method: 'POST' });
+      toast.success(res.copies > 1 ? `Imprimé (${res.copies} exemplaires).` : 'Envoyé à l’imprimante.');
+    } catch (err) {
+      // The printer being unplugged is an everyday event, not a bug — point at
+      // the way out instead of just reporting the failure.
+      toast.error(`${errorMessage(err)} Vous pouvez imprimer via le navigateur en attendant.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const formats = ticket ? BROWSER_FORMATS : BROWSER_FORMATS.slice(0, 1);
+
+  // Nothing to choose from: no roll builder and no printer — print A4 directly.
+  if (!direct && formats.length === 1) {
+    return (
+      <button className={className} onClick={() => runBrowser('a4')} disabled={disabled}>
+        <IconEl name="print" />{label}
+      </button>
+    );
+  }
+
+  return (
+    <div className="pop-wrap" ref={ref}>
+      <button className={className} onClick={() => setOpen((o) => !o)} disabled={disabled || busy} aria-haspopup="menu" aria-expanded={open}>
+        <IconEl name="print" />{busy ? 'Impression…' : label}
+      </button>
+      {open && (
+        <div className="pop pop-print" role="menu">
+          {direct && (
+            <div className="pop-section">
+              <div className="pop-section-title">Imprimante</div>
+              <button
+                className="print-opt print-opt-direct"
+                role="menuitem"
+                onClick={runDirect}
+                disabled={!printer?.enabled}
+              >
+                <span className="print-opt-label">
+                  <IconEl name="print" />Imprimer directement
+                  {printer?.enabled && (
+                    <span className={`dot ${printer.ok ? 'dot-ok' : 'dot-warn'}`} title={printer.message} />
+                  )}
+                </span>
+                <span className="print-opt-hint">
+                  {!printer
+                    ? 'Vérification…'
+                    : printer.enabled
+                      ? `${printer.config.largeur} mm — ${printer.config.imprimante || printer.config.hote || printer.config.fichier || 'destination non renseignée'}`
+                      : 'Non configurée — Paramètres → Impression'}
+                </span>
+              </button>
+            </div>
+          )}
+          <div className="pop-section">
+            <div className="pop-section-title">Via le navigateur</div>
+            {formats.map((f) => (
+              <button key={f.key} className="print-opt" role="menuitem" onClick={() => runBrowser(f.key)}>
+                <span className="print-opt-label">{f.label}</span>
+                <span className="print-opt-hint">{f.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

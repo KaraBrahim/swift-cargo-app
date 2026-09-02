@@ -1,0 +1,123 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Swift Cargo — typography
+
+   One switch on <html>: data-font. Every family lives here and nowhere
+   else; theme/fonts.js only carries the labels, and the boot script in
+   index.html only copies localStorage onto the attribute.
+
+   The list is built for CONTRAST — one family per category, so the
+   choice is obvious at a glance instead of six near-identical sans:
+
+     jakarta   géométrique   the modern default
+     grotesk   technique     Space Grotesk, angular and marked
+     bitter    sérif         slab serif — a document, not an app
+     nunito    arrondie      soft terminals, warm
+     barlow    étroite       semi-condensed, more text per line
+     inter     l'original    the previous pairing, kept as a way back
+     systeme   aucune        the desk's own UI font, nothing downloaded
+
+   ── About space ──────────────────────────────────────────────────
+   Swapping a family changes how much room text needs, and this app is
+   dense: tables, sidebar labels, KPI cards. Two knobs keep every option
+   occupying about the same room as the original Inter:
+
+     --font-scale     corrects apparent size. Fonts differ in x-height,
+                      so the same px looks bigger or smaller. Applied to
+                      the root font-size, it scales text AND the rem-based
+                      spacing together, so density never drifts.
+     --font-tracking  recovers width. A wide family gets slightly negative
+                      letter-spacing so a table row lands back on the
+                      pixel count it had before.
+
+   Every family here turned out NARROWER than Inter — from 2.6 % (Jakarta)
+   to 21.6 % (Barlow) on a real table row — and shorter on the x. So each is
+   sized *up* to look the same, with the scale capped at the point a row
+   would start needing more width than it does today. Nothing on screen
+   grows, whichever police is picked. That is also why --font-tracking is 0
+   throughout: it exists for a family that runs wide, and none of these does.
+   Values are measured in the browser, not guessed — see each note below.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* The families, named once. The settings cards preview themselves with
+   var(--f-<id>), so adding a font here is the only edit needed. */
+:root {
+  --f-jakarta: 'Plus Jakarta Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --f-grotesk: 'Space Grotesk', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --f-bitter: 'Bitter', Georgia, 'Times New Roman', serif;
+  --f-nunito: 'Nunito', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --f-barlow: 'Barlow Semi Condensed', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --f-inter: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --f-sora: 'Sora', 'Inter', system-ui, sans-serif;
+  --f-systeme: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --font-scale: 1;
+  --font-tracking: 0em;
+}
+
+/* Géométrique — the default. Humanist-geometric, distinctive at small
+   sizes, and its numerals are unambiguous, which matters on a screen
+   that is mostly money. Measured: 2.6 % narrower than Inter, x-height
+   1.8 % shorter. */
+:root[data-font='jakarta'] {
+  --font-sans: var(--f-jakarta);
+  --font-display: var(--f-jakarta);
+  --font-scale: 1.02;
+  --font-tracking: 0em;
+}
+
+/* Technique — angular, wide apertures, a very recognisable g and a.
+   Measured: 2.9 % narrower than Inter but a full 10.9 % shorter on the x, so
+   it is sized up until the width headroom runs out. */
+:root[data-font='grotesk'] {
+  --font-sans: var(--f-grotesk);
+  --font-display: var(--f-grotesk);
+  --font-scale: 1.03;
+  --font-tracking: 0em;
+}
+
+/* Sérif — a slab drawn for screens. Completely different texture from
+   everything else in the list; reads like a printed document. Despite the
+   serifs it is the second narrowest here: 6.2 % under Inter. */
+:root[data-font='bitter'] {
+  --font-sans: var(--f-bitter);
+  --font-display: var(--f-bitter);
+  --font-scale: 1.02;
+  --font-tracking: 0em;
+}
+
+/* Arrondie — soft terminals, warmer tone, still perfectly sober for a
+   business screen. 3.3 % narrower, 9.1 % shorter on the x. */
+:root[data-font='nunito'] {
+  --font-sans: var(--f-nunito);
+  --font-display: var(--f-nunito);
+  --font-scale: 1.03;
+  --font-tracking: 0em;
+}
+
+/* Étroite — semi-condensed, and by far the biggest difference in the list:
+   21.6 % narrower than Inter. Condensed faces always read small, so this one
+   takes the largest size correction — and even after it, a table row still
+   needs ~15 % less width than it does today. */
+:root[data-font='barlow'] {
+  --font-sans: var(--f-barlow);
+  --font-display: var(--f-barlow);
+  --font-scale: 1.08;
+  --font-tracking: 0em;
+}
+
+/* The original pairing, kept so nobody is forced off what they know. */
+:root[data-font='inter'] {
+  --font-sans: var(--f-inter);
+  --font-display: var(--f-sora);
+  --font-scale: 1;
+  --font-tracking: 0em;
+}
+
+/* No download at all — the desk's own UI font. The safety net for a machine
+   that cannot reach Google Fonts. 7 % narrower, 9.1 % shorter on the x. */
+:root[data-font='systeme'] {
+  --font-sans: var(--f-systeme);
+  --font-display: var(--f-systeme);
+  --font-scale: 1.05;
+  --font-tracking: 0em;
+}

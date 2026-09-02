@@ -1,0 +1,238 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Swift Cargo — design tokens
+   Two independent switches, set on <html>:
+     data-mode    = "dark" | "light"     (surfaces, text, elevation)
+     data-palette = "sober" | "vivid"    (the brand accent + module hues)
+   They are orthogonal, so the four themes fall out of the cascade.
+
+   The BRAND layer is what separates Doré from Prisme. Everything that used
+   to be hardcoded gold now reads --brand-*: in the sober themes that resolves
+   to gold, in the vivid ones to violet. Gold survives in Prisme only where it
+   is the literal logo.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── surfaces ── */
+  --bg: #07070a;
+  --surface-1: #0f1015;
+  --surface-2: #16171d;
+  --surface-3: #1e1f27;
+  --surface-hover: #262832;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  /* Hover step for controls whose resting border is already --border-strong. */
+  --border-hover: rgba(255, 255, 255, 0.28);
+  --sidebar-1: rgba(20, 21, 27, 0.96);
+  --sidebar-2: rgba(11, 11, 15, 0.96);
+  --input-bg: #0f1015;
+  --placeholder: #575a66;
+  --scroll-thumb: #262832;
+  --scroll-thumb-hover: #34363f;
+  --sheen: rgba(255, 255, 255, 0.5);
+  --ring: rgba(255, 255, 255, 0.06);
+
+  /* ── text ── */
+  --text: #f3f4f7;
+  --text-2: #bcc0cb;
+  --muted: #7e828f;
+
+  /* ── gold (the logo colour; still the brand in the sober themes) ── */
+  --gold: #d8b45f;
+  --gold-2: #c9a24e;
+  --gold-hi: #f1da97;
+  --gold-deep: #9a7c34;
+
+  /* ── brand (sober default → gold) ── */
+  --brand: #d8b45f;
+  --brand-2: #c9a24e;
+  --brand-deep: #9a7c34;
+  --brand-text: #f1da97;
+  --brand-ink: #221806;
+  --brand-fill-1: #f1da97;
+  --brand-fill-2: #d8b45f;
+  --brand-fill-3: #c9a24e;
+  --brand-tint: rgba(216, 180, 95, 0.09);
+  --brand-tint-strong: rgba(216, 180, 95, 0.16);
+  --brand-glow: rgba(216, 180, 95, 0.2);
+  --brand-pulse: rgba(216, 180, 95, 0.5);
+  --brand-shadow: 0 8px 26px rgba(216, 180, 95, 0.18);
+  --brand-shadow-hover: 0 10px 30px rgba(216, 180, 95, 0.3);
+
+  /* ── semantic ── */
+  --green: #4ec98a;
+  --green-bg: rgba(78, 201, 138, 0.13);
+  --green-border: rgba(78, 201, 138, 0.45);
+  --green-text: #a8e8c6;
+  --red: #f2726a;
+  --red-bg: rgba(242, 114, 106, 0.13);
+  --red-border: rgba(242, 114, 106, 0.45);
+  --red-text: #f6b6b1;
+  --blue: #7aa2f7;
+  --blue-border: #3a5f8f;
+  --amber: #e6b84c;
+
+  /* ── bon status ── */
+  --st-cree: #c9c4b4;
+  --st-transit: var(--brand-text);
+  --st-transit-border: var(--brand-deep);
+  --st-arrive: var(--blue);
+  --st-arrive-border: var(--blue-border);
+  --st-regle: var(--green);
+  --st-regle-border: #2f6b4a;
+
+  /* ── elevation ── */
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+
+  /* ── page glows ── */
+  --bg-glow-1: rgba(216, 180, 95, 0.07);
+  --bg-glow-2: rgba(216, 180, 95, 0.035);
+
+  color-scheme: dark;
+}
+
+/* ═══ LIGHT ════════════════════════════════════════════════════════ */
+:root[data-mode='light'] {
+  --bg: #f4f5f8;
+  --surface-1: #ffffff;
+  --surface-2: #f7f8fa;
+  --surface-3: #eceef3;
+  --surface-hover: #e2e5ec;
+  --border: rgba(15, 17, 26, 0.1);
+  --border-strong: rgba(15, 17, 26, 0.18);
+  --border-hover: rgba(15, 17, 26, 0.34);
+  --sidebar-1: rgba(255, 255, 255, 0.97);
+  --sidebar-2: rgba(247, 248, 251, 0.97);
+  --input-bg: #ffffff;
+  --placeholder: #8b91a0;
+  --scroll-thumb: #d3d7e0;
+  --scroll-thumb-hover: #bbc0cc;
+  --sheen: rgba(255, 255, 255, 0.8);
+  --ring: rgba(15, 17, 26, 0.05);
+
+  --text: #12141b;
+  --text-2: #414654;
+  --muted: #646a79; /* 4.9:1 on white — small labels need 4.5 minimum */
+
+  --gold: #c8a24e;
+  --gold-2: #b08c3c;
+  --gold-hi: #7f6118;
+  --gold-deep: #d8bd80;
+
+  --brand: #c8a24e;
+  --brand-2: #b08c3c;
+  --brand-deep: #d8bd80;
+  --brand-text: #7f6118;
+  --brand-ink: #221806;
+  --brand-fill-1: #e8c76a;
+  --brand-fill-2: #d0aa50;
+  --brand-fill-3: #b98f36;
+  --brand-tint: rgba(200, 162, 78, 0.12);
+  --brand-tint-strong: rgba(200, 162, 78, 0.2);
+  --brand-glow: rgba(200, 162, 78, 0.25);
+  --brand-pulse: rgba(176, 140, 60, 0.45);
+  --brand-shadow: 0 8px 20px rgba(200, 162, 78, 0.3);
+  --brand-shadow-hover: 0 10px 24px rgba(200, 162, 78, 0.42);
+
+  --green: #14875a;
+  --green-bg: rgba(20, 135, 90, 0.11);
+  --green-border: rgba(20, 135, 90, 0.38);
+  --green-text: #0f5d3e;
+  --red: #cc3b33;
+  --red-bg: rgba(204, 59, 51, 0.1);
+  --red-border: rgba(204, 59, 51, 0.35);
+  --red-text: #93211b;
+  --blue: #3465c4;
+  --blue-border: #a8c0ea;
+  --amber: #a2740a;
+
+  --st-cree: #6a614b;
+  --st-regle-border: rgba(20, 135, 90, 0.45);
+
+  --shadow-sm: 0 2px 8px rgba(15, 17, 26, 0.07);
+  --shadow: 0 18px 44px rgba(15, 17, 26, 0.13);
+
+  --bg-glow-1: rgba(200, 162, 78, 0.13);
+  --bg-glow-2: rgba(200, 162, 78, 0.05);
+
+  color-scheme: light;
+}
+
+/* ═══ SOBER — one brand colour, colour reserved for meaning ═══════ */
+:root,
+:root[data-palette='sober'] {
+  --c-dash: var(--brand);
+  --c-order: var(--brand);
+  --c-caisse: var(--brand);
+  --c-bon: var(--brand);
+  --c-stock: var(--brand);
+  --c-people: var(--brand);
+  --c-rate: var(--brand);
+  --c-audit: var(--brand);
+  --c-alert: var(--brand);
+  --c-report: var(--brand);
+}
+
+/* ═══ VIVID — violet brand, each module its own hue ═══════════════ */
+:root[data-palette='vivid'] {
+  --brand: #7c5cf0;
+  --brand-2: #6a45e0;
+  --brand-deep: #4c2fae;
+  --brand-text: #b9a5fb;
+  --brand-ink: #ffffff;
+  --brand-fill-1: #9277f5;
+  --brand-fill-2: #7c5cf0;
+  --brand-fill-3: #6a45e0;
+  --brand-tint: rgba(124, 92, 240, 0.13);
+  --brand-tint-strong: rgba(124, 92, 240, 0.22);
+  --brand-glow: rgba(124, 92, 240, 0.28);
+  --brand-pulse: rgba(124, 92, 240, 0.5);
+  --brand-shadow: 0 8px 26px rgba(124, 92, 240, 0.35);
+  --brand-shadow-hover: 0 10px 30px rgba(124, 92, 240, 0.48);
+
+  --st-cree: #a8adbd;
+  --bg-glow-1: rgba(124, 92, 240, 0.1);
+  --bg-glow-2: rgba(56, 184, 204, 0.06);
+
+  --c-dash: #7c5cf0;
+  --c-order: #4b8bf5;
+  --c-caisse: #22b07d;
+  --c-bon: #ef9c3d;
+  --c-stock: #b06ee8;
+  --c-people: #22aec4;
+  --c-rate: #e56ba6;
+  --c-audit: #8b93a7;
+  --c-alert: #ef5f6b;
+  --c-report: #4b8bf5;
+}
+
+:root[data-palette='vivid'][data-mode='light'] {
+  --brand: #6a45e0;
+  --brand-2: #5a34d0;
+  --brand-deep: #c3b2f7;
+  --brand-text: #5227c4;
+  --brand-ink: #ffffff;
+  --brand-fill-1: #8563ef;
+  --brand-fill-2: #6a45e0;
+  --brand-fill-3: #5732c9;
+  --brand-tint: rgba(106, 69, 224, 0.1);
+  --brand-tint-strong: rgba(106, 69, 224, 0.17);
+  --brand-glow: rgba(106, 69, 224, 0.24);
+  --brand-shadow: 0 8px 20px rgba(106, 69, 224, 0.28);
+  --brand-shadow-hover: 0 10px 24px rgba(106, 69, 224, 0.4);
+
+  --st-cree: #5f6577;
+  --bg-glow-1: rgba(106, 69, 224, 0.1);
+  --bg-glow-2: rgba(34, 174, 196, 0.07);
+
+  --c-dash: #6a45e0;
+  --c-order: #2f62c9;
+  --c-caisse: #10855f;
+  --c-bon: #b3700e;
+  --c-stock: #8348c9;
+  --c-people: #0f8497;
+  --c-rate: #bf4a84;
+  --c-audit: #5b6376;
+  --c-alert: #cc3b33;
+  --c-report: #2f62c9;
+}

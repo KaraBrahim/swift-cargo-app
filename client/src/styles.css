@@ -1,0 +1,582 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Swift Cargo — Tailwind v4 entry.
+
+   Layering:
+     1. theme/tokens.css   raw CSS variables, switched by data-mode/data-palette
+     2. @theme inline      exposes those variables to Tailwind as utilities
+                           (bg-surface-2, text-brand, border-line, …)
+     3. @layer components  the shared vocabulary (.panel, .btn, .table, …) so
+                           utilities and existing markup stay consistent
+
+   Nothing here hardcodes a colour — every value routes through a token, which
+   is what makes the four themes work.
+   ═══════════════════════════════════════════════════════════════════ */
+@import 'tailwindcss';
+@import './theme/tokens.css';
+@import './theme/fonts.css';
+@import './theme/intro.css';
+@import './theme/shell.css';
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-hover: var(--surface-hover);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-muted: var(--muted);
+
+  --color-brand: var(--brand);
+  --color-brand-2: var(--brand-2);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-text: var(--brand-text);
+  --color-brand-ink: var(--brand-ink);
+
+  --color-gold: var(--gold);
+  --color-gold-text: var(--gold-hi);
+
+  --color-ok: var(--green);
+  --color-danger: var(--red);
+  --color-info: var(--blue);
+  --color-warn: var(--amber);
+
+  --color-mod-dash: var(--c-dash);
+  --color-mod-order: var(--c-order);
+  --color-mod-caisse: var(--c-caisse);
+  --color-mod-bon: var(--c-bon);
+  --color-mod-stock: var(--c-stock);
+  --color-mod-people: var(--c-people);
+  --color-mod-alert: var(--c-alert);
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Sora', 'Inter', system-ui, sans-serif;
+
+  --radius-card: 14px;
+  --radius-soft: 10px;
+  --radius-pill: 999px;
+
+  --shadow-card: var(--shadow-sm);
+  --shadow-pop: var(--shadow);
+  --shadow-brand: var(--brand-shadow);
+}
+
+/* Layout constants that are not colours. */
+:root {
+  --sidebar-w: 214px;
+  --sidebar-w-collapsed: 72px;
+  --topbar-h: 56px;
+}
+
+/* ═══ Base ═════════════════════════════════════════════════════════ */
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; }
+  /* The chosen family's optical correction (theme/fonts.css). Scaling the root
+     moves text and rem-based spacing together, so density stays put. */
+  html { font-size: calc(16px * var(--font-scale, 1)); }
+  body {
+    font-family: var(--font-sans);
+    letter-spacing: var(--font-tracking, 0em);
+    background:
+      radial-gradient(1100px 520px at 78% -8%, var(--bg-glow-1), transparent 60%),
+      radial-gradient(900px 600px at -5% 110%, var(--bg-glow-2), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a { color: inherit; text-decoration: none; }
+  h1 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 700; margin: 0; letter-spacing: -0.4px; }
+  h2 { font-family: var(--font-display); font-size: 0.95rem; font-weight: 600; margin: 0 0 10px; letter-spacing: -0.2px; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 10px; border: 3px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+}
+
+/* ═══ Components ═══════════════════════════════════════════════════
+   The shared vocabulary. Utilities are used directly in new markup; these
+   classes exist so every screen keeps one voice without repeating a dozen
+   utilities on every card, button and table.
+   ═══════════════════════════════════════════════════════════════════ */
+@layer components {
+  /* ── Text helpers ── */
+  .muted { @apply text-muted; }
+  .gold { color: var(--brand-text); }
+  .pos { @apply text-ok; }
+  .neg { @apply text-danger; }
+  .right { @apply text-right; }
+  .pad { @apply p-6; }
+  .nowrap { @apply whitespace-nowrap; }
+
+  /* ── Buttons ── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius-soft)]
+           px-3.5 py-2 text-[0.85rem] font-semibold leading-none cursor-pointer
+           transition-[background,border-color,box-shadow,filter,transform] duration-150;
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    font-family: var(--font-sans);
+  }
+  /* Hover shifts VALUE, never HUE: a neutral control stays neutral, a brand
+     control stays brand. Swapping a grey button border to gold on hover read
+     as the control changing identity mid-interaction. */
+  .btn:hover { background: var(--surface-hover); border-color: var(--border-hover); }
+  .btn:active { transform: scale(0.985); filter: brightness(0.97); }
+  .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-glow); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn svg { @apply h-4 w-4; }
+  .btn-gold {
+    background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2) 55%, var(--brand-fill-3));
+    color: var(--brand-ink);
+    border: none;
+    box-shadow: var(--brand-shadow);
+  }
+  /* Same gradient, stops shifted one step lighter. brightness() also lifted the
+     dark ink label, which flattened its contrast. */
+  .btn-gold:hover {
+    background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-1) 55%, var(--brand-fill-2));
+    box-shadow: var(--brand-shadow-hover);
+  }
+  .btn-ghost { background: transparent; border-color: var(--border); }
+  .btn-ghost:hover { background: var(--surface-2); border-color: var(--border-strong); }
+  .btn-danger:hover { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+  .btn-danger-solid { background: var(--red); color: #fff; border: none; }
+  .btn-danger-solid:hover { filter: brightness(1.06); box-shadow: 0 6px 18px -6px var(--red); }
+  .btn-block { @apply w-full; }
+  .btn-sm { @apply px-3 py-1.5 text-[0.78rem]; }
+
+  /* ── Fields ── */
+  .field { @apply flex flex-col gap-1.5; }
+  .field > span {
+    @apply text-[0.68rem] font-semibold uppercase tracking-wider;
+    color: var(--muted);
+  }
+  .field input, .field select, .field textarea {
+    @apply w-full rounded-[var(--radius-soft)] px-3 py-2 text-[0.88rem] outline-none
+           transition-[border-color,box-shadow] duration-150;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--font-sans);
+  }
+  .field input::placeholder { color: var(--placeholder); }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px var(--brand-glow);
+  }
+  .field-grow { @apply flex-1 basis-56; }
+
+  /* Password input + « voir » toggle. The eye sits inside the field, and the
+     input reserves room for it so a long password never runs under the icon. */
+  .pw-wrap { @apply relative flex items-center; }
+  .pw-wrap input { @apply pr-10; }
+  .pw-eye {
+    @apply absolute right-1 grid cursor-pointer place-items-center rounded-md p-1.5
+           transition-colors duration-150;
+    background: none; border: none; color: var(--muted);
+  }
+  .pw-eye:hover { color: var(--text); background: var(--surface-3); }
+  .pw-eye svg { @apply h-4 w-4; }
+
+  .alert { @apply mb-4 rounded-[var(--radius-soft)] px-4 py-3 text-[0.86rem]; }
+  .alert-error { background: var(--red-bg); border: 1px solid var(--red-border); color: var(--red-text); }
+  .alert-ok { background: var(--green-bg); border: 1px solid var(--green-border); color: var(--green-text); }
+  .alert-warn { background: var(--amber-bg, var(--surface-2)); border: 1px solid var(--border-strong); color: var(--text-2); }
+
+  /* ── Panels ── */
+  .panel {
+    @apply relative mb-3 rounded-[var(--radius-card)] p-3.5;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+  }
+  .panel-title { @apply text-ink; }
+  .panel-head { @apply mb-3 flex flex-wrap items-center justify-between gap-3; }
+  .panel-head h2 { @apply m-0; }
+  .panel-accent::before {
+    content: '';
+    @apply absolute left-5 right-5 top-0 h-0.5 rounded-sm;
+    background: linear-gradient(90deg, var(--accent, var(--brand)), transparent 70%);
+  }
+  .sub-panel { @apply mt-3 rounded-[var(--radius-soft)] p-4; background: var(--surface-2); border: 1px solid var(--border); }
+
+  /* ── Tables ── */
+  .table-wrap { @apply -mx-1 overflow-x-auto; }
+  .table { @apply w-full border-collapse text-[0.84rem]; }
+  .table th {
+    @apply whitespace-nowrap px-3 py-2.5 text-left text-[0.67rem] font-semibold uppercase tracking-wider;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  /* .table th sets text-left, which outranks the plain .right utility — so a
+     right-aligned column needs its header re-aligned explicitly, otherwise the
+     header and its numbers drift apart. */
+  .table th.right { @apply text-right; }
+  .table td { @apply whitespace-nowrap px-3 py-2.5 tabular-nums; border-bottom: 1px solid var(--surface-2); }
+  .table tbody tr { @apply transition-colors duration-100; }
+  .table tbody tr:hover td { background: var(--surface-2); }
+  .table tbody tr:last-child td { border-bottom: none; }
+  .table-tight td, .table-tight th { @apply px-2 py-1.5 text-[0.8rem]; }
+
+  .type-badge { @apply rounded-md px-2 py-1 text-[0.69rem] font-semibold; background: var(--surface-3); color: var(--muted); }
+  .type-badge.in { color: var(--green); background: var(--green-bg); }
+  .type-badge.out { color: var(--red); background: var(--red-bg); }
+  .cell-main { @apply flex items-center gap-2.5; }
+  .details-cell code { @apply whitespace-normal break-words text-[0.73rem]; color: var(--muted); }
+
+  /* ── Badges & chips ── */
+  .badge { @apply rounded-full px-2.5 py-1 text-[0.65rem] font-semibold; background: var(--surface-3); color: var(--muted); border: 1px solid var(--border); }
+  .badge-gold { color: var(--brand-text); border-color: var(--brand-deep); background: var(--brand-tint); }
+
+  .chips { @apply flex flex-wrap gap-2; }
+  .chip {
+    @apply cursor-pointer rounded-full px-3 py-1.5 text-[0.79rem] font-medium transition-all duration-150;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
+  }
+  .chip:hover { border-color: var(--border-strong); color: var(--text); }
+  .chip.active {
+    background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2));
+    color: var(--brand-ink); border-color: transparent; font-weight: 600;
+  }
+  .filter-bar { @apply mb-4 flex flex-wrap items-center gap-2; }
+
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[0.71rem] font-semibold;
+    background: var(--surface-3); border: 1px solid var(--border); color: var(--muted);
+  }
+  .status-badge::before { content: ''; @apply h-1.5 w-1.5 rounded-full; background: currentColor; }
+  .status-badge.st-cree { color: var(--st-cree); }
+  .status-badge.st-transit { color: var(--st-transit); border-color: var(--st-transit-border); }
+  .status-badge.st-arrive { color: var(--st-arrive); border-color: var(--st-arrive-border); }
+  .status-badge.st-regle { color: var(--st-regle); border-color: var(--st-regle-border); background: var(--green-bg); }
+
+  /* ── Avatars ── */
+  .avatar {
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[10px] text-[0.76rem] font-bold;
+    background: var(--surface-3); border: 1px solid var(--border-strong);
+    color: var(--brand-text); font-family: var(--font-display);
+  }
+  .avatar-md { @apply h-10 w-10 rounded-xl text-[0.9rem]; }
+  .avatar-lg { @apply h-[68px] w-[68px] rounded-[20px] text-[1.5rem]; }
+
+  /* ── Page header ──
+     Pinned under the top bar so the page title, the back button and the primary
+     action stay reachable however far down the user has scrolled. The negative
+     margins cancel .content's padding so the bar bleeds edge to edge and nothing
+     shows through beside it while scrolling. */
+  .page-head {
+    @apply sticky z-20 mb-3 flex flex-wrap items-start justify-between gap-4;
+    /* Sticky resolves the offset against the MARGIN box, so a negative
+       margin-top here would leave a gap under the top bar for content to show
+       through. Keep it at zero and pin the border edge flush instead. */
+    top: var(--topbar-h);
+    margin-inline: -20px;
+    margin-top: 0;
+    padding: 12px 20px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .page-head p { @apply mt-1 text-[0.82rem]; }
+  .page-title-row { @apply flex items-center gap-3; }
+  .page-actions { @apply flex flex-wrap gap-2.5; }
+  .page-ico {
+    @apply grid h-9 w-9 shrink-0 place-items-center rounded-xl;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--accent, var(--brand-text));
+  }
+  .page-ico svg { @apply h-5 w-5; }
+  .back-link { @apply inline-block text-[0.82rem] transition-colors duration-150; color: var(--muted); }
+  .back-link:hover { color: var(--brand-text); }
+
+  /* Explicit "go back" control — a real button, not a faint text link, so the
+     way out of a detail page is obvious at a glance. */
+  .btn-back {
+    @apply mb-2 inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-[0.85rem] font-semibold transition-all duration-150;
+    background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+    font-family: var(--font-sans);
+  }
+  .btn-back:hover { background: var(--surface-3); border-color: var(--border-hover); }
+  .btn-back:active { transform: scale(0.97); }
+  .btn-back svg { @apply h-4 w-4 shrink-0; }
+  /* Sideways nudge on the arrow signals the direction of travel. */
+  .btn-back:hover svg { transform: translateX(-2px); transition: transform 0.15s ease; }
+
+  /* Link to a related document (not a back action). */
+  .btn-related {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[0.78rem] font-semibold transition-colors duration-150;
+    background: var(--brand-tint); border: 1px solid var(--brand-deep); color: var(--brand-text);
+  }
+  .btn-related:hover { background: var(--brand-tint-strong); }
+  /* Name echoed in the pinned bar, so a long profile still says whose it is. */
+  .page-head-name { @apply self-center text-[0.95rem] font-bold; color: var(--muted); }
+  /* Single-row variant: back button and label sit on one line, no stacked title. */
+  .page-head-bar { @apply items-center; }
+  .page-head-bar .btn-back { @apply mb-0; }
+
+  /* ── Empty / spinner / toast ── */
+  .empty { @apply flex flex-col items-center gap-2 px-5 py-10 text-center; }
+  .empty-ico { @apply mb-1 grid h-12 w-12 place-items-center rounded-2xl; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+  .empty-ico svg { @apply h-6 w-6; }
+  .empty-title { @apply text-[0.95rem] font-semibold; }
+  .empty-sub { @apply max-w-sm text-[0.84rem]; color: var(--muted); }
+
+  .center-screen { @apply grid min-h-screen place-items-center p-5; }
+  .spinner { @apply flex items-center justify-center gap-3 p-14; color: var(--muted); }
+  .spinner-dot { @apply h-4 w-4 rounded-full; border: 2px solid var(--border); border-top-color: var(--brand); animation: spin 0.75s linear infinite; }
+  .error-panel { @apply text-center; }
+
+  .toast-wrap { @apply fixed bottom-6 right-6 z-[100] flex flex-col gap-2.5; }
+  .toast {
+    @apply max-w-sm cursor-pointer rounded-[var(--radius-soft)] px-4 py-3 text-[0.86rem];
+    background: var(--surface-2); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+    animation: toastIn 0.25s ease;
+  }
+  .toast-success { border-color: var(--green-border); color: var(--green-text); }
+  .toast-error { border-color: var(--red-border); color: var(--red-text); }
+  .toast-info { border-color: var(--brand-deep); }
+
+  /* ── Confirm modal ── */
+  .modal-backdrop {
+    @apply fixed inset-0 z-[300] flex items-center justify-center px-5;
+    background: color-mix(in srgb, var(--bg) 68%, transparent);
+    backdrop-filter: blur(5px); animation: fade 0.14s ease;
+  }
+  .modal-card {
+    @apply w-full max-w-md rounded-2xl p-6 text-center;
+    background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+    animation: popIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .modal-icon { @apply mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full; background: var(--surface-3); color: var(--brand-text); }
+  .modal-icon svg { @apply h-7 w-7; }
+  .modal-icon.danger { background: var(--red-bg); color: var(--red); }
+  .modal-title { @apply text-[1.15rem] font-bold; color: var(--text); }
+  .modal-msg { @apply mx-auto mt-2 max-w-sm text-[0.9rem] leading-relaxed; color: var(--muted); }
+  .modal-bullets { @apply mx-auto mt-3 max-w-sm space-y-1.5 text-left text-[0.83rem]; color: var(--muted); }
+  .modal-bullets li { @apply relative pl-5; }
+  .modal-bullets li::before { content: '↺'; @apply absolute left-0; color: var(--red); }
+  .modal-actions { @apply mt-6 flex justify-center gap-3; }
+  .modal-actions .btn { @apply min-w-[120px] justify-center; }
+
+  /* ── Animated background (app-wide) ── */
+  /* tsparticles sizes its own canvas (fixed, 100%); this just puts the animated
+     layer behind the UI (shell z-1, login card z-10). */
+  #sc-bg-particles { position: fixed; inset: 0; z-index: 0; }
+
+  /* ── Login ── */
+  .login-bg { background: radial-gradient(900px 500px at 50% -10%, var(--brand-tint), transparent 60%); }
+  .login-card {
+    @apply relative z-10 flex w-[370px] max-w-full flex-col gap-4 rounded-3xl p-9;
+    background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+  }
+  .login-emblem {
+    @apply mx-auto grid h-13 w-13 place-items-center rounded-2xl text-[1.3rem] font-extrabold;
+    height: 52px; width: 52px;
+    background: linear-gradient(145deg, var(--gold-hi), var(--gold) 60%, var(--gold-2));
+    color: #221806; font-family: var(--font-display); box-shadow: var(--brand-shadow);
+  }
+  .login-brand { @apply text-center text-[1.2rem] font-bold tracking-[4px]; font-family: var(--font-display); }
+  .login-sub { @apply -mt-2.5 text-center text-[0.83rem] tracking-wide; color: var(--muted); }
+
+  /* Checkbox + label as one click target. */
+  .check-row { @apply flex cursor-pointer items-start gap-2.5 text-[0.84rem]; color: var(--text-2); }
+  .check-row input[type='checkbox'] {
+    @apply mt-0.5 h-4 w-4 shrink-0 cursor-pointer;
+    accent-color: var(--brand);
+  }
+  .check-row small { @apply mt-0.5 block text-[0.7rem]; color: var(--muted); }
+
+  /* ── Misc shared blocks ── */
+  .op-form { @apply flex flex-wrap items-end gap-3; }
+  .op-form .field { @apply min-w-32; }
+  .preview { @apply mt-4 rounded-[var(--radius-soft)] px-4 py-3 text-[0.88rem]; background: var(--surface-2); border: 1px solid var(--border); }
+  .info-grid { @apply grid gap-4; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .info-grid > div { @apply flex flex-col gap-1; }
+  .info-k { @apply text-[0.66rem] font-semibold uppercase tracking-wider; color: var(--muted); }
+  .action-panel { @apply flex flex-wrap items-center gap-3; }
+  .card-grid { @apply grid gap-4; }
+
+  .tabs { @apply mb-4 flex flex-wrap gap-1; border-bottom: 1px solid var(--border); }
+  .tab { @apply -mb-px cursor-pointer border-b-2 border-transparent px-4 py-2.5 text-[0.86rem] font-semibold transition-colors duration-150; background: none; color: var(--muted); font-family: var(--font-sans); }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--brand-text); border-bottom-color: var(--brand); }
+
+  .segmented { @apply inline-flex gap-0.5 rounded-[var(--radius-soft)] p-0.5; background: var(--surface-2); border: 1px solid var(--border); }
+  .seg-btn { @apply cursor-pointer rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold transition-all duration-150; background: none; border: none; color: var(--muted); font-family: var(--font-sans); }
+  .seg-btn:hover { color: var(--text); }
+  .seg-btn.active { background: var(--surface-hover); color: var(--brand-text); }
+
+  .timeline { @apply m-0 list-none p-0; }
+  .timeline li { @apply flex flex-wrap items-center gap-3.5 py-2.5 text-[0.85rem]; border-bottom: 1px solid var(--surface-2); }
+  .timeline li:last-child { border-bottom: none; }
+  .tl-note { @apply italic; color: var(--muted); }
+
+  .lines-head { @apply mb-2 mt-5 flex items-center justify-between text-[0.68rem] font-semibold uppercase tracking-wider; color: var(--muted); }
+  .line-row { @apply pt-3.5; border-top: 1px solid var(--surface-2); }
+  .mini-input { @apply w-[86px] rounded-lg px-2 py-1.5 text-right; background: var(--input-bg); border: 1px solid var(--border); color: var(--text); font-family: var(--font-sans); }
+  .mini-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-glow); outline: none; }
+
+  .stepper { @apply mb-5 flex gap-1; }
+  .step { @apply relative flex flex-1 flex-col items-center gap-2 text-[0.77rem]; color: var(--muted); }
+  .step::before { content: ''; @apply absolute top-2 z-0 h-0.5 w-full; left: -50%; background: var(--border); }
+  .step:first-child::before { @apply hidden; }
+  .step.done::before { background: var(--brand-deep); }
+  .step-dot { @apply z-[1] h-5 w-5 rounded-full transition-all duration-200; background: var(--surface-3); border: 2px solid var(--border-strong); }
+  .step.done .step-dot { background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2)); border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-glow); }
+  .step.current .step-label { color: var(--brand-text); font-weight: 700; }
+  /* Clickable stepper (jump to a stage). */
+  .stepper-click .step { @apply cursor-pointer border-0 bg-transparent; font-family: var(--font-sans); }
+  .stepper-click .step:not(:disabled):hover .step-dot { border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-glow); }
+  .stepper-click .step:not(:disabled):hover .step-label { color: var(--brand-text); }
+  .stepper-click .step:disabled { @apply cursor-default; }
+  .input-error { border-color: var(--danger, #d33) !important; }
+  .total-row td { border-top: 2px solid var(--border-strong); font-weight: 600; }
+  .reconcile-actions { @apply mt-4; }
+  .recon-sum { @apply flex flex-wrap gap-x-6 gap-y-1 rounded-[var(--radius-soft)] px-4 py-3; background: var(--surface-2); }
+  .recon-sum span { @apply text-[0.82rem]; color: var(--muted); }
+  .recon-sum strong { @apply ml-1.5 text-[0.95rem]; color: var(--text); }
+
+  /* ── Balance / caisse / rate cards ── */
+  .caisse-list { @apply grid gap-4; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); }
+  .caisse-card { @apply block rounded-[var(--radius-card)] p-5 transition-all duration-200; background: var(--surface-1); border: 1px solid var(--border); }
+  /* One hover convention app-wide: cards lift toward the brand, not toward a
+     per-module hue. Green/pink borders on hover read as noise next to the
+     brand-tinted hovers everywhere else. */
+  .caisse-card:hover { border-color: var(--brand-deep); transform: translateY(-3px); box-shadow: var(--shadow-sm); }
+  .caisse-head { @apply mb-3.5 flex items-center justify-between; }
+  .caisse-label { @apply text-[0.97rem] font-bold; }
+  .bal-grid { @apply grid grid-cols-2 gap-2; }
+  .bal-cell { @apply flex items-baseline justify-between rounded-[var(--radius-soft)] px-3 py-2; background: var(--surface-2); }
+  .bal-cell.bal-base { border: 1px solid var(--brand-deep); background: var(--brand-tint); }
+  /* Only the currency the office actually works in gets the full width of the
+     card and a large figure — dinars in Algeria, yuan in China. Every other
+     balance stays small in the two-column grid below it. */
+  .bal-cell.bal-own {
+    @apply col-span-2 px-3.5 py-2.5;
+    border: 1px solid var(--brand-deep); background: var(--brand-tint-strong);
+  }
+  .bal-cell.bal-own .bal-code { @apply text-[0.8rem]; color: var(--brand-text); }
+  .bal-cell.bal-own .bal-val { @apply text-[1.4rem]; color: var(--brand-text); }
+  .bal-code { @apply text-[0.72rem] font-semibold; color: var(--muted); }
+  .bal-val { @apply text-[0.9rem] font-bold tabular-nums; }
+
+  .balances-row { @apply mb-5 grid gap-3.5; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .balance-card { @apply rounded-[var(--radius-card)] p-4 transition-transform duration-150; background: var(--surface-1); border: 1px solid var(--border); }
+  .balance-card:hover { transform: translateY(-2px); }
+  .balance-primary { border-color: var(--brand-deep); background: linear-gradient(165deg, var(--brand-tint), var(--surface-1)); }
+  .balance-code { @apply text-[0.74rem] font-semibold tracking-wide; color: var(--muted); }
+  .balance-amount { @apply my-1 text-[1.5rem] font-bold tabular-nums; font-family: var(--font-display); letter-spacing: -0.5px; }
+  .balance-primary .balance-amount { color: var(--brand-text); }
+  /* The office's own currency is the headline figure; the others stay small. */
+  .balance-own { background: linear-gradient(165deg, var(--brand-tint-strong), var(--surface-1)); }
+  .balance-own .balance-amount { @apply text-[2.15rem]; }
+  .balance-own .balance-code { color: var(--brand-text); }
+  .balance-name { @apply text-[0.75rem]; color: var(--muted); }
+
+  .rates-grid { @apply mb-5 grid gap-3.5; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
+  .rate-card { @apply rounded-[var(--radius-card)] p-4 transition-all duration-150; background: var(--surface-1); border: 1px solid var(--border); }
+  .rate-card:hover { transform: translateY(-2px); border-color: var(--brand-deep); }
+  .rate-base { border-color: var(--brand-deep); background: linear-gradient(165deg, var(--brand-tint), var(--surface-1)); }
+  .rate-code { @apply font-bold tracking-wide; font-family: var(--font-display); color: var(--brand-text); }
+  .rate-name { @apply mb-3 mt-0.5 text-[0.73rem]; color: var(--muted); }
+  .rate-value { @apply text-[1.25rem] font-bold tabular-nums; font-family: var(--font-display); }
+  .rate-unit { @apply mt-0.5 block text-[0.65rem] font-normal; color: var(--muted); font-family: var(--font-sans); }
+
+  /* ── Profile ── */
+  .profile-hero {
+    @apply relative mb-4 flex flex-wrap items-start gap-5 overflow-hidden rounded-3xl p-6;
+    background: linear-gradient(150deg, var(--surface-2), var(--surface-1) 60%);
+    border: 1px solid var(--border);
+  }
+  .profile-hero::before { content: ''; @apply absolute inset-x-0 top-0 h-[3px]; background: linear-gradient(90deg, var(--accent, var(--brand)), transparent 65%); }
+  .profile-id { @apply min-w-0 flex-1 basis-72; }
+  .profile-name { @apply text-[1.4rem] font-bold; font-family: var(--font-display); letter-spacing: -0.4px; }
+  .profile-meta { @apply mt-2.5 flex flex-wrap gap-x-5 gap-y-2; }
+  .profile-meta-item { @apply flex items-center gap-2 text-[0.85rem]; color: var(--text-2); }
+  .profile-meta-item svg { @apply h-4 w-4; color: var(--muted); }
+  .profile-actions { @apply flex flex-wrap items-center gap-2; }
+  .profile-kpis { @apply mt-4 grid w-full gap-3; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .pk { @apply rounded-[var(--radius-soft)] px-4 py-3; background: var(--surface-2); border: 1px solid var(--border); }
+  .pk-val { @apply text-[1.2rem] font-bold tabular-nums; font-family: var(--font-display); }
+  .pk-label { @apply mt-0.5 text-[0.7rem]; color: var(--muted); }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes contentIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .panel, .stat, .caisse-card, .balance-card, .rate-card, .login-card, .profile-hero {
+    animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+}
+
+/* Print: never let the app shell clip a multi-page document. */
+@media print {
+  .no-print, .sidebar, .topbar, .btn-back { display: none !important; }
+  html, body { overflow: visible !important; height: auto !important; background: #fff !important; }
+  .panel { break-inside: avoid; border-color: #ddd !important; }
+  /* A pinned header would repeat/overlap across printed pages. */
+  .page-head {
+    position: static !important; margin: 0 0 12px !important; padding: 0 !important;
+    background: none !important; backdrop-filter: none !important; border-bottom: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Interaction polish (added after the component layer, so these plain
+   rules win over the @layer defaults).
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Clickable table rows — whole line routes to its detail/profile. */
+.table tr.clickable { cursor: pointer; }
+.table tr.clickable:hover td { background: var(--surface-2); }
+.table tr.clickable:hover td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+.table tr.clickable:hover .gold { text-decoration: underline; text-underline-offset: 3px; }
+.cell-main { color: inherit; }
+
+/* Clickable pipeline steps — each routes to that filtered bon-passager list. */
+.pipe-step.clickable { cursor: pointer; }
+.pipe-step.clickable .pipe-node { transition: border-color .15s, color .15s, box-shadow .15s, transform .15s; }
+.pipe-step.clickable:hover .pipe-node {
+  border-color: var(--brand); color: var(--brand-text);
+  box-shadow: 0 0 0 4px var(--brand-glow); transform: translateY(-2px);
+}
+.pipe-step.clickable:hover .pipe-label,
+.pipe-step.clickable:hover .pipe-count { color: var(--brand-text); }
+.pipe-step.clickable:focus-visible { outline: none; }
+.pipe-step.clickable:focus-visible .pipe-node { box-shadow: 0 0 0 3px var(--brand-glow); }
+
+/* ── Presence dot on the user avatar (Messenger-style) ── */
+.sb-avatar-wrap { position: relative; flex-shrink: 0; line-height: 0; }
+.presence {
+  position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px;
+  border-radius: 50%; border: 2px solid var(--surface-1); background: var(--muted);
+}
+.presence-on { background: var(--green); }
+.presence-off { background: var(--red); }
+.presence-hub { background: var(--green); }
+@media (prefers-reduced-motion: no-preference) {
+  .presence-on, .presence-hub { animation: syncPulse 2.4s ease-in-out infinite; }
+}
+@keyframes syncPulse { 0%,100% { box-shadow: 0 0 0 0 var(--green-pulse, rgba(78,201,138,.5)); } 50% { box-shadow: 0 0 0 4px transparent; } }
+
+/* Give brand emblem a soft glow on hover for a touch more life. */
+.sb-emblem { transition: box-shadow .2s, transform .2s; }
+.sb-brand:hover .sb-emblem { box-shadow: 0 6px 20px var(--brand-glow); transform: translateY(-1px); }
+
+/* Reduced-motion users: drop the transforms. */
+@media (prefers-reduced-motion: reduce) {
+  .sb-link:hover, .pipe-step.clickable:hover .pipe-node, .sb-brand:hover .sb-emblem { transform: none; }
+}
