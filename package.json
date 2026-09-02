@@ -3,9 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "description": "Swift Cargo — gestion des envois Chine → Algérie",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
-    "build": "npm --prefix client ci && npm --prefix client run build && npm --prefix server ci",
+    "build": "npm --prefix client ci --include=dev && npm --prefix client run build && npm --prefix server ci --omit=dev",
     "start": "npm --prefix server start",
     "dev": "npm --prefix server run dev",
     "test": "npm --prefix server test"
