@@ -487,21 +487,57 @@
 @media print { .print-only { display: block !important; } }
 
 /* ── Mobile ────────────────────────────────────────────────────────── */
+/* The drawer's close button and backdrop exist only on a phone. Both must be
+   display:none by default: .app-shell is a flex row, so an unstyled backdrop
+   would sit in it as an empty flex child on every desktop screen. */
+.sb-close, .nav-backdrop { display: none; }
+
 @media (max-width: 860px) {
-  .app-shell { flex-direction: column; }
-  .sidebar { width: 100%; height: auto; position: static; flex-direction: row; align-items: center; padding: 10px 14px; overflow-x: auto; }
-  .sb-brand { padding: 0 14px 0 4px; }
-  .sb-brand-sub, .sb-group-label, .sb-user-role, .sync-info { display: none; }
-  .sb-nav { flex-direction: row; margin-top: 0; }
-  .sb-link { padding: 8px 10px; }
-  .sb-link span { display: none; }
-  .sb-link.active::before { display: none; }
-  .sb-foot { flex-direction: row; margin-top: 0; margin-left: auto; align-items: center; }
+  /* The sidebar becomes an off-canvas DRAWER.
+     It used to be laid out as a horizontal strip (flex-direction: row), but
+     .sb-nav holds five group wrappers that each stack their own links — so the
+     row only spread the groups sideways while the icons still stacked, wrapping
+     into a grid that ate half the screen, unlabelled. A drawer has room for the
+     words, which is what makes a menu usable. */
+  .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 60;
+    width: min(284px, 84vw); height: 100dvh;
+    padding: 14px 10px;
+    transform: translateX(-100%);
+    transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .app-shell.nav-open .sidebar { transform: translateX(0); box-shadow: 0 0 44px rgba(0, 0, 0, 0.5); }
+
+  .nav-backdrop {
+    display: block;
+    position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, 0.55);
+    opacity: 0; pointer-events: none; transition: opacity 0.24s;
+  }
+  .app-shell.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
+
+  /* `collapsed` is a desktop width preference. Letting it through here would
+     strip the labels off the drawer and rebuild the icon soup. */
+  .app-shell.collapsed .sidebar { width: min(284px, 84vw); padding: 14px 10px; }
+  .app-shell.collapsed :is(.sb-brand-text, .sb-group-label, .sb-user-info, .sb-logout, .sync-info) { display: revert; }
+  .app-shell.collapsed .sb-link span { display: revert; }
+  .app-shell.collapsed :is(.sb-brand, .sb-link, .sb-user) { justify-content: flex-start; }
+  .app-shell.collapsed .sb-link { padding-left: 12px; padding-right: 12px; }
+
+  /* Thumb-sized targets, and the text large enough to read at arm's length. */
+  .sb-link { padding: 10px 12px; font-size: 0.88rem; gap: 12px; }
+  .sb-link svg { height: 1.05rem; width: 1.05rem; }
+  .sb-group-label { font-size: 0.6rem; padding-top: 12px; }
   .sb-collapse { display: none; }
+  .sb-close {
+    display: grid; place-items: center; margin-left: auto; padding: 6px;
+    background: none; border: none; color: var(--muted); border-radius: 8px; cursor: pointer;
+  }
+  .sb-close:hover { background: var(--surface-2); color: var(--text); }
+  .sb-close svg { height: 1.1rem; width: 1.1rem; }
   .topbar { padding: 0 12px; gap: 8px; }
   .topbar-burger { display: inline-flex; }
   .search-trigger span, .search-trigger kbd { display: none; }
-  .search-trigger { flex: 0 0 auto; width: 36px; height: 36px; justify-content: center; padding: 0; border-radius: 10px; }
+  .search-trigger { flex: 0 0 auto; width: 42px; height: 42px; justify-content: center; padding: 0; border-radius: 10px; }
   .user-btn-id, .user-btn-caret { display: none; }
   .pop { right: -8px; min-width: min(340px, calc(100vw - 24px)); }
   .pop-alerts { min-width: min(360px, calc(100vw - 24px)); }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { IconEl, initialsOf } from './icons.jsx';
 import { useSyncPresence } from './SyncStatus.jsx';
@@ -55,10 +55,38 @@ export function Layout() {
   const { state: presence } = useSyncPresence();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
   const [searchOpen, setSearchOpen] = useState(false);
+  // On a phone the sidebar is a drawer, not a column: `collapsed` is a desktop
+  // width preference and means nothing here, so the two are separate states.
+  const [navOpen, setNavOpen] = useState(false);
+  const { pathname } = useLocation();
 
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
+
+  // Tapping a link must close the drawer — otherwise it stays open on top of
+  // the page it just opened.
+  useEffect(() => { setNavOpen(false); }, [pathname]);
+
+  // While the drawer covers the screen, the page behind it must not scroll.
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') setNavOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [navOpen]);
+
+  // The same button means two different things by width: open the drawer on a
+  // phone, widen/narrow the column on a desktop.
+  const toggleSidebar = useCallback(() => {
+    if (window.matchMedia('(max-width: 860px)').matches) setNavOpen((o) => !o);
+    else setCollapsed((c) => !c);
+  }, []);
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
 
@@ -75,7 +103,10 @@ export function Layout() {
   }, []);
 
   return (
-    <div className={`app-shell ${collapsed ? 'collapsed' : ''}`}>
+    <div className={`app-shell ${collapsed ? 'collapsed' : ''} ${navOpen ? 'nav-open' : ''}`}>
+      {/* Phone only (see shell.css): tapping beside the drawer closes it. */}
+      <div className="nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />
+
       <aside className="sidebar">
         <div className="sb-brand">
           <div className="sb-emblem">SC</div>
@@ -83,6 +114,9 @@ export function Layout() {
             <div className="sb-brand-name">SWIFT CARGO</div>
             <div className="sb-brand-sub">Gestion</div>
           </div>
+          <button className="sb-close" onClick={() => setNavOpen(false)} aria-label="Fermer le menu">
+            <IconEl name="close" />
+          </button>
         </div>
 
         <nav className="sb-nav">
@@ -131,7 +165,7 @@ export function Layout() {
       </aside>
 
       <div className="main">
-        <TopBar onToggleSidebar={() => setCollapsed((c) => !c)} onOpenSearch={openSearch} />
+        <TopBar onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
         <div className="content">
           <Outlet />
         </div>

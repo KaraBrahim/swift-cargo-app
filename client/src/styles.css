@@ -580,3 +580,59 @@
 @media (prefers-reduced-motion: reduce) {
   .sb-link:hover, .pipe-step.clickable:hover .pipe-node, .sb-brand:hover .sb-emblem { transform: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Phones — safe centring, no zoom-on-focus, finger-sized targets
+   Everything here is a phone-only correction; the desktop sizes above
+   stay exactly as they are.
+   ═══════════════════════════════════════════════════════════════════ */
+@media (max-width: 860px) {
+  /* Full-height screens. 100vh counts the strip behind the browser's own
+     toolbar, so a "centred" card sits low and the page scrolls for nothing.
+     100dvh is the height actually visible at this moment. */
+  .center-screen { min-height: 100dvh; }
+
+  /* Centre the sign-in card properly.
+     `place-items: center` on an auto-sized grid lets the single track grow to
+     the card's fixed 370px — wider than the padded container — so max-width:100%
+     had nothing narrower to clamp against and the card spilled past the right
+     edge instead of centring. A minmax(0,1fr) track can shrink, so it cannot. */
+  .center-screen { grid-template-columns: minmax(0, 1fr); }
+  .login-card { width: min(370px, 100%); padding: 26px 20px; gap: 14px; }
+
+  /* Mobile Safari zooms the whole page whenever a focused field is smaller
+     than 16px, which throws the layout sideways mid-typing. 16px is a
+     threshold, not a taste. */
+  .field input, .field select, .field textarea,
+  input, select, textarea { font-size: 16px; }
+  .field input, .field select, .field textarea { min-height: 44px; }
+
+  /* A fingertip needs ~44px; these are 28-36 on desktop. */
+  .btn { min-height: 44px; padding-top: 11px; padding-bottom: 11px; }
+  .icon-btn { min-height: 42px; min-width: 42px; }
+  .chip { min-height: 40px; }
+  .sb-close, .sb-logout { min-height: 40px; min-width: 40px; }
+  /* The eye sits inside the password field, so it grows without moving it. */
+  .pw-eye { min-height: 40px; min-width: 40px; }
+  .pw-wrap input { padding-right: 46px; }
+
+  /* Segmented switches (Stock Chine / Algérie, À payer / À encaisser…) are the
+     main way you move around on these pages — they cannot be 28px. */
+  .seg button { min-height: 40px; padding-left: 14px; padding-right: 14px; }
+  .seg { flex-wrap: wrap; }
+
+  /* The "⋮" on a dashboard card was 15px wide — not tappable by any thumb. */
+  .stat-more { min-height: 38px; min-width: 38px; }
+  .ca-switch button { min-height: 38px; padding-left: 12px; padding-right: 12px; }
+  /* The palette's own input is borderless, so it needs the height itself. */
+  .cmd-input input { min-height: 40px; }
+  .cmd-item { min-height: 44px; }
+  .period-select { min-height: 40px; }
+  .check-row input[type='checkbox'] { height: 20px; width: 20px; }
+
+  /* A primary action stranded at 180px in a full-width column reads as
+     unfinished; let the buttons share the row instead. */
+  .op-form > .btn, .page-actions > .btn { flex: 1 1 auto; }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions .btn { width: 100%; }
+}
