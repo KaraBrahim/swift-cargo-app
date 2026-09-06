@@ -4,6 +4,7 @@ import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth } from '../../middleware/auth.js';
 import * as dash from './dashboard.service.js';
+import { isSuperadmin } from '../../lib/visibility.js';
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -19,7 +20,7 @@ dashboardRouter.get(
   validate({ query: periodQuery }),
   asyncHandler(async (req, res) => {
     const { period, currency } = req.validatedQuery;
-    res.json(await dash.overview({ period, currency }));
+    res.json(await dash.overview({ period, currency, isSuper: isSuperadmin(req.admin) }));
   })
 );
 

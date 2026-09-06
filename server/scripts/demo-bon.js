@@ -49,17 +49,19 @@ try {
   token = (await call('POST', '/api/auth/login', { username: user, password: pass })).token;
   console.log(`Connecté en tant que ${user}.`);
 
-  const fournisseurs = (await call('GET', '/api/fournisseurs?search=Guangzhou')).fournisseurs || [];
+  const fournisseurs = (await call('GET', '/api/people?role=fournisseur&search=Guangzhou')).people || [];
   const fournisseur = fournisseurs[0]
-    || (await call('POST', '/api/fournisseurs', {
-      name: 'Guangzhou Trading Co.', phone: '+86 20 8888 1234', city: 'Guangzhou', notes: 'Fournisseur de démonstration',
-    })).fournisseur;
+    || (await call('POST', '/api/people', {
+      isFournisseur: true,
+      name: 'Guangzhou Trading Co.', phone: '+86 20 8888 1234', notes: 'Fournisseur de démonstration',
+    })).person;
 
-  const passagers = (await call('GET', '/api/passagers?search=Karim')).passagers || [];
+  const passagers = (await call('GET', '/api/people?role=passager&search=Karim')).people || [];
   const passager = passagers[0]
-    || (await call('POST', '/api/passagers', {
+    || (await call('POST', '/api/people', {
+      isPassager: true,
       full_name: 'Karim Benali', phone: '+213 550 12 34 56', type: 'regular', notes: 'Passager de démonstration',
-    })).passager;
+    })).person;
 
   // Three lines, one per unit of measure, so the ticket shows each form.
   const bon = (await call('POST', '/api/bons', {

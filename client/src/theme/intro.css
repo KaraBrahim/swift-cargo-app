@@ -238,6 +238,10 @@
   left: 0;
   right: 0;
   bottom: 34px;
+  /* `position: absolute` takes this out of the grid, so the parent's
+     `place-items: center` no longer reaches it. Stretched from edge to edge it
+     needs to centre its own text, or it sits hard against the left margin. */
+  text-align: center;
   font-size: 0.7rem;
   letter-spacing: 1.4px;
   text-transform: uppercase;

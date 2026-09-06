@@ -12,7 +12,7 @@ const ACCENT = 'var(--c-audit)';
 // can run the light theme while Chine keeps the dark one. So it is saved in this
 // browser only, while everything else on this page is stored server-side.
 function ThemeSection() {
-  const { themeId, themes, setTheme } = useTheme();
+  const { themeId, themes, setTheme, navGroups, setNavGroups } = useTheme();
   return (
     <div className="panel">
       <div className="panel-head">
@@ -36,6 +36,24 @@ function ThemeSection() {
           </button>
         ))}
       </div>
+
+      {/* Same kind of setting as the theme, so it sits with it rather than in a
+          panel of its own. */}
+      <label className="switch-row pref-row">
+        <input
+          type="checkbox"
+          checked={navGroups}
+          onChange={(e) => setNavGroups(e.target.checked)}
+        />
+        <span>
+          <strong>Titres de sections dans le menu</strong>
+          <span className="muted">
+            {navGroups
+              ? '« Opérations », « Répertoire »… sont affichés au-dessus de chaque groupe.'
+              : 'Le menu est une liste continue : il tient sur moins de hauteur.'}
+          </span>
+        </span>
+      </label>
     </div>
   );
 }
@@ -273,6 +291,30 @@ export default function ParametresPage() {
       <FontSection />
 
       <ImpressionSection />
+
+      {/* Alipay yuan and cash yuan are the same money in this business. Keeping
+          the two rates equal by hand is a way to eventually get them apart. */}
+      {data?.settings?.taux && (
+        <div className="panel">
+          <h2 className="panel-title">Taux de change</h2>
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={data.settings.taux.alp_suit_cny}
+              disabled={busy === 'taux'}
+              onChange={(e) => save('taux', { alp_suit_cny: e.target.checked })}
+            />
+            <span>
+              <strong>L’ALP suit le CNY</strong>
+              <span className="muted">
+                {data.settings.taux.alp_suit_cny
+                  ? 'Modifier le taux du CNY met l’ALP à la même valeur. L’ALP n’a pas de crayon tant que le lien est actif.'
+                  : 'L’ALP est indépendant : il se modifie séparément depuis Taux de change.'}
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
 
       {societe && (
         <form className="panel" onSubmit={(e) => { e.preventDefault(); save('societe', societe); }}>

@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
-import { Spinner, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
+import { Spinner, Money, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import { RoleBadges } from '../components/RolePicker.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
+import AmountInput from '../components/AmountInput.jsx';
 
 const OFFICE_LABEL = { china: 'Bureau Chine', algeria: 'Bureau Algérie' };
 
@@ -21,10 +23,15 @@ export default function CaissesPage() {
   const transfers = useApi('/office-transfers');
   const debts = useApi('/accounts/debts');
   const [debtTab, setDebtTab] = useState('toPay');
+  // Le compte ne distingue plus fournisseur et passager — une même personne
+  // peut être les deux — donc on filtre sur le SENS de l'argent, qui reste vrai.
   const [payFilter, setPayFilter] = useState('');
-  const payments = useApi(`/accounts/payments${payFilter ? `?personType=${payFilter}` : ''}`);
+  const payments = useApi('/accounts/payments');
 
-  const [form, setForm] = useState({ fromCaisseId: '', toOffice: '', currency: 'DZD', amount: '', note: '' });
+  const [form, setForm] = useState({ fromCaisseId: '', toCaisseId: '', currency: 'DZD', amount: '', note: '' });
+  // Set when a confirmation fails for lack of funds — carries the numbers the
+  // dialog needs so the person deciding sees them, not just "insufficient".
+  const [shortfall, setShortfall] = useState(null);
   const [busy, setBusy] = useState(false);
   const [wallet, setWallet] = useState(null); // null=closed; { id?, label }
   const [editTransfer, setEditTransfer] = useState(null);
@@ -74,19 +81,20 @@ export default function CaissesPage() {
 
   const curList = currencies.data?.currencies ?? [];
   const offices = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
-  const caisseById = (id) => offices.find((c) => c.id === Number(id));
-  const caisseForOffice = (office) => offices.find((c) => c.office === office);
 
   const reload = () => { caisses.reload(); transfers.reload(); debts.reload(); payments.reload(); };
 
   const send = async (e) => {
     e.preventDefault();
-    if (!form.fromCaisseId || !form.toOffice || !(Number(form.amount) > 0)) return;
+    if (!form.fromCaisseId || !form.toCaisseId || !(Number(form.amount) > 0)) return;
     setBusy(true);
     try {
-      await api('/office-transfers', { method: 'POST', body: { ...form } });
-      toast.success('Transfert envoyé.');
-      setForm({ fromCaisseId: '', toOffice: '', currency: 'DZD', amount: '', note: '' });
+      await api('/office-transfers', {
+        method: 'POST',
+        body: { ...form, fromCaisseId: Number(form.fromCaisseId), toCaisseId: Number(form.toCaisseId) },
+      });
+      toast.success('Transfert créé. Il attend la confirmation du bureau destinataire.');
+      setForm({ fromCaisseId: '', toCaisseId: '', currency: 'DZD', amount: '', note: '' });
       reload();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -95,19 +103,37 @@ export default function CaissesPage() {
     }
   };
 
-  const receive = async (t) => {
-    const dest = caisseForOffice(t.to_office);
-    if (!dest) return toast.error('Caisse destination introuvable.');
+  // Confirming is what moves the money — both caisses at once. If the sending
+  // caisse has been emptied in the meantime the server refuses and tells us by
+  // how much; that is a decision for a person, so it becomes a dialog rather
+  // than a red toast.
+  const receive = async (t, force = false) => {
+    setBusy(true);
     try {
-      await api(`/office-transfers/${t.id}/receive`, { method: 'POST', body: { toCaisseId: dest.id } });
-      toast.success('Réception confirmée.');
+      await api(`/office-transfers/${t.id}/receive`, { method: 'POST', body: force ? { force: true } : {} });
+      toast.success(force ? 'Réception confirmée — caisse d’origine en négatif.' : 'Réception confirmée.');
+      setShortfall(null);
       reload();
     } catch (err) {
-      toast.error(errorMessage(err));
+      if (err.code === 'INSUFFICIENT_FUNDS') {
+        setShortfall({ transfer: t, ...err.details });
+      } else {
+        toast.error(errorMessage(err));
+      }
+    } finally {
+      setBusy(false);
     }
   };
 
-  const fromOffice = caisseById(form.fromCaisseId)?.office;
+  // Awaiting confirmation — surfaced at the top of the page, and the same rows
+  // the Transferts table lists below.
+  const pending = (transfers.data?.transfers ?? []).filter((t) => t.status === 'envoye');
+
+  const cancelPending = (t) =>
+    runTransfer(async () => {
+      await api(`/office-transfers/${t.id}`, { method: 'DELETE' });
+      setShortfall(null);
+    }, 'Transfert annulé.');
 
   return (
     <div>
@@ -127,13 +153,39 @@ export default function CaissesPage() {
               {sortByImportance(curList.map((x) => x.code), c.office).map((code) => (
                 <div key={code} className={`bal-cell ${code === leadCurrencyFor(c.office) ? 'bal-own' : ''}`}>
                   <span className="bal-code">{code}</span>
-                  <span className="bal-val">{formatMoney(c.balances?.[code] ?? '0')}</span>
+                  <Money className="bal-val" value={c.balances?.[code] ?? '0'} />
                 </div>
               ))}
             </div>
           </Link>
         ))}
       </div>
+
+      {/* A transfer waiting to be confirmed is the only thing on this page that
+          asks something of you right now, and the table it lives in is five
+          panels down. So it also appears here, directly under the caisses, with
+          the button that settles it. */}
+      {pending.length > 0 && (
+        <div className="pending-strip">
+          <div className="pending-title">
+            <IconEl name="swap" />
+            {pending.length === 1 ? '1 transfert à confirmer' : `${pending.length} transferts à confirmer`}
+          </div>
+          {pending.map((t) => (
+            <div className="pending-row" key={t.id}>
+              <span className="gold">{t.reference}</span>
+              <span className="muted">{OFFICE_LABEL[t.from_office]} → {OFFICE_LABEL[t.to_office]}</span>
+              <strong>{formatMoney(t.amount, t.currency_code)}</strong>
+              <button className="btn btn-sm btn-gold" disabled={busy} onClick={() => receive(t)}>
+                Confirmer la réception
+              </button>
+            </div>
+          ))}
+          <p className="muted pending-hint">
+            Rien n’a encore bougé : les deux caisses changeront à la confirmation.
+          </p>
+        </div>
+      )}
 
       {/* ── What is still owed, both directions ── */}
       <div className="panel" style={{ marginTop: 24 }}>
@@ -169,9 +221,9 @@ export default function CaissesPage() {
             <tbody>
               {(debts.data?.[debtTab] ?? []).map((d) => (
                 <tr key={`${d.person_type}-${d.person_id}-${d.currency_code}`} className="clickable"
-                  onClick={() => navigate(`/${d.person_type === 'fournisseur' ? 'fournisseurs' : 'passagers'}/${d.person_id}`)}>
+                  onClick={() => navigate(`/personnes/${d.person_id}`)}>
                   <td><span className="gold">{d.person_name}</span></td>
-                  <td>{d.person_type === 'fournisseur' ? 'Fournisseur' : 'Passager'}</td>
+                  <td className="nowrap"><RoleBadges person={d} /></td>
                   <td className="muted">{d.phone || '—'}</td>
                   <td className="muted">{d.last_activity ? new Date(d.last_activity).toLocaleDateString('fr-FR') : '—'}</td>
                   <td className={`right ${debtTab === 'toPay' ? 'pos' : 'neg'}`}>
@@ -179,7 +231,7 @@ export default function CaissesPage() {
                   </td>
                   <td className="right" onClick={(e) => e.stopPropagation()}>
                     <button className="btn btn-sm"
-                      onClick={() => navigate(`/${d.person_type === 'fournisseur' ? 'fournisseurs' : 'passagers'}/${d.person_id}`)}>
+                      onClick={() => navigate(`/personnes/${d.person_id}`)}>
                       {debtTab === 'toPay' ? 'Payer' : 'Encaisser'}
                     </button>
                   </td>
@@ -200,7 +252,7 @@ export default function CaissesPage() {
         <div className="page-head" style={{ marginBottom: 12 }}>
           <h2 className="panel-title">Paiements effectués</h2>
           <div className="seg">
-            {[['', 'Tous'], ['fournisseur', 'Fournisseurs'], ['passager', 'Passagers']].map(([k, label]) => (
+            {[['', 'Tous'], ['fee_payment', 'Encaissés'], ['passager_payment', 'Payés']].map(([k, label]) => (
               <button key={k || 'all'} type="button" className={payFilter === k ? 'active' : ''} onClick={() => setPayFilter(k)}>{label}</button>
             ))}
           </div>
@@ -227,11 +279,11 @@ export default function CaissesPage() {
           <table className="table">
             <thead><tr><th>Date</th><th>Sens</th><th>Personne</th><th>Caisse</th><th>Bon</th><th>Par</th><th className="right">Montant</th><th className="right">Actions</th></tr></thead>
             <tbody>
-              {(payments.data?.payments ?? []).map((p) => (
+              {(payments.data?.payments ?? []).filter((p) => !payFilter || p.type === payFilter).map((p) => (
                 <tr key={p.id}>
                   <td>{new Date(p.created_at).toLocaleString('fr-FR')}</td>
                   <td><span className={`money-dir ${p.type === 'fee_payment' ? 'in' : 'out'}`}>{p.type === 'fee_payment' ? 'Encaissé' : 'Payé'}</span></td>
-                  <td className="clickable-cell" onClick={() => navigate(`/${p.person_type === 'fournisseur' ? 'fournisseurs' : 'passagers'}/${p.person_id}`)}>
+                  <td className="clickable-cell" onClick={() => navigate(`/personnes/${p.person_id}`)}>
                     <span className="gold">{p.person_name}</span>
                   </td>
                   <td className="muted">{p.caisse_label || '—'}</td>
@@ -271,12 +323,12 @@ export default function CaissesPage() {
             <div className="field field-grow"><span>Corriger le paiement — {editPayment.person}</span>
               <span className="muted">La caisse et le compte de la personne sont réajustés ensemble.</span></div>
             <label className="field"><span>Montant ({editPayment.currency})</span>
-              <input autoFocus inputMode="decimal" value={editPayment.amount}
-                onChange={(e) => setEditPayment({ ...editPayment, amount: e.target.value.replace(',', '.') })} /></label>
+              <AmountInput autoFocus value={editPayment.amount}
+                onChange={(v) => setEditPayment({ ...editPayment, amount: v })} /></label>
             <label className="field field-grow"><span>Note</span>
               <input value={editPayment.note} onChange={(e) => setEditPayment({ ...editPayment, note: e.target.value })} /></label>
             <button className="btn btn-gold" disabled={busy || !(Number(editPayment.amount) > 0)}>Enregistrer</button>
-            <button type="button" className="btn btn-ghost" onClick={() => setEditPayment(null)}>Annuler</button>
+            <button type="button" className="btn btn-ghost" onClick={() => setEditPayment(null)}><IconEl name="close" />Annuler</button>
           </form>
         )}
         <p className="muted line-hint">
@@ -290,7 +342,7 @@ export default function CaissesPage() {
         <div className="page-head" style={{ marginBottom: 12 }}>
           <h2 className="panel-title">Gérer les caisses</h2>
           <button className="btn btn-gold" onClick={() => setWallet(wallet ? null : { label: '' })}>
-            {wallet ? 'Fermer' : 'Nouvelle caisse'}
+            <IconEl name={wallet ? 'close' : 'plus'} />{wallet ? 'Fermer' : 'Nouvelle caisse'}
           </button>
         </div>
         {wallet && (
@@ -320,19 +372,19 @@ export default function CaissesPage() {
       </div>
       )}
 
-      {/* ── Sub-feature: inter-office cash transfers ── */}
+      {/* ── Cash transfers between caisses — the only kind there is ── */}
       <div className="panel" style={{ marginTop: 24 }}>
-        <h2 className="panel-title">Transferts inter-bureaux</h2>
+        <h2 className="panel-title">Transferts</h2>
         <div className="money-head">
-          <span className="money-dir out">Sortie puis entrée</span>
+          <span className="money-dir out">En attente de confirmation</span>
           <span>
-            Le bureau d’origine <strong>envoie</strong> l’argent (il quitte sa caisse) ; le bureau destinataire
-            <strong> confirme la réception</strong> à l’arrivée (il entre dans la sienne).
+            L’envoi ne déplace <strong>aucun argent</strong> : il annonce le transfert. Les deux caisses ne
+            bougent qu’à la <strong>confirmation de la réception</strong>, et elles bougent ensemble.
           </span>
         </div>
         <p className="muted line-hint">
-          Tant qu’un transfert n’est pas reçu, il peut être corrigé ou supprimé. Une fois reçu, il faut d’abord
-          annuler la réception — les deux bureaux ayant déjà enregistré leur écriture.
+          Tant qu’un transfert n’est pas confirmé, il peut être corrigé ou annulé sans conséquence — rien n’a
+          encore bougé. Une fois confirmé, il faut d’abord annuler la réception.
         </p>
 
         <form className="op-form" onSubmit={send}>
@@ -348,20 +400,22 @@ export default function CaissesPage() {
               <option value="">— choisir —</option>
               {offices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select></label>
-          <label className="field"><span>Vers le bureau</span>
-            <select value={form.toOffice} onChange={(e) => setForm({ ...form, toOffice: e.target.value })}>
+          <label className="field"><span>Vers la caisse</span>
+            <select value={form.toCaisseId} onChange={(e) => setForm({ ...form, toCaisseId: e.target.value })}>
               <option value="">— choisir —</option>
-              {['china', 'algeria'].filter((o) => o !== fromOffice).map((o) => <option key={o} value={o}>{OFFICE_LABEL[o]}</option>)}
+              {offices.filter((c) => String(c.id) !== String(form.fromCaisseId)).map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
             </select></label>
           <label className="field"><span>Devise</span>
             <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
               {curList.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
             </select></label>
           <label className="field"><span>Montant</span>
-            <input inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value.replace(',', '.') })} placeholder="0.00" /></label>
+            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} placeholder="0.00" /></label>
           <label className="field field-grow"><span>Note</span>
             <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-          <button className="btn btn-gold" disabled={busy || !form.fromCaisseId || !form.toOffice || !(Number(form.amount) > 0)}>Envoyer</button>
+          <button className="btn btn-gold" disabled={busy || !form.fromCaisseId || !form.toCaisseId || !(Number(form.amount) > 0)}>Envoyer</button>
         </form>
 
         {editTransfer && (
@@ -377,14 +431,14 @@ export default function CaissesPage() {
             }}
           >
             <div className="field field-grow"><span>Corriger {editTransfer.reference}</span>
-              <span className="muted">La sortie de caisse d’origine est réajustée au nouveau montant.</span></div>
+              <span className="muted">Rien n’a encore bougé : seul le montant annoncé change.</span></div>
             <label className="field"><span>Montant</span>
-              <input autoFocus inputMode="decimal" value={editTransfer.amount}
-                onChange={(e) => setEditTransfer({ ...editTransfer, amount: e.target.value.replace(',', '.') })} /></label>
+              <AmountInput autoFocus value={editTransfer.amount}
+                onChange={(v) => setEditTransfer({ ...editTransfer, amount: v })} /></label>
             <label className="field field-grow"><span>Note</span>
               <input value={editTransfer.note} onChange={(e) => setEditTransfer({ ...editTransfer, note: e.target.value })} /></label>
             <button className="btn btn-gold" disabled={busy || !(Number(editTransfer.amount) > 0)}>Enregistrer</button>
-            <button type="button" className="btn btn-ghost" onClick={() => setEditTransfer(null)}>Annuler</button>
+            <button type="button" className="btn btn-ghost" onClick={() => setEditTransfer(null)}><IconEl name="close" />Annuler</button>
           </form>
         )}
 
@@ -397,7 +451,7 @@ export default function CaissesPage() {
                   <td className="gold">{t.reference}</td>
                   <td>{OFFICE_LABEL[t.from_office]} → {OFFICE_LABEL[t.to_office]}</td>
                   <td className="right">{formatMoney(t.amount, t.currency_code)}</td>
-                  <td><span className={`status-badge ${t.status === 'recu' ? 'st-regle' : 'st-transit'}`}>{t.status === 'recu' ? 'Reçu' : 'En route'}</span></td>
+                  <td><span className={`status-badge ${t.status === 'recu' ? 'st-regle' : 'st-transit'}`}>{t.status === 'recu' ? 'Reçu' : 'À confirmer'}</span></td>
                   <td className="muted">{t.status === 'recu' ? t.received_by_name : t.sent_by_name}</td>
                   <td className="right nowrap">
                     {t.status === 'envoye' ? (
@@ -426,6 +480,29 @@ export default function CaissesPage() {
           </table>
         </div>
       </div>
+
+      {/* The sending caisse no longer covers the amount. Neither answer is
+          obviously right — the cash may really have arrived, or the transfer may
+          be stale — so the numbers go in front of a person. */}
+      <ConfirmDialog
+        open={Boolean(shortfall)}
+        tone="warn"
+        title="Solde insuffisant à l’origine"
+        message={shortfall
+          ? `La caisse d’origine ne contient que ${formatMoney(shortfall.available, shortfall.currency)}, alors que le transfert ${shortfall.transfer.reference} est de ${formatMoney(shortfall.required, shortfall.currency)}.`
+          : ''}
+        bullets={[
+          'Confirmer quand même : l’argent est enregistré des deux côtés et la caisse d’origine passe en négatif — le signe qu’une entrée y manque.',
+          'Annuler le transfert : la ligne disparaît. Rien n’avait bougé, il n’y a rien à défaire.',
+        ]}
+        confirmLabel="Confirmer quand même"
+        extraLabel="Annuler le transfert"
+        cancelLabel="Fermer"
+        busy={busy}
+        onCancel={() => setShortfall(null)}
+        onExtra={() => cancelPending(shortfall.transfer)}
+        onConfirm={() => receive(shortfall.transfer, true)}
+      />
 
       <ConfirmDialog
         open={Boolean(confirmPayment)}

@@ -5,11 +5,12 @@
 // dependency. The browser's own "Imprimer → Enregistrer au format PDF" is the
 // PDF export.
 import { formatMoney } from './ui.jsx';
+import { formatQty } from '../lib/format.js';
 
 export const esc = (s) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const num = (v) => (v == null ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 3 }));
+const num = (v) => formatQty(v);
 
 // Shared stylesheet — matches the printed bon so every document looks like one
 // family, independent of whichever of the four screen themes is active.
@@ -100,11 +101,18 @@ export function caisseStatementBody(d) {
     </div>`;
 }
 
+// Une fiche peut tenir les deux rôles : l'en-tête du relevé les nomme tels
+// qu'ils sont plutôt que d'en choisir un au hasard.
+const rolesLabel = (p) => {
+  const r = [p.is_fournisseur && 'Fournisseur', p.is_passager && 'Passager'].filter(Boolean);
+  return r.length ? r.join(' · ') : 'Personne';
+};
+
 export function personStatementBody(d) {
   const owed = Number(d.solde);
   return `
     <div class="meta">
-      <div><span class="k">${d.person.person_type === 'fournisseur' ? 'Fournisseur' : 'Passager'} :</span>${esc(d.person.name)}</div>
+      <div><span class="k">${rolesLabel(d.person)} :</span>${esc(d.person.name)}</div>
       <div><span class="k">Téléphone :</span>${esc(d.person.phone || '—')}</div>
       <div><span class="k">Devise :</span>${esc(d.currency)}</div>
       <div><span class="k">Solde :</span><strong>${formatMoney(Math.abs(owed))} ${esc(d.currency)}
@@ -175,6 +183,11 @@ export function tableDocBody({ columns, rows: data, meta = [], totals = [] }) {
 // A line is measured by quantity, weight or volume; everything printed about it
 // (declared amount, shortfall, money) follows from that choice, so both the A4
 // document and the thermal ticket derive it here rather than each guessing.
+// Un bon passager porte la marchandise d'autant de fournisseurs qu'il veut ;
+// n'en nommer qu'un désignerait le mauvais propriétaire.
+const fournisseursOf = (bon) =>
+  (bon.fournisseurs || []).map((f) => f.name).join(', ') || bon.fournisseur_name || '—';
+
 export const BON_STATUS_FR = { cree: 'Créé', en_transit: 'En transit', arrive: 'Arrivé', regle: 'Réglé' };
 export const measureOf = (l) =>
   l.measure || (Number(l.weight_kg) > 0 ? 'poids' : Number(l.cbm) > 0 ? 'cbm' : 'quantite');
@@ -186,7 +199,7 @@ export const measureUnit = (l) => {
   const m = measureOf(l);
   return m === 'poids' ? 'kg' : m === 'cbm' ? 'm³' : l.unit || 'u';
 };
-export const qtyFr = (v) => (v == null ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 3 }));
+export const qtyFr = (v) => formatQty(v);
 export const declaredOf = (l) => `${qtyFr(measureQty(l))} ${measureUnit(l)}`.trim();
 export const deliveredOf = (l) => (l.received_quantity != null ? Number(l.received_quantity) : measureQty(l));
 export const missingOf = (l) => Math.max(measureQty(l) - deliveredOf(l), 0);
@@ -208,7 +221,7 @@ export function bonDocBody(bon) {
 
   return `
     <div class="meta">
-      <div><span class="k">Fournisseur :</span>${esc(bon.fournisseur_name)}</div>
+      <div><span class="k">${(bon.fournisseurs || []).length > 1 ? 'Fournisseurs' : 'Fournisseur'} :</span>${esc(fournisseursOf(bon))}</div>
       <div><span class="k">Passager :</span>${esc(bon.passager_name || '—')}</div>
       <div><span class="k">Statut :</span>${esc(BON_STATUS_FR[bon.status] || bon.status)}</div>
       <div><span class="k">Créé le :</span>${new Date(bon.created_at).toLocaleString('fr-FR')}</div>

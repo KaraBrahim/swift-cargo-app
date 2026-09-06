@@ -10,23 +10,19 @@ import { startSyncWorker } from './modules/sync/sync.service.js';
 import { createApp } from './app.js';
 import { logger } from './lib/logger.js';
 
-// Secrets that MUST come from the environment in production.
-//
-// This refuses to start rather than warning. A warning is the wrong tool here:
-// nobody reads the log of a server that came up fine, and the thing being
-// warned about is the front door of a cash ledger. In production the seed
-// passwords have no default at all (config.js), so booting without them would
-// create the super-admin with an empty password.
+
 function assertSecrets() {
   const missing = [];
   if (!process.env.SUPERADMIN_PASSWORD) missing.push('SUPERADMIN_PASSWORD');
   if (missing.length) {
-    throw new Error(
+    const err = new Error(
       `Démarrage refusé — variable(s) d'environnement manquante(s) : ${missing.join(', ')}. ` +
         "Le code ne contient aucun mot de passe par défaut. " +
         'En développement : copiez server/.env.example vers server/.env. ' +
         "En production : définissez-les dans l'environnement du serveur."
     );
+    err.userFacing = true;
+    throw err;
   }
   if (!config.isProduction) return;
 
@@ -74,6 +70,9 @@ async function main() {
 }
 
 main().catch((err) => {
-  logger.error('Fatal startup error', err?.stack || err);
+  // A stack trace helps with a real crash and only buries the point when the
+  // problem is something the operator is meant to read and act on.
+  if (err?.userFacing) logger.error(err.message);
+  else logger.error('Fatal startup error', err?.stack || err);
   process.exit(1);
 });

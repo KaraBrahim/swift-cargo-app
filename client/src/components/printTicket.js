@@ -17,9 +17,10 @@ import {
   esc, BON_STATUS_FR, measureUnit, qtyFr,
   declaredOf, missingOf, lineAmount,
 } from './printDocument.js';
+import { formatMoney } from '../lib/format.js';
 
 const money = (v, c) =>
-  `${Number(v ?? 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${c ? ' ' + c : ''}`;
+  formatMoney(v ?? 0, c || undefined);
 const dt = (v) => (v ? new Date(v).toLocaleString('fr-FR') : '—');
 
 export const TICKET_WIDTHS = [
@@ -108,7 +109,8 @@ export function bonTicket(bon, societe) {
 
   return `
     ${header(societe, 'Bon passager', bon.reference)}
-    ${line('Fournisseur', bon.fournisseur_name || '—')}
+    ${line((bon.fournisseurs || []).length > 1 ? 'Fournisseurs' : 'Fournisseur',
+      (bon.fournisseurs || []).map((f) => f.name).join(', ') || bon.fournisseur_name || '—')}
     ${line('Passager', bon.passager_name || '—')}
     ${line('Statut', BON_STATUS_FR[bon.status] || bon.status)}
     ${line('Créé le', dt(bon.created_at))}

@@ -7,6 +7,7 @@ import { ORDER_STATUS } from '../components/orderStatus.js';
 import { IconEl } from '../components/icons.jsx';
 import { LineEditor, emptyLine, lineValid, lineTotal } from '../components/LineEditor.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import AmountInput from '../components/AmountInput.jsx';
 
 // A bon fournisseur records the goods received from a fournisseur. It is NOT tied
 // to a passager — assigning goods to a passager happens when creating a bon
@@ -16,7 +17,7 @@ export default function OrdersPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState('');
   const orders = useApi(`/orders${status ? `?status=${status}` : ''}`);
-  const fournisseurs = useApi('/fournisseurs');
+  const fournisseurs = useApi('/people?role=fournisseur');
   const currencies = useApi('/currencies');
   const stockItems = useApi('/stock/items');
   const cats = useApi('/stock/categories');
@@ -80,7 +81,9 @@ export default function OrdersPage() {
           </div>
           <p className="muted">Marchandises reçues d’un fournisseur. L’affectation à un passager se fait dans les bons passagers.</p>
         </div>
-        <button className="btn btn-gold" onClick={() => setOpen(!open)}>{open ? 'Fermer' : 'Nouveau bon fournisseur'}</button>
+        <button className="btn btn-gold" onClick={() => setOpen(!open)}>
+          <IconEl name={open ? 'close' : 'plus'} />{open ? 'Fermer' : 'Nouveau bon fournisseur'}
+        </button>
       </div>
 
       {open && (
@@ -89,14 +92,14 @@ export default function OrdersPage() {
             <label className="field field-grow"><span>Fournisseur</span>
               <select value={form.fournisseurId} onChange={(e) => setForm({ ...form, fournisseurId: e.target.value })}>
                 <option value="">— choisir —</option>
-                {(fournisseurs.data?.fournisseurs ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                {(fournisseurs.data?.people ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select></label>
             <label className="field"><span>Devise des frais</span>
               <select value={form.transportCurrency} onChange={(e) => setForm({ ...form, transportCurrency: e.target.value })}>
                 {curList.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
               </select></label>
             <label className="field"><span>Remise</span>
-              <input inputMode="decimal" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value.replace(',', '.') })} /></label>
+              <AmountInput value={form.discount} onChange={(v) => setForm({ ...form, discount: v })} /></label>
             <label className="field field-grow"><span>Notes</span>
               <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
           </div>

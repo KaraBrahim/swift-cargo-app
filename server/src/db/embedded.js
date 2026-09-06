@@ -4,7 +4,7 @@
 // which cannot store Arabic / Chinese / € / ¥ — unacceptable for this app).
 import EmbeddedPostgres from 'embedded-postgres';
 import pg from 'pg';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '../lib/logger.js';
 
@@ -30,7 +30,53 @@ async function ensureUtf8Database(port) {
   }
 }
 
+// Is this process id actually running right now?
+// `kill(pid, 0)` sends no signal — it only asks. ESRCH means "no such process";
+// EPERM means it exists but belongs to someone else, which still counts as
+// alive.
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
+
+// Postgres refuses to start while postmaster.pid exists, and it is left behind
+// by anything that kills the process rather than asking it to stop: a force
+// quit, a power cut, closing the terminal window. The database is fine — only
+// the note on the door is stale — but the app then refuses to start for good,
+// with a message that names a file most people have never heard of.
+//
+// So: read the pid in that file. If it is genuinely running, say so in words
+// someone can act on. If it is not, the lock is stale — remove it and carry on.
+function clearStaleLock(dataDir) {
+  const lock = join(dataDir, 'postmaster.pid');
+  if (!existsSync(lock)) return;
+
+  const pid = Number(String(readFileSync(lock, 'utf8')).split(/\r?\n/)[0].trim());
+  if (Number.isFinite(pid) && pid > 0 && pidAlive(pid)) {
+    const err = new Error(
+      `Une autre instance de Swift Cargo utilise déjà cette base de données (PID ${pid}). ` +
+        "N'en lancez qu'une seule : ouvrez http://localhost:4000, ou arrêtez l'autre " +
+        `d'abord (Windows : taskkill /PID ${pid} /F).`
+    );
+    // Nothing is broken and there is nothing to debug — the message IS the fix.
+    err.userFacing = true;
+    throw err;
+  }
+
+  rmSync(lock, { force: true });
+  logger.warn(
+    'Verrou Postgres périmé supprimé — le serveur précédent ne s’est pas arrêté proprement. ' +
+      'Les données sont intactes : Postgres rejoue son journal au démarrage.'
+  );
+}
+
 export async function startEmbeddedPg({ dataDir, port, persistent = true }) {
+  clearStaleLock(dataDir);
+
   const pgInst = new EmbeddedPostgres({
     databaseDir: dataDir,
     user: 'postgres',

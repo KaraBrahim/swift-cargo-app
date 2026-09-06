@@ -9,6 +9,7 @@ import { Spinner, PageHeader, EmptyState, formatMoney, errorMessage, useToast } 
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor } from '../lib/offices.js';
+import AmountInput from '../components/AmountInput.jsx';
 
 const ACCENT = 'var(--c-caisse)';
 const CATEGORIES = [
@@ -110,7 +111,7 @@ export default function ChargesPage() {
           <label className="field field-grow"><span>Libellé</span>
             <input autoFocus value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="ex. Abonnement fibre — bureau Chine" /></label>
           <label className="field"><span>Montant</span>
-            <input inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value.replace(',', '.') })} /></label>
+            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} /></label>
           <label className="field"><span>Devise</span>
             <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
               {(currencies.data?.currencies ?? []).map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
@@ -167,11 +168,11 @@ export default function ChargesPage() {
           <label className="field field-grow"><span>Libellé</span>
             <input autoFocus value={edit.label} onChange={(e) => setEdit({ ...edit, label: e.target.value })} /></label>
           <label className="field"><span>Montant ({edit.currency_code})</span>
-            <input inputMode="decimal" value={edit.amount} onChange={(e) => setEdit({ ...edit, amount: e.target.value.replace(',', '.') })} /></label>
+            <AmountInput value={edit.amount} onChange={(v) => setEdit({ ...edit, amount: v })} /></label>
           <label className="field"><span>Période</span>
             <input value={edit.period || ''} onChange={(e) => setEdit({ ...edit, period: e.target.value })} placeholder="2026-08" /></label>
           <button className="btn btn-gold" disabled={busy || !(Number(edit.amount) > 0)}>Enregistrer</button>
-          <button type="button" className="btn btn-ghost" onClick={() => setEdit(null)}>Annuler</button>
+          <button type="button" className="btn btn-ghost" onClick={() => setEdit(null)}><IconEl name="close" />Annuler</button>
         </form>
       )}
 

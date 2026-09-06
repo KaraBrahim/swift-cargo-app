@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
+import { useTabTitle } from '../components/TabsContext.jsx';
 import { Spinner, Money, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
@@ -9,6 +10,8 @@ import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/of
 import { PrintButton } from '../components/PrintButton.jsx';
 import { tableDocBody } from '../components/printDocument.js';
 import { listTicket } from '../components/printTicket.js';
+import AmountInput from '../components/AmountInput.jsx';
+import { formatNumber } from '../lib/format.js';
 
 const OPS = [
   { key: 'deposit', label: 'Dépôt' },
@@ -39,9 +42,15 @@ export default function CaisseDetailPage() {
   const [confirmTx, setConfirmTx] = useState(null);
   const [txBusy, setTxBusy] = useState(false);
   const [ledgerAdmin, setLedgerAdmin] = useState('');
-  const admins = useApi('/admins');
   const ledger = useApi(`/caisses/${id}/ledger?limit=50${ledgerAdmin ? `&adminId=${ledgerAdmin}` : ''}`);
   const conversions = useApi(`/caisses/${id}/conversions?limit=50`);
+
+  // Actors come from the movements themselves; "Tous" counts what the tabs
+  // count, so the numbers add up on screen.
+  const actors = ledger.data?.actors ?? [];
+  // undefined, not 0: a server that predates this endpoint sends no total, and
+  // "Tous 0" above a table full of rows is a worse answer than no number.
+  const actorTotal = ledger.data?.total;
 
   const reloadAll = () => {
     detail.reload();
@@ -64,6 +73,9 @@ export default function CaisseDetailPage() {
     finally { setTxBusy(false); }
   };
 
+  // L'onglet porte le nom de la fiche, pas celui de sa section : « BP-…-00003 »
+  // se retrouve dans une barre d'onglets, « Bons passagers · fiche » non.
+  useTabTitle(detail.data?.caisse?.label);
   if (detail.loading || currencies.loading) return <Spinner />;
   if (detail.error) return <div className="alert alert-error">{detail.error}</div>;
 
@@ -74,7 +86,6 @@ export default function CaisseDetailPage() {
     <div>
       <div className="page-head">
         <div>
-          <Link to="/caisses" className="btn-back"><IconEl name="chevronLeft" />Retour aux caisses</Link>
           <h1>{caisse.label}</h1>
         </div>
         <div className="page-actions">
@@ -113,7 +124,7 @@ export default function CaisseDetailPage() {
               className={`balance-card ${b.currency_code === leadCurrencyFor(caisse.office) ? 'balance-primary balance-own' : ''}`}
             >
               <div className="balance-code">{b.currency_code}</div>
-              <div className="balance-amount">{formatMoney(b.balance)}</div>
+              <Money as="div" className="balance-amount" value={b.balance} />
               <div className="balance-name">{b.name}</div>
             </div>
           ))}
@@ -138,12 +149,28 @@ export default function CaisseDetailPage() {
         </div>
         {historyTab === 'ledger' ? (
           <>
-            <div className="op-form" style={{ marginBottom: 14 }}>
-              <label className="field"><span>Journal par admin</span>
-                <select value={ledgerAdmin} onChange={(e) => setLedgerAdmin(e.target.value)}>
-                  <option value="">Tous les admins</option>
-                  {(admins.data?.admins ?? []).map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
-                </select></label>
+            {/* Tabs, not a dropdown: with a handful of people the names are
+                worth seeing at a glance, and the count says who actually works
+                this till. Built from the caisse's own movements, so there are no
+                empty tabs — and the super-admin never appears among them. */}
+            <div className="seg ledger-actors">
+              <button
+                className={ledgerAdmin === '' ? 'active' : ''}
+                onClick={() => setLedgerAdmin('')}
+              >
+                Tous
+                {actorTotal != null && <span className="audit-count">{actorTotal}</span>}
+              </button>
+              {actors.map((a) => (
+                <button
+                  key={a.admin_id}
+                  className={String(ledgerAdmin) === String(a.admin_id) ? 'active' : ''}
+                  onClick={() => setLedgerAdmin(String(a.admin_id))}
+                >
+                  {a.full_name}
+                  <span className="audit-count">{a.n}</span>
+                </button>
+              ))}
             </div>
             {editTx && (
               <form
@@ -157,12 +184,12 @@ export default function CaisseDetailPage() {
                 <div className="field field-grow"><span>Corriger ce mouvement</span>
                   <span className="muted">Le solde de la caisse est recalculé sur tout l’historique.</span></div>
                 <label className="field"><span>Montant ({editTx.currency})</span>
-                  <input autoFocus inputMode="decimal" value={editTx.amount}
-                    onChange={(e) => setEditTx({ ...editTx, amount: e.target.value.replace(',', '.') })} /></label>
+                  <AmountInput autoFocus value={editTx.amount}
+                    onChange={(v) => setEditTx({ ...editTx, amount: v })} /></label>
                 <label className="field field-grow"><span>Note</span>
                   <input value={editTx.note} onChange={(e) => setEditTx({ ...editTx, note: e.target.value })} /></label>
                 <button className="btn btn-gold" disabled={txBusy || !(Number(editTx.amount) > 0)}>Enregistrer</button>
-                <button type="button" className="btn btn-ghost" onClick={() => setEditTx(null)}>Annuler</button>
+                <button type="button" className="btn btn-ghost" onClick={() => setEditTx(null)}><IconEl name="close" />Annuler</button>
               </form>
             )}
             <LedgerTable
@@ -203,9 +230,18 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
   const [currency, setCurrency] = useState(own);
   const [fromCurrency, setFromCurrency] = useState(own);
   const [toCurrency, setToCurrency] = useState(codes.find((c) => c !== own) || 'DZD');
-  const [toCaisseId, setToCaisseId] = useState(caisses[0]?.id ?? '');
+  // Left empty on purpose and filled by the effect below: useState only reads
+  // its argument on the FIRST render, and the caisse list usually arrives after
+  // that. The select then showed a destination while the state was still empty,
+  // which left the Transfert button dead with no visible reason — and only
+  // sometimes, depending on which request answered first.
+  const [toCaisseId, setToCaisseId] = useState('');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (!toCaisseId && caisses.length) setToCaisseId(caisses[0].id);
+  }, [caisses, toCaisseId]);
 
   const rateOf = (code) => {
     const c = currencies.find((x) => x.code === code);
@@ -251,11 +287,14 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
         });
         toast.success('Conversion effectuée.');
       } else if (op === 'transfer') {
-        await api('/transfer', {
+        // Creates a transfer awaiting confirmation — the same one the Caisses
+        // page lists. No money moves here; both caisses stay as they are until
+        // the destination confirms.
+        await api('/office-transfers', {
           method: 'POST',
           body: { fromCaisseId: caisseId, toCaisseId: Number(toCaisseId), currency, amount, note },
         });
-        toast.success('Transfert effectué.');
+        toast.success('Transfert créé. Il attend la confirmation du bureau destinataire.');
       }
       setAmount('');
       setNote('');
@@ -308,6 +347,10 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
 
         {op === 'transfer' && (
           <>
+            <p className="muted line-hint" style={{ flexBasis: '100%' }}>
+              L’argent ne bouge pas maintenant : le transfert attend la confirmation
+              de la caisse destinataire, depuis « Caisse &amp; Finance ».
+            </p>
             <label className="field">
               <span>Vers la caisse</span>
               <select value={toCaisseId} onChange={(e) => setToCaisseId(e.target.value)}>
@@ -325,10 +368,9 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
 
         <label className="field">
           <span>Montant</span>
-          <input
-            inputMode="decimal"
+          <AmountInput
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(',', '.'))}
+            onChange={(v) => setAmount(v)}
             placeholder="0.00"
           />
         </label>
@@ -450,7 +492,7 @@ function ConversionsTable({ q }) {
               <td>{formatMoney(c.from_amount, c.from_currency)}</td>
               <td className="gold">{formatMoney(c.to_amount, c.to_currency)}</td>
               <td className="right">{formatMoney(c.dzd_value)}</td>
-              <td className="right">{Number(c.effective_rate).toLocaleString('fr-FR', { maximumFractionDigits: 6 })}</td>
+              <td className="right">{formatNumber(c.effective_rate, { decimals: 6, trim: true })}</td>
               <td>{c.admin_name}</td>
             </tr>
           ))}

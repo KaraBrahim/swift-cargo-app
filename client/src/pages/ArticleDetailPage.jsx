@@ -2,13 +2,15 @@
 // bons reference it. The page states up front whether it can be deleted, so the
 // user learns the rule before hitting a refusal.
 import { useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
+import { useTabTitle } from '../components/TabsContext.jsx';
 import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
+import { formatQty } from '../lib/format.js';
 
 const ACCENT = 'var(--c-stock)';
 const OFFICE = { china: 'Chine', algeria: 'Algérie' };
@@ -18,7 +20,7 @@ const REASON = {
 };
 // Only hand-made corrections may be undone here; the rest belong to a bon.
 const MANUAL = ['inventaire', 'ajustement'];
-const q3 = (v) => Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+const q3 = (v) => formatQty(v);
 const signed = (v) => (Number(v) > 0 ? `+${q3(v)}` : q3(v));
 
 export default function ArticleDetailPage() {
@@ -42,6 +44,9 @@ export default function ArticleDetailPage() {
     finally { setBusy(false); }
   };
 
+  // L'onglet porte le nom de la fiche, pas celui de sa section : « BP-…-00003 »
+  // se retrouve dans une barre d'onglets, « Bons passagers · fiche » non.
+  useTabTitle(data?.item?.name);
   if (loading) return <Spinner />;
   if (error) return <div className="alert alert-error">{error}</div>;
   const it = data.item;
@@ -74,7 +79,6 @@ export default function ArticleDetailPage() {
     <div style={{ '--accent': ACCENT }}>
       <div className="page-head">
         <div>
-          <Link to="/articles" className="btn-back"><IconEl name="chevronLeft" />Retour aux articles</Link>
           <div className="page-title-row">
             <div className="page-ico"><IconEl name="box" /></div>
             <div>

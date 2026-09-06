@@ -19,9 +19,11 @@ transfersRouter.get(
 
 transfersRouter.post(
   '/office-transfers',
+  // A caisse, not an office: each caisse belongs to exactly one office, so the
+  // destination office is derived rather than asked for twice.
   validate({ body: z.object({
     fromCaisseId: id,
-    toOffice: z.enum(['china', 'algeria']),
+    toCaisseId: id,
     currency: z.string().trim().toUpperCase().length(3),
     amount: num,
     note: z.string().trim().max(300).optional(),
@@ -31,7 +33,13 @@ transfersRouter.post(
 
 transfersRouter.post(
   '/office-transfers/:id/receive',
-  validate({ params: z.object({ id }), body: z.object({ toCaisseId: id, note: z.string().trim().max(300).optional() }) }),
+  // `force` confirms a transfer whose sending caisse no longer holds the amount,
+  // and is only ever sent after the user has answered the dialog that says so.
+  validate({ params: z.object({ id }), body: z.object({
+    toCaisseId: id.optional(),
+    force: z.boolean().optional(),
+    note: z.string().trim().max(300).optional(),
+  }) }),
   asyncHandler(async (req, res) => res.json({ transfer: await svc.receiveTransfer({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))
 );
 

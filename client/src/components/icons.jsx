@@ -62,6 +62,10 @@ export const Icon = {
   arrowIn: svg(<><path d="M12 4v11" /><path d="m7.5 10.5 4.5 4.5 4.5-4.5" /><path d="M4 20h16" /></>),
   arrowOut: svg(<><path d="M12 20V9" /><path d="m7.5 13.5 4.5-4.5 4.5 4.5" /><path d="M4 4h16" /></>),
   net: svg(<><path d="M12 4v16" /><path d="M4.5 8.5h15" /><path d="M4.5 8.5 2.5 14h4l-2-5.5ZM19.5 8.5 17.5 14h4l-2-5.5Z" /></>),
+  // Connection state, said with a picture: the crossed-out wifi is understood
+  // without reading, which is the point of putting it in the top bar.
+  wifi: svg(<><path d="M2.5 8.6a15 15 0 0 1 19 0" /><path d="M5.5 12.2a10.5 10.5 0 0 1 13 0" /><path d="M8.8 15.8a5.5 5.5 0 0 1 6.4 0" /><path d="M12 19.2h.01" /></>),
+  wifiOff: svg(<><path d="M2.5 8.6a15 15 0 0 1 5.2-3.1M13.2 4.8a15 15 0 0 1 8.3 3.8" /><path d="M5.5 12.2a10.5 10.5 0 0 1 3.1-2M15.4 10.4a10.5 10.5 0 0 1 3.1 1.8" /><path d="M8.8 15.8a5.5 5.5 0 0 1 4.4-1.3" /><path d="M12 19.2h.01" /><path d="m3 3 18 18" /></>),
   refresh: svg(<><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" /><path d="M20.5 4v5h-5" /></>),
   plane: svg(<><path d="M10.5 19.5 12 22l1.5-2.5V15l7 2.5v-2L13.5 10V4.2a1.5 1.5 0 0 0-3 0V10L3.5 15.5v2L10.5 15v4.5Z" /></>),
   report: svg(<><rect x="4" y="3" width="16" height="18" rx="2.5" /><path d="M8.5 12v4.5M12 8.5v8M15.5 14v2.5" /></>),

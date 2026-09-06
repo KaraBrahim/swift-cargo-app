@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
+import { useTabTitle } from '../components/TabsContext.jsx';
 import { Spinner, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
 import { BON_STATUS, STATUS_ORDER } from '../components/bonStatus.js';
 import { IconEl } from '../components/icons.jsx';
@@ -9,11 +10,13 @@ import { PrintButton } from '../components/PrintButton.jsx';
 import { bonDocBody } from '../components/printDocument.js';
 import { bonTicket } from '../components/printTicket.js';
 import { LineEditor, emptyLine, lineValid, lineTotal } from '../components/LineEditor.jsx';
-import { SourceLineEditor, emptySourceLine, sourceLineValid, sourceLineTotal } from '../components/SourceLineEditor.jsx';
+import { GoodsPicker, pickedValid, pickedTotal, pickedToLine } from '../components/GoodsPicker.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import AmountInput from '../components/AmountInput.jsx';
+import { formatQty } from '../lib/format.js';
 
 const NEXT_LABEL = { cree: 'Marquer « En transit »', en_transit: 'Marquer « Arrivé »' };
-const q3 = (v) => (v == null ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 3 }));
+const q3 = (v) => formatQty(v);
 
 // Convert a stored bon line back into the editable line shape. A bon passager
 // line keeps its link to the bon fournisseur line it draws from.
@@ -50,11 +53,14 @@ export default function BonDetailPage() {
   const caisses = useApi('/caisses');
   const currencies = useApi('/currencies');
   const categories = useApi('/stock/categories');
-  const passagers = useApi('/passagers');
+  const passagers = useApi('/people?role=passager');
   const catalogue = useApi('/stock/items');
   const chinaStock = useApi('/stock/levels?office=china');
   // Goods this bon could draw from — its own current allocation stays available.
-  const allocatable = useApi(data?.bon && data.bon.order_id == null ? `/bons/allocatable?fournisseurId=${data.bon.fournisseur_id}&forBonId=${id}` : null);
+  // Pas de filtre par fournisseur : un bon passager peut reprendre des lots
+  // d'ailleurs. `forBonId` fait compter ce qu'il tient déjà comme disponible
+  // pour lui — sinon modifier un bon montrerait sa propre marchandise comme prise.
+  const allocatable = useApi(data?.bon && data.bon.order_id == null ? `/bons/allocatable?forBonId=${id}` : null);
   const [busy, setBusy] = useState(false);
   const [rec, setRec] = useState({});
   const [payment, setPayment] = useState('');
@@ -67,6 +73,9 @@ export default function BonDetailPage() {
   const [editPayment, setEditPayment] = useState(null);
   const [confirmJump, setConfirmJump] = useState(null); // target stage awaiting confirmation
 
+  // L'onglet porte le nom de la fiche, pas celui de sa section : « BP-…-00003 »
+  // se retrouve dans une barre d'onglets, « Bons passagers · fiche » non.
+  useTabTitle(data?.bon?.reference);
   const bon = data?.bon;
 
   useEffect(() => {
@@ -77,6 +86,17 @@ export default function BonDetailPage() {
         init[l.id] = { missing: String(miss), responsible: l.responsible ?? '' };
       }
       setRec(init);
+      // The two cash forms open on what is STILL owed, not on the original
+      // total: paying twice on a partly-settled bon is the mistake worth
+      // designing out. A passager entry is stored negated in the ledger, hence
+      // the absolute value.
+      const paidOf = (type) =>
+        (bon.payments ?? [])
+          .filter((p) => p.type === type)
+          .reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0);
+      const due = (total, type) => Math.max(Number(total ?? 0) - paidOf(type), 0).toFixed(2);
+      setFeeForm((f) => ({ ...f, amount: due(bon.transport_fee, 'fee_payment') }));
+      setPayForm((f) => ({ ...f, amount: due(bon.passager_payment, 'passager_payment') }));
     }
   }, [bon]);
 
@@ -131,26 +151,46 @@ export default function BonDetailPage() {
   const settle = () =>
     act(() => api(`/bons/${id}/settle`, { method: 'POST', body: { passagerPayment: payment || undefined } }), 'Bon réglé.');
   const collectFee = () =>
-    act(() => api(`/bons/${id}/collect-fee`, { method: 'POST', body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount || undefined } }), 'Frais encaissés.');
+    act(() => api(`/bons/${id}/collect-fee`, { method: 'POST', body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount } }), 'Frais encaissés.');
   const payPassager = () =>
-    act(() => api(`/bons/${id}/pay-passager`, { method: 'POST', body: { caisseId: Number(payForm.caisseId), amount: payForm.amount || undefined } }), 'Passager payé.');
+    act(() => api(`/bons/${id}/pay-passager`, { method: 'POST', body: { caisseId: Number(payForm.caisseId), amount: payForm.amount } }), 'Passager payé.');
 
   // Full edit — only while « Créé ». A bon fournisseur line (order_id set) picks
   // from the whole catalogue and may create new articles; a bon passager line
   // picks only from what is in the China stock.
   const isFournisseurBon = bon.order_id != null;
-  const openEdit = () => setEdit({
-    transportCurrency: bon.transport_currency,
-    passagerId: bon.passager_id ? String(bon.passager_id) : '',
-    lines: bon.lines.map(toEditLine),
-  });
+  // Ce que le bon porte déjà, remis dans la forme du panier : la quantité
+  // encore disponible vient de /bons/allocatable, qui compte la sienne comme
+  // libre pour lui. L'index est construit à l'ouverture du formulaire, pas au
+  // rendu : `editSources` est déclaré plus bas.
+  const toPickedLine = (l, _i, _all, index) => {
+    const e = toEditLine(l);
+    const src = index.get(String(l.source_line_id));
+    return {
+      ...e,
+      sourceLineId: l.source_line_id,
+      remaining: src ? Number(src.remaining) : Number(e.value),
+      salePrice: Number(l.source_unit_price ?? src?.sale_price ?? 0),
+      fournisseurId: src?.fournisseur_id ?? null,
+      fournisseurName: src?.fournisseur_name || '—',
+      sourceLabel: l.source_order_reference || src?.order_reference || '',
+    };
+  };
+  const openEdit = () => {
+    const index = new Map((allocatable.data?.lines ?? []).map((o) => [String(o.line_id), o]));
+    setEdit({
+      transportCurrency: bon.transport_currency,
+      passagerId: bon.passager_id ? String(bon.passager_id) : '',
+      lines: bon.lines.map((l, i, all) => (isFournisseurBon ? toEditLine(l) : toPickedLine(l, i, all, index))),
+    });
+  };
   const setEditLine = (i, next) => setEdit((e) => ({ ...e, lines: e.lines.map((l, idx) => (idx === i ? next : l)) }));
-  const addEditLine = () => setEdit((e) => ({ ...e, lines: [...e.lines, isFournisseurBon ? emptyLine() : emptySourceLine()] }));
+  const addEditLine = () => setEdit((e) => ({ ...e, lines: [...e.lines, emptyLine()] }));
   const removeEditLine = (i) => setEdit((e) => ({ ...e, lines: e.lines.filter((_, idx) => idx !== i) }));
-  const editValid = edit && edit.lines.length > 0 && edit.lines.every(isFournisseurBon ? lineValid : sourceLineValid);
+  const editValid = edit && edit.lines.length > 0 && edit.lines.every(isFournisseurBon ? lineValid : pickedValid);
   const editItems = catalogue.data?.items ?? [];
   const editSources = allocatable.data?.lines ?? [];
-  const editTotal = edit ? edit.lines.reduce((s, l) => s + (isFournisseurBon ? lineTotal(l) : sourceLineTotal(l)), 0) : 0;
+  const editTotal = edit ? edit.lines.reduce((s, l) => s + (isFournisseurBon ? lineTotal(l) : pickedTotal(l)), 0) : 0;
   const saveEdit = () =>
     act(async () => {
       await api(`/bons/${id}`, {
@@ -158,7 +198,7 @@ export default function BonDetailPage() {
         body: {
           transportCurrency: edit.transportCurrency,
           ...(isFournisseurBon ? {} : { passagerId: edit.passagerId || null }),
-          lines: edit.lines,
+          lines: isFournisseurBon ? edit.lines : edit.lines.map(pickedToLine),
         },
       });
       setEdit(null);
@@ -176,7 +216,6 @@ export default function BonDetailPage() {
     <div>
       <div className="page-head">
         <div>
-          <Link to="/bons-passager" className="btn-back"><IconEl name="chevronLeft" />Retour aux bons passagers</Link>
           <h1>{bon.reference}</h1>
           {bon.order_reference && (
             <Link to={`/bons-fournisseur/${bon.order_id}`} className="btn-related">
@@ -222,7 +261,17 @@ export default function BonDetailPage() {
       </div>
 
       <div className="info-grid panel">
-        <div><span className="info-k">Fournisseur</span><span>{bon.fournisseur_name}{bon.fournisseur_phone ? ` · ${bon.fournisseur_phone}` : ''}</span></div>
+        {/* Un bon fournisseur appartient à quelqu'un ; un bon passager porte la
+            marchandise d'autant de fournisseurs que de lots, déduits de ses
+            lignes — les nommer tous, ou n'en désigner aucun à tort. */}
+        <div>
+          <span className="info-k">{isFournisseurBon || (bon.fournisseurs?.length ?? 0) < 2 ? 'Fournisseur' : 'Fournisseurs'}</span>
+          <span>
+            {isFournisseurBon
+              ? `${bon.fournisseur_name}${bon.fournisseur_phone ? ` · ${bon.fournisseur_phone}` : ''}`
+              : (bon.fournisseurs ?? []).map((f) => f.name).join(', ') || '—'}
+          </span>
+        </div>
         <div><span className="info-k">Passager</span><span>{bon.passager_name || '—'}{bon.passager_phone ? ` · ${bon.passager_phone}` : ''}</span></div>
         <div><span className="info-k">Frais de transport</span><span>{formatMoney(bon.transport_fee, bon.transport_currency)}</span></div>
         <div><span className="info-k">Manquants (valeur)</span><span className={Number(bon.loss_total) > 0 ? 'neg' : ''}>{formatMoney(bon.loss_total, bon.transport_currency)}</span></div>
@@ -244,7 +293,7 @@ export default function BonDetailPage() {
               <label className="field"><span>Passager</span>
                 <select value={edit.passagerId} onChange={(e) => setEdit({ ...edit, passagerId: e.target.value })}>
                   <option value="">— aucun —</option>
-                  {(passagers.data?.passagers ?? []).map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                  {(passagers.data?.people ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select></label>
             )}
             <label className="field"><span>Devise transport</span>
@@ -253,47 +302,43 @@ export default function BonDetailPage() {
               </select></label>
           </div>
 
-          <div className="lines-head">
-            <span>{isFournisseurBon ? 'Marchandises reçues' : 'Marchandises confiées au passager'}</span>
-            <button type="button" className="btn btn-ghost" onClick={addEditLine}>+ Ligne</button>
-          </div>
-          <p className="muted line-hint">
-            {isFournisseurBon
-              ? 'Prix de vente facturé au fournisseur × quantité.'
-              : 'Chaque ligne prend tout ou partie d’un bon fournisseur ; le prix est celui payé au passager.'}
-          </p>
-          {edit.lines.map((l, i) => (isFournisseurBon ? (
-            <LineEditor
-              key={i}
-              line={l}
-              items={editItems}
-              categories={categories.data?.categories ?? []}
-              onPatch={(nl) => setEditLine(i, nl)}
-              onRemove={() => removeEditLine(i)}
-              removable={edit.lines.length > 1}
-              autoFocus={i === edit.lines.length - 1}
-              allowCreate
-            />
+          {isFournisseurBon ? (
+            <>
+              <div className="lines-head">
+                <span>Marchandises reçues</span>
+                <button type="button" className="btn btn-ghost" onClick={addEditLine}>+ Ligne</button>
+              </div>
+              <p className="muted line-hint">Prix de vente facturé au fournisseur × quantité.</p>
+              {edit.lines.map((l, i) => (
+                <LineEditor
+                  key={i}
+                  line={l}
+                  items={editItems}
+                  categories={categories.data?.categories ?? []}
+                  onPatch={(nl) => setEditLine(i, nl)}
+                  onRemove={() => removeEditLine(i)}
+                  removable={edit.lines.length > 1}
+                  autoFocus={i === edit.lines.length - 1}
+                  allowCreate
+                />
+              ))}
+              <div className="form-total">
+                <span>À facturer au fournisseur</span>
+                <strong>{formatMoney(editTotal, edit.transportCurrency)}</strong>
+              </div>
+            </>
           ) : (
-            <SourceLineEditor
-              key={i}
-              line={l}
+            <GoodsPicker
               options={editSources}
+              picked={edit.lines}
               currency={edit.transportCurrency}
-              onPatch={(nl) => setEditLine(i, nl)}
-              onRemove={() => removeEditLine(i)}
-              removable={edit.lines.length > 1}
-              autoFocus={i === edit.lines.length - 1}
+              loading={allocatable.loading}
+              onChange={(lines) => setEdit((e) => ({ ...e, lines }))}
             />
-          )))}
-
-          <div className="form-total">
-            <span>{isFournisseurBon ? 'À facturer au fournisseur' : 'À payer au passager'}</span>
-            <strong>{formatMoney(editTotal, edit.transportCurrency)}</strong>
-          </div>
+          )}
           <div style={{ marginTop: 14 }}>
             <button className="btn btn-gold" disabled={busy || !editValid} onClick={saveEdit}>{busy ? '…' : 'Enregistrer les modifications'}</button>{' '}
-            <button className="btn btn-ghost" disabled={busy} onClick={() => setEdit(null)}>Annuler</button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => setEdit(null)}><IconEl name="close" />Annuler</button>
           </div>
         </div>
       )}
@@ -333,9 +378,9 @@ export default function BonDetailPage() {
                       <td className="right">{formatMoney(up, bon.transport_currency)} <span className="muted">/ {unitLabel(l)}</span></td>
                       <td className="right">{declared(l)}</td>
                       <td className="right">
-                        <input className={`mini-input ${over ? 'input-error' : ''}`} inputMode="decimal"
+                        <AmountInput decimals={3} className={`mini-input ${over ? 'input-error' : ''}`}
                           value={rec[l.id]?.missing ?? ''}
-                          onChange={(e) => setRec({ ...rec, [l.id]: { ...rec[l.id], missing: e.target.value.replace(',', '.') } })} />
+                          onChange={(v) => setRec({ ...rec, [l.id]: { ...rec[l.id], missing: v } })} />
                       </td>
                       <td className="right">{q3(delivered)} {unitLabel(l)}</td>
                       <td className="right gold">{formatMoney(delivered * up, bon.transport_currency)}</td>
@@ -403,8 +448,8 @@ export default function BonDetailPage() {
             <div className="op-form">
               {payMode === 'manual' && (
                 <label className="field"><span>Prix du service ({bon.transport_currency})</span>
-                  <input autoFocus inputMode="decimal" value={payment}
-                    onChange={(e) => setPayment(e.target.value.replace(',', '.'))}
+                  <AmountInput autoFocus value={payment}
+                    onChange={(v) => setPayment(v)}
                     placeholder={formatMoney(recDeliveredTotal)} /></label>
               )}
               <button className="btn btn-gold" disabled={busy || (payMode === 'manual' && !(Number(payment) >= 0))} onClick={settle}>
@@ -466,12 +511,12 @@ export default function BonDetailPage() {
                 <div className="field field-grow"><span>Corriger le paiement</span>
                   <span className="muted">La caisse et le compte de la personne sont réajustés ensemble.</span></div>
                 <label className="field"><span>Montant ({editPayment.currency})</span>
-                  <input autoFocus inputMode="decimal" value={editPayment.amount}
-                    onChange={(e) => setEditPayment({ ...editPayment, amount: e.target.value.replace(',', '.') })} /></label>
+                  <AmountInput autoFocus value={editPayment.amount}
+                    onChange={(v) => setEditPayment({ ...editPayment, amount: v })} /></label>
                 <label className="field field-grow"><span>Note</span>
                   <input value={editPayment.note} onChange={(e) => setEditPayment({ ...editPayment, note: e.target.value })} /></label>
                 <button className="btn btn-gold" disabled={busy || !(Number(editPayment.amount) > 0)}>Enregistrer</button>
-                <button type="button" className="btn btn-ghost" onClick={() => setEditPayment(null)}>Annuler</button>
+                <button type="button" className="btn btn-ghost" onClick={() => setEditPayment(null)}><IconEl name="close" />Annuler</button>
               </form>
             )}
             <p className="muted line-hint">
@@ -494,12 +539,12 @@ export default function BonDetailPage() {
                   {offices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select></label>
               <label className="field"><span>Montant reçu du fournisseur</span>
-                <input inputMode="decimal" value={feeForm.amount} onChange={(e) => setFeeForm({ ...feeForm, amount: e.target.value.replace(',', '.') })} placeholder={`total ${formatMoney(bon.transport_fee, bon.transport_currency)}`} /></label>
-              <button className="btn btn-gold" disabled={busy || !feeForm.caisseId} onClick={collectFee}>Encaisser</button>
+                <AmountInput value={feeForm.amount} onChange={(v) => setFeeForm({ ...feeForm, amount: v })} /></label>
+              <button className="btn btn-gold" disabled={busy || !feeForm.caisseId || !(Number(feeForm.amount) > 0)} onClick={collectFee}>Encaisser</button>
             </div>
             <p className="muted line-hint">
-              Laissez vide pour encaisser la totalité. Un paiement partiel est possible : le reste demeure une dette,
-              réglable depuis la fiche du fournisseur.
+              Le montant restant dû est déjà inscrit. Baissez-le pour un encaissement partiel :
+              le reste demeure une dette, réglable depuis la fiche du fournisseur.
             </p>
           </div>
         ) : (
@@ -517,10 +562,10 @@ export default function BonDetailPage() {
                       {offices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                     </select></label>
                   <label className="field"><span>Montant versé au passager</span>
-                    <input inputMode="decimal" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value.replace(',', '.') })} placeholder={`dû ${formatMoney(bon.passager_payment ?? 0, bon.transport_currency)}`} /></label>
-                  <button className="btn btn-gold" disabled={busy || !payForm.caisseId} onClick={payPassager}>Payer le passager</button>
+                    <AmountInput value={payForm.amount} onChange={(v) => setPayForm({ ...payForm, amount: v })} /></label>
+                  <button className="btn btn-gold" disabled={busy || !payForm.caisseId || !(Number(payForm.amount) > 0)} onClick={payPassager}>Payer le passager</button>
                 </div>
-                <p className="muted line-hint">Laissez vide pour payer la totalité due.</p>
+                <p className="muted line-hint">Le montant restant dû est déjà inscrit. Baissez-le pour un paiement partiel.</p>
               </>
             ) : (
               <p className="muted line-hint">

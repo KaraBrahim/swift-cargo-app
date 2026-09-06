@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
+import { useTabTitle } from '../components/TabsContext.jsx';
 import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { ORDER_STATUS, ORDER_ORDER } from '../components/orderStatus.js';
 import { BON_STATUS } from '../components/bonStatus.js';
@@ -10,6 +11,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { orderManifestBody } from '../components/printDocument.js';
 import { orderTicket } from '../components/printTicket.js';
+import { formatQty } from '../lib/format.js';
 
 export default function OrderDetailPage() {
   const { id } = useParams();
@@ -19,13 +21,16 @@ export default function OrderDetailPage() {
   const [busy, setBusy] = useState(false);
   const [confirmJump, setConfirmJump] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // L'onglet porte le nom de la fiche, pas celui de sa section : « BP-…-00003 »
+  // se retrouve dans une barre d'onglets, « Bons passagers · fiche » non.
+  useTabTitle(data?.order?.reference);
   if (loading) return <Spinner />;
   if (error) return <div className="alert alert-error">{error}</div>;
 
   const o = data.order;
   const stepIndex = ORDER_ORDER.indexOf(o.status);
   const cur = o.bons?.[0]?.transport_currency || 'DZD';
-  const q3 = (v) => Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+  const q3 = (v) => formatQty(v);
 
   // Clickable stepper: move every child bon to the matching stage. Backward
   // reverses stock and money, so confirm via a styled dialog first.
@@ -65,7 +70,6 @@ export default function OrderDetailPage() {
     <div>
       <div className="page-head">
         <div>
-          <Link to="/bons-fournisseur" className="btn-back"><IconEl name="chevronLeft" />Retour aux bons fournisseurs</Link>
           <h1>{o.reference}</h1>
         </div>
         <div className="page-actions">

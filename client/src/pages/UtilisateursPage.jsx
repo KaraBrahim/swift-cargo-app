@@ -67,7 +67,7 @@ export default function UtilisateursPage() {
         subtitle="Réservé au super-administrateur. Créez, modifiez ou désactivez les comptes admin ; chaque action est tracée dans le journal d'audit."
       >
         <button className="btn btn-gold" onClick={() => setForm(form ? null : { ...EMPTY })}>
-          <IconEl name={form ? 'edit' : 'plus'} />{form ? 'Fermer' : 'Nouvel utilisateur'}
+          <IconEl name={form ? 'close' : 'plus'} />{form ? 'Fermer' : 'Nouvel utilisateur'}
         </button>
       </PageHeader>
 
@@ -106,7 +106,7 @@ export default function UtilisateursPage() {
             <input autoFocus type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="8 caractères min." />
           </label>
           <button className="btn btn-gold" disabled={busy || pw.length < 8}>Réinitialiser</button>
-          <button type="button" className="btn btn-ghost" onClick={() => { setPwFor(null); setPw(''); }}>Annuler</button>
+          <button type="button" className="btn btn-ghost" onClick={() => { setPwFor(null); setPw(''); }}><IconEl name="close" />Annuler</button>
         </form>
       )}
 

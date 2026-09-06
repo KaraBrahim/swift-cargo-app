@@ -263,7 +263,7 @@ export async function getItemDetail(id) {
       `SELECT office, quantity, weight_kg, cbm FROM stock_levels WHERE item_id=$1 ORDER BY office`, [id]
     ),
     getPool().query(
-      `SELECT m.*, a.full_name AS admin_name, b.reference AS bon_reference, o.reference AS order_reference
+      `SELECT m.*, a.full_name AS admin_name, a.role AS admin_role, b.reference AS bon_reference, o.reference AS order_reference
          FROM stock_movements m
          LEFT JOIN admins a ON a.id = m.admin_id
          LEFT JOIN bons b   ON b.id = m.ref_bon_id
@@ -273,11 +273,11 @@ export async function getItemDetail(id) {
     getPool().query(
       `SELECT bl.id AS line_id, bl.measure, bl.quantity, bl.weight_kg, bl.cbm, bl.unit, bl.unit_price,
               b.id AS bon_id, b.reference, b.status, b.order_id,
-              f.name AS fournisseur_name, p.full_name AS passager_name
+              f.name AS fournisseur_name, p.name AS passager_name
          FROM bon_lines bl
          JOIN bons b ON b.id = bl.bon_id
-         JOIN fournisseurs f ON f.id = b.fournisseur_id
-         LEFT JOIN passagers p ON p.id = b.passager_id
+         LEFT JOIN people f ON f.id = b.fournisseur_id
+         LEFT JOIN people p ON p.id = b.passager_id
         WHERE bl.item_id=$1 ORDER BY b.created_at DESC, bl.id DESC LIMIT 60`, [id]
     ),
   ]);
@@ -331,7 +331,7 @@ export async function listInventory({ itemId, limit = 100 } = {}) {
     where = `WHERE inv.item_id = $${params.length}`;
   }
   const { rows } = await getPool().query(
-    `SELECT inv.*, it.name AS item_name, a.full_name AS admin_name
+    `SELECT inv.*, it.name AS item_name, a.full_name AS admin_name, a.role AS admin_role
        FROM stock_inventory inv
        JOIN stock_items it ON it.id = inv.item_id
        JOIN admins a ON a.id = inv.admin_id

@@ -115,10 +115,14 @@ export async function runSeed() {
     });
   }
 
+  // Report what was actually created, not what the environment implies: a
+  // development machine with SEED_ADMIN_PASSWORD blank has no demo accounts
+  // either, and a log line that says otherwise is worse than none.
+  const demo = SEED_USERS.length - 1;
   logger.info(
-    config.isProduction
-      ? 'Seed complete (production : super-admin uniquement).'
-      : `Seed complete (${SEED_USERS.length} comptes, dont les comptes de démonstration).`
+    demo > 0
+      ? `Seed complete (super-admin + ${demo} comptes de démonstration).`
+      : 'Seed complete (super-admin uniquement — aucun compte de démonstration).'
   );
 }
 

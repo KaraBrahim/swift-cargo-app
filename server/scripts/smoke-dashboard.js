@@ -56,40 +56,49 @@ try {
   token = (await call('POST', '/api/auth/login', { username: 'admin1', password: config.seedAdminPassword })).token;
 
   const caisse = (await call('GET', '/api/caisses')).caisses.find((c) => c.office === 'china');
-  const f = (await call('POST', '/api/fournisseurs', { name: 'Fournisseur Dash', city: 'Guangzhou' }, 201)).fournisseur;
-  const p = (await call('POST', '/api/passagers', { type: 'regular', full_name: 'Passager Dash' }, 201)).passager;
+  const f = (await call('POST', '/api/people', { name: 'Fournisseur Dash', isFournisseur: true }, 201)).person;
+  const p = (await call('POST', '/api/people', { name: 'Passager Dash', isPassager: true, passagerType: 'regular' }, 201)).person;
 
   // Cash in, so Entrées/Net are non-zero.
   await call('POST', `/api/caisses/${caisse.id}/deposit`, { currency: 'DZD', amount: '100000', note: 'Fonds' }, 201);
   await call('POST', `/api/caisses/${caisse.id}/withdraw`, { currency: 'DZD', amount: '25000', note: 'Frais' }, 201);
 
-  // Bon A — carried all the way to fully settled (should land in "Terminé").
+  // La marchandise entre TOUJOURS par un bon fournisseur : c'est là qu'elle est
+  // reçue, facturée et mise en stock. Les bons passagers y puisent ensuite.
+  // Facturé au fournisseur : 10 × 500 + 50 kg × 100 = 10 000.
+  const order = (await call('POST', '/api/orders', {
+    fournisseurId: f.id,
+    bons: [{ transportCurrency: 'DZD', lines: [
+      { designation: 'Cartons', measure: 'quantite', value: '10', unit: 'carton', unitPrice: '500' },
+      { designation: 'Riz', measure: 'poids', value: '50', unitPrice: '100' },
+    ] }],
+  }, 201)).order;
+  const crate = order.bons[0];
+  const lots = (await call('GET', '/api/bons/allocatable')).lines;
+  const lotCartons = lots.find((l) => l.designation === 'Cartons');
+  const lotRiz = lots.find((l) => l.designation === 'Riz');
+
+  // Bon A — porté jusqu'au bout : réglé, puis le passager payé (3 000).
   const a = (await call('POST', '/api/bons', {
-    fournisseurId: f.id, passagerId: p.id, transportCurrency: 'DZD', transportFee: '5000',
-    lines: [{ designation: 'Cartons', quantity: '10', unit: 'carton', weight_kg: '50', cbm: '0.8' }],
+    passagerId: p.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: lotCartons.line_id, measure: 'quantite', value: '10', unitPrice: '300' }],
   }, 201)).bon;
   await call('POST', `/api/bons/${a.id}/advance`, {});
   await call('POST', `/api/bons/${a.id}/advance`, {});
   await call('POST', `/api/bons/${a.id}/reconcile`, {
-    lines: [{ lineId: a.lines[0].id, receivedQuantity: '10', lossValue: '0' }],
+    lines: [{ lineId: a.lines[0].id, receivedQuantity: '10' }],
   });
   await call('POST', `/api/bons/${a.id}/settle`, {});
-  await call('POST', `/api/bons/${a.id}/collect-fee`, { caisseId: caisse.id });
   await call('POST', `/api/bons/${a.id}/pay-passager`, { caisseId: caisse.id });
 
-  // Bon B — settled but the passager has NOT been paid (stays at "Réglé").
-  const b = (await call('POST', '/api/bons', {
-    fournisseurId: f.id, passagerId: p.id, transportCurrency: 'DZD', transportFee: '3000',
-    lines: [{ designation: 'Sacs', quantity: '4', unit: 'pièce', weight_kg: '20', cbm: '0.2' }],
-  }, 201)).bon;
-  await call('POST', `/api/bons/${b.id}/advance`, {});
-  await call('POST', `/api/bons/${b.id}/advance`, {});
-  await call('POST', `/api/bons/${b.id}/settle`, {});
+  // Le fournisseur règle 5 000 des 10 000 facturés — sur SON bon, le seul qui
+  // porte une dette.
+  await call('POST', `/api/bons/${crate.id}/collect-fee`, { caisseId: caisse.id, amount: '5000' });
 
-  // Bon C — left at "En attente".
+  // Bon B — laissé « En attente ».
   await call('POST', '/api/bons', {
-    fournisseurId: f.id, transportCurrency: 'DZD', transportFee: '0',
-    lines: [{ designation: 'Divers', quantity: '2', unit: 'kg', weight_kg: '2', cbm: '0.01' }],
+    passagerId: p.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: lotRiz.line_id, measure: 'poids', value: '50', unitPrice: '40' }],
   }, 201);
 
   // ── the assertions ────────────────────────────────────────────────
@@ -97,31 +106,30 @@ try {
 
   const steps = Object.fromEntries(ov.pipeline.steps.map((s) => [s.key, s.count]));
   check('pipeline en_attente', steps.en_attente, 1);
-  // Bons A (fully settled) and B (settled, passager unpaid) are both 'regle' now
-  // that the derived "Terminé" step is gone.
-  check('pipeline regle', steps.regle, 2);
+  check('pipeline regle', steps.regle, 1);
   check('pipeline termine supprimé', steps.termine, undefined);
-  check('pipeline total', ov.pipeline.total, 3);
+  // Le bon fournisseur n'y est pas : le pipeline suit les bons PASSAGERS.
+  check('pipeline total (bons passagers seulement)', ov.pipeline.total, 2);
   check('pipeline = 4 étapes', ov.pipeline.steps.length, 4);
 
-  // Entrées: 100000 deposit + 5000 fee collected. Dépenses: 25000 + 5000 paid.
-  // Conversions/transfers are excluded by design; there are none here anyway.
+  // Entrées : dépôt 100 000 + 5 000 encaissés. Dépenses : 25 000 + 3 000 payés
+  // au passager. Conversions et transferts sont exclus par principe.
   check('financier entrées', ov.financial.entrees.value, '105000.00');
-  check('financier dépenses', ov.financial.depenses.value, '30000.00');
-  check('financier net', ov.financial.net.value, '75000.00');
+  check('financier dépenses', ov.financial.depenses.value, '28000.00');
+  check('financier net', ov.financial.net.value, '77000.00');
   check('net = entrées - dépenses', ov.financial.net.value,
     (Number(ov.financial.entrees.value) - Number(ov.financial.depenses.value)).toFixed(2));
 
-  // Chiffre d'affaires: only the 5000 actually collected, not the 8000 billed.
+  // Chiffre d'affaires : seulement les 5 000 encaissés, pas les 10 000 facturés.
   check("CA argent (encaissé)", ov.revenue.money.value, '5000.00');
-  check('CA poids kg', ov.revenue.quantity.weightKg, '72.000');
+  // Volumes = marchandise REÇUE (bons fournisseurs). Les compter aussi sur les
+  // bons passagers compterait deux fois les mêmes cartons.
+  check('CA poids kg', ov.revenue.quantity.weightKg, '50.000');
   const units = Object.fromEntries(ov.revenue.quantity.byUnit.map((u) => [u.unit, u.quantity]));
   check('CA quantité par unité: carton', units.carton, '10.000');
-  check('CA quantité par unité: pièce', units['pièce'], '4.000');
-  check('CA quantité par unité: kg', units.kg, '2.000');
 
   check('séries financières remplies', ov.financial.entrees.series.length, 12);
-  check('bons récents', ov.recentBons.length, 3);
+  check('bons récents', ov.recentBons.length, 2);
   check("activité récente non vide", ov.activity.length > 0, 'true');
   check('overview ne renvoie plus alerts', 'alerts' in ov, false);
 
@@ -131,8 +139,8 @@ try {
   }
   await call('GET', '/api/dashboard/financial?period=decennie', null, 400);
 
-  // Per-card tile endpoint (the 3-dots period picker). Bons actifs = not 'regle':
-  // A and B are réglé, only C remains → 1.
+  // Per-card tile endpoint (the 3-dots period picker). Bons actifs = bons
+  // passagers non réglés : A est réglé, B attend → 1.
   const tileBons = await call('GET', '/api/dashboard/tile/bons?period=semaine&currency=DZD');
   check('tile bons: valeur = bons actifs', tileBons.value, '1');
   const tileRev = await call('GET', '/api/dashboard/tile/revenue?period=mois&currency=DZD');
@@ -144,8 +152,10 @@ try {
   check('sync expose online', typeof sync.online !== 'undefined', 'true');
   check('sync expose oldestPendingAt', 'oldestPendingAt' in sync, 'true');
 
-  // Donut
-  check('donut total = quantité stock', ov.stockByCategory.total, '0.000');
+  // Donut : la marchandise reçue est en stock — 10 cartons, partis de Chine avec
+  // le passager et arrives en Algerie, donc toujours comptes. Le riz est mesure
+  // au poids, sa quantite est 0.
+  check('donut total = quantité stock', ov.stockByCategory.total, '10.000');
 
   console.log(out.join('\n'));
   console.log(failed ? '\nSMOKE-DASHBOARD FAILED' : '\nSMOKE-DASHBOARD PASSED');

@@ -5,6 +5,7 @@
 // is the fallback when a desk has no printer wired to its server. This module is
 // the other half: one click, paper.
 import { getPool } from '../../db/pool.js';
+import { MASKED_NAME, isSuperadmin } from '../../lib/visibility.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { getBonDetail } from '../bons/bons.service.js';
@@ -96,7 +97,7 @@ export async function printOrder({ admin, id, ip, cfgOverride }) {
 export async function printMovement({ admin, id, ip, cfgOverride }) {
   const cfg = cfgOverride ?? (await getConfig());
   const { rows } = await getPool().query(
-    `SELECT t.*, c.label AS caisse_label, a.full_name AS admin_name
+    `SELECT t.*, c.label AS caisse_label, a.full_name AS admin_name, a.role AS admin_role
        FROM transactions t
        JOIN caisses c ON c.id = t.caisse_id
        JOIN admins a  ON a.id = t.admin_id
@@ -105,6 +106,11 @@ export async function printMovement({ admin, id, ip, cfgOverride }) {
   );
   const movement = rows[0];
   if (!movement) throw errors.notFound('Mouvement introuvable.');
+  // A receipt is rendered to ESC/POS here, never through res.json, so the
+  // response scrubber cannot reach it — mask the actor on the paper too.
+  if (movement.admin_role === 'superadmin' && !isSuperadmin(admin)) {
+    movement.admin_name = MASKED_NAME;
+  }
   const societe = await getSociete();
   return emit({
     admin, ip, cfgOverride: cfg, entity: 'transaction', entityId: id, docName: `Recu ${id}`,

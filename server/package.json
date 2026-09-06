@@ -17,6 +17,7 @@
     "smoke:orders": "node scripts/smoke-orders.js",
     "smoke:sync": "node scripts/smoke-sync.js",
     "smoke:transfers": "node scripts/smoke-transfers.js",
+    "smoke:rates": "node scripts/smoke-rates.js",
     "smoke:dashboard": "node scripts/smoke-dashboard.js",
     "smoke:admin": "node scripts/smoke-admin.js",
     "demo:bon": "node scripts/demo-bon.js"

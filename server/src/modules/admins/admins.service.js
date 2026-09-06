@@ -13,10 +13,17 @@ import { writeAudit } from '../../lib/audit.js';
 
 const PUBLIC_COLS = `id, username, full_name, office, role, email, phone, active, created_at, last_login_at`;
 
-export async function listAdmins({ includeInactive = false } = {}) {
+// The super-admin is invisible to everyone else — and this list is the one
+// place the rule could be walked around, because it returns `full_name`, which
+// the response scrubber does not touch (it masks the *_name actor columns).
+// Any signed-in admin may call this endpoint, so the filter belongs here.
+export async function listAdmins({ includeInactive = false, viewerIsSuperadmin = false } = {}) {
+  const clauses = [];
+  if (!includeInactive) clauses.push('active = TRUE');
+  if (!viewerIsSuperadmin) clauses.push("role <> 'superadmin'");
   const { rows } = await getPool().query(
     `SELECT ${PUBLIC_COLS} FROM admins
-      ${includeInactive ? '' : 'WHERE active = TRUE'}
+      ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
       ORDER BY active DESC, office NULLS LAST, full_name`
   );
   return rows;

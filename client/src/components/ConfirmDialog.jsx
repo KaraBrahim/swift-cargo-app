@@ -6,6 +6,10 @@ import { IconEl } from './icons.jsx';
 
 export function ConfirmDialog({
   open, title, message, bullets, confirmLabel = 'Confirmer', cancelLabel = 'Annuler',
+  // A third way out, for the case where "confirm or go back" is a false choice:
+  // confirming a transfer the sending caisse can no longer cover leaves a real
+  // decision to make — force it, or cancel the transfer entirely.
+  extraLabel, onExtra,
   tone = 'danger', busy = false, onConfirm, onCancel,
 }) {
   const confirmRef = useRef(null);
@@ -35,7 +39,12 @@ export function ConfirmDialog({
           </ul>
         )}
         <div className="modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
+            <IconEl name="close" />{cancelLabel}
+          </button>
+          {extraLabel && (
+            <button type="button" className="btn btn-danger" onClick={onExtra} disabled={busy}>{extraLabel}</button>
+          )}
           <button
             type="button"
             ref={confirmRef}

@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useApi } from '../api/useApi.js';
+import { useApi, useDebounced } from '../api/useApi.js';
 import { Spinner, errorMessage, useToast, PageHeader, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
+import { RolePicker, RoleBadges, emptyPerson, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 
-const EMPTY = { type: 'regular', full_name: '', phone: '', notes: '' };
 const TYPE_LABEL = { regular: 'Régulier', auto: 'Auto-entrepreneur' };
 const ACCENT = 'var(--c-stock)';
 
@@ -14,8 +14,11 @@ export default function PassagersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
-  const qs = [search && `search=${encodeURIComponent(search)}`, typeFilter && `type=${typeFilter}`].filter(Boolean).join('&');
-  const list = useApi(`/passagers${qs ? `?${qs}` : ''}`);
+  // The box follows your typing; the request waits for you to stop.
+  const query = useDebounced(search);
+  const qs = ['role=passager', query && `search=${encodeURIComponent(query)}`, typeFilter && `passagerType=${typeFilter}`]
+    .filter(Boolean).join('&');
+  const list = useApi(`/people?${qs}`);
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -23,9 +26,10 @@ export default function PassagersPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      if (form.id) await api(`/passagers/${form.id}`, { method: 'PUT', body: form });
-      else await api('/passagers', { method: 'POST', body: form });
-      toast.success('Passager enregistré.');
+      const body = personBody(form);
+      if (form.id) await api(`/people/${form.id}`, { method: 'PUT', body });
+      else await api('/people', { method: 'POST', body });
+      toast.success('Fiche enregistrée.');
       setForm(null);
       list.reload();
     } catch (err) { toast.error(errorMessage(err)); }
@@ -34,38 +38,34 @@ export default function PassagersPage() {
 
   const remove = async (id) => {
     try {
-      await api(`/passagers/${id}/active`, { method: 'POST', body: { active: false } });
-      toast.success('Passager retiré.');
+      await api(`/people/${id}/active`, { method: 'POST', body: { active: false } });
+      toast.success('Fiche retirée.');
       list.reload();
     } catch (err) { toast.error(errorMessage(err)); }
   };
 
-  if (list.loading) return <Spinner />;
+  if (list.loading || !list.data) return <Spinner />;
   if (list.error) return <div className="alert alert-error">{list.error}</div>;
-  const rows = list.data.passagers;
+  const rows = list.data.people;
 
   return (
     <div style={{ '--accent': ACCENT }}>
       <PageHeader icon="passager" accent={ACCENT} title="Passagers" subtitle="Répertoire des passagers, leurs bons et leurs comptes.">
-        <button className="btn btn-gold" onClick={() => setForm(form ? null : { ...EMPTY })}>
-          <IconEl name={form ? 'edit' : 'plus'} />{form ? 'Fermer' : 'Nouveau passager'}
+        <button className="btn btn-gold" onClick={() => setForm(form ? null : emptyPerson({ isPassager: true }))}>
+          <IconEl name={form ? 'close' : 'plus'} />{form ? 'Fermer' : 'Nouveau passager'}
         </button>
       </PageHeader>
 
       {form && (
         <form className="panel panel-accent op-form" onSubmit={save}>
-          <label className="field"><span>Type</span>
-            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-              <option value="regular">Régulier</option>
-              <option value="auto">Auto-entrepreneur</option>
-            </select></label>
           <label className="field field-grow"><span>Nom complet</span>
-            <input autoFocus value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></label>
+            <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label className="field"><span>Téléphone</span>
             <input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
           <label className="field field-grow"><span>Notes</span>
             <input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
-          <button className="btn btn-gold" disabled={busy || !form.full_name.trim()}>{form.id ? 'Modifier' : 'Créer'}</button>
+          <RolePicker value={form} onChange={setForm} />
+          <button className="btn btn-gold" disabled={busy || !personValid(form)}>{form.id ? 'Modifier' : 'Créer'}</button>
         </form>
       )}
 
@@ -85,18 +85,20 @@ export default function PassagersPage() {
               <thead><tr><th>Passager</th><th>Type</th><th>Téléphone</th><th>Notes</th><th></th></tr></thead>
               <tbody>
                 {rows.map((p) => (
-                  <tr key={p.id} className="clickable" onClick={() => navigate(`/passagers/${p.id}`)}>
+                  <tr key={p.id} className="clickable" onClick={() => navigate(`/personnes/${p.id}`)}>
                     <td>
                       <span className="cell-main">
-                        <span className="avatar">{initialsOf(p.full_name)}</span>
-                        <span className="gold">{p.full_name}</span>
+                        <span className="avatar">{initialsOf(p.name)}</span>
+                        <span className="gold">{p.name}</span>
+                        {/* Only the OTHER role is worth saying here. */}
+                        <RoleBadges person={p} hide="passager" />
                       </span>
                     </td>
-                    <td><span className="type-badge">{TYPE_LABEL[p.type]}</span></td>
+                    <td><span className="type-badge">{TYPE_LABEL[p.passager_type] || '—'}</span></td>
                     <td>{p.phone || '—'}</td>
                     <td className="muted">{p.notes || '—'}</td>
                     <td className="right nowrap">
-                      <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setForm({ id: p.id, type: p.type, full_name: p.full_name, phone: p.phone || '', notes: p.notes || '' }); }}>Modifier</button>{' '}
+                      <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setForm(personToForm(p)); }}>Modifier</button>{' '}
                       <button className="btn btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); remove(p.id); }}>Retirer</button>
                     </td>
                   </tr>

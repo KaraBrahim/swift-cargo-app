@@ -1,10 +1,31 @@
-// Inter-office cash transfers (two legs). Send = OUT at the origin office caisse
-// + a pending transfer row. Receive = IN at the destination office caisse +
-// mark received. Each leg is written by its own office, so it is conflict-free.
+// Cash transfers between caisses — the only kind there is. Each caisse belongs
+// to exactly one office, so choosing the destination caisse already chooses the
+// destination office; there is no separate "internal" transfer.
+//
+// NOTHING MOVES UNTIL THE DESTINATION CONFIRMS. Sending writes a pending row and
+// no money at all; confirming writes BOTH legs at once inside one transaction.
+// Between the two, the amount is a claim, not a movement — which is why the
+// pending amount is not reserved and the sending caisse can be emptied
+// meanwhile. See receiveTransfer() for what happens then.
 import { getPool, withTx } from '../../db/pool.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { postMovement, replayChain } from '../caisse/caisse.service.js';
+
+// Both office caisses, by id, locked in the caller's transaction.
+async function loadOfficeCaisse(c, id, label) {
+  const { rows } = await c.query("SELECT * FROM caisses WHERE id = $1 AND kind = 'office'", [id]);
+  if (!rows[0]) throw errors.notFound(`${label} introuvable.`);
+  return rows[0];
+}
+
+const balanceOf = async (c, caisseId, currency) => {
+  const { rows } = await c.query(
+    'SELECT balance FROM caisse_balances WHERE caisse_id = $1 AND currency_code = $2',
+    [caisseId, currency]
+  );
+  return Number(rows[0]?.balance ?? 0);
+};
 
 export async function listTransfers({ status, limit = 100 } = {}) {
   const params = [];
@@ -13,7 +34,7 @@ export async function listTransfers({ status, limit = 100 } = {}) {
   params.push(limit);
   const { rows } = await getPool().query(
     `SELECT t.*, sc.label AS sent_caisse_label, rc.label AS received_caisse_label,
-            sa.full_name AS sent_by_name, ra.full_name AS received_by_name
+            sa.full_name AS sent_by_name, sa.role AS sent_by_role, ra.full_name AS received_by_name, ra.role AS received_by_role
        FROM office_transfers t
        LEFT JOIN caisses sc ON sc.id = t.sent_caisse_id
        LEFT JOIN caisses rc ON rc.id = t.received_caisse_id
@@ -25,27 +46,34 @@ export async function listTransfers({ status, limit = 100 } = {}) {
   return rows;
 }
 
-// Origin office sends cash → OUT of its caisse + a pending transfer.
-export async function sendTransfer({ admin, fromCaisseId, toOffice, currency, amount, note, ip }) {
+// Sending only records the intent: a pending row, no movement. The money is
+// still in the origin's till and the books must say so.
+export async function sendTransfer({ admin, fromCaisseId, toCaisseId, currency, amount, note, ip }) {
   return withTx(async (c) => {
-    const { rows } = await c.query("SELECT * FROM caisses WHERE id = $1 AND kind = 'office'", [fromCaisseId]);
-    const from = rows[0];
-    if (!from) throw errors.notFound('Caisse bureau introuvable.');
-    if (!['china', 'algeria'].includes(toOffice)) {
-      throw errors.validation([{ field: 'toOffice', message: 'Bureau destination invalide.' }]);
-    }
-    if (from.office === toOffice) throw errors.conflict('Bureaux source et destination identiques.');
+    const from = await loadOfficeCaisse(c, fromCaisseId, 'Caisse d’origine');
+    const to = await loadOfficeCaisse(c, toCaisseId, 'Caisse de destination');
+    if (from.id === to.id) throw errors.conflict('Caisses d’origine et de destination identiques.');
 
-    const { txId } = await postMovement(c, {
-      caisseId: fromCaisseId, currency, direction: 'out', amount, type: 'transfer',
-      note: note ?? `Transfert vers ${toOffice}`, adminId: admin.id,
-    });
+    // Checked here as a courtesy — you should not be able to promise money the
+    // till does not hold. It is checked again at confirmation, because nothing
+    // reserves it in between.
+    const available = await balanceOf(c, from.id, currency);
+    if (available < Number(amount)) {
+      throw errors.insufficientFunds({
+        currency, available: available.toFixed(2), required: Number(amount).toFixed(2),
+      });
+    }
+
     const ins = await c.query(
-      `INSERT INTO office_transfers (from_office, to_office, currency_code, amount, sent_caisse_id, sent_tx_id, sent_by, note)
+      `INSERT INTO office_transfers
+         (from_office, to_office, currency_code, amount, sent_caisse_id, received_caisse_id, sent_by, note)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [from.office, toOffice, currency, amount, fromCaisseId, txId, admin.id, note ?? null]
+      [from.office, to.office, currency, amount, from.id, to.id, admin.id, note ?? null]
     );
-    await writeAudit(c, { adminId: admin.id, action: 'transfer.send', entity: 'office_transfer', entityId: ins.rows[0].id, details: { toOffice, currency, amount }, ip });
+    await writeAudit(c, {
+      adminId: admin.id, action: 'transfer.send', entity: 'office_transfer', entityId: ins.rows[0].id,
+      details: { fromCaisseId: from.id, toCaisseId: to.id, currency, amount }, ip,
+    });
     return ins.rows[0];
   });
 }
@@ -69,9 +97,8 @@ export async function updateTransfer({ admin, id, amount, note, ip }) {
     const next = amount != null && amount !== '' ? String(amount).trim() : t.amount;
     if (!(Number(next) > 0)) throw errors.invalidAmount('Le montant doit être supérieur à zéro.');
 
-    // Re-shape the OUT leg, then replay the caisse's balance chain.
-    await c.query('UPDATE transactions SET amount=$2, note=$3 WHERE id=$1', [t.sent_tx_id, next, note ?? t.note]);
-    await replayChain(c, t.sent_caisse_id, t.currency_code);
+    // Nothing was posted at send time, so there is no ledger row to reshape and
+    // no chain to replay — the pending transfer is just a note to ourselves.
     const upd = await c.query(
       'UPDATE office_transfers SET amount=$2, note=COALESCE($3, note) WHERE id=$1 RETURNING *',
       [id, next, note ?? null]
@@ -88,19 +115,15 @@ export async function deleteTransfer({ admin, id, ip }) {
     if (!t) throw errors.notFound('Transfert introuvable.');
     assertPending(t);
 
-    // Remove the OUT leg and put the money back by replaying the chain.
-    if (t.sent_tx_id) {
-      await c.query('DELETE FROM transactions WHERE id=$1', [t.sent_tx_id]);
-      await replayChain(c, t.sent_caisse_id, t.currency_code);
-    }
+    // No movement was ever written, so cancelling leaves no trace to undo.
     await c.query('DELETE FROM office_transfers WHERE id=$1', [id]);
     await writeAudit(c, { adminId: admin.id, action: 'transfer.delete', entity: 'office_transfer', entityId: id, details: { reference: t.reference, amount: t.amount }, ip });
     return { deleted: true, reference: t.reference };
   });
 }
 
-// Undo a reception: removes the destination's IN leg and puts the transfer back
-// in flight, so it can then be corrected or deleted.
+// Undo a confirmation: both legs are removed and the transfer goes back to
+// pending, i.e. back to moving no money at all.
 export async function unreceiveTransfer({ admin, id, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('SELECT * FROM office_transfers WHERE id=$1 FOR UPDATE', [id]);
@@ -108,43 +131,84 @@ export async function unreceiveTransfer({ admin, id, ip }) {
     if (!t) throw errors.notFound('Transfert introuvable.');
     if (t.status !== 'recu') throw errors.conflict('Ce transfert n’a pas encore été reçu.');
 
-    if (t.received_tx_id) {
-      await c.query('DELETE FROM transactions WHERE id=$1', [t.received_tx_id]);
-      await replayChain(c, t.received_caisse_id, t.currency_code);
+    for (const [txId, caisseId] of [[t.sent_tx_id, t.sent_caisse_id], [t.received_tx_id, t.received_caisse_id]]) {
+      if (!txId) continue;
+      await c.query('DELETE FROM transactions WHERE id=$1', [txId]);
+      await replayChain(c, caisseId, t.currency_code);
     }
     const upd = await c.query(
-      `UPDATE office_transfers SET status='envoye', received_caisse_id=NULL, received_tx_id=NULL,
-              received_by=NULL, received_at=NULL WHERE id=$1 RETURNING *`, [id]
+      `UPDATE office_transfers SET status='envoye', sent_tx_id=NULL, received_tx_id=NULL,
+              received_by=NULL, received_at=NULL, forced=false WHERE id=$1 RETURNING *`, [id]
     );
     await writeAudit(c, { adminId: admin.id, action: 'transfer.unreceive', entity: 'office_transfer', entityId: id, ip });
     return upd.rows[0];
   });
 }
 
-// Destination office confirms arrival → IN to its caisse + mark received.
-export async function receiveTransfer({ admin, id, toCaisseId, note, ip }) {
+// Confirming is where the money actually moves — both legs, one transaction,
+// all or nothing.
+//
+// The sending caisse may no longer hold the amount: nothing reserved it while
+// the transfer was pending. That is not something this function can decide, so
+// it refuses and hands the UI the numbers to put in front of a human, who
+// either forces it through (`force`) or cancels the transfer. Forcing is
+// recorded: the cash did arrive, so the origin's negative balance is the honest
+// statement that an entry is missing there.
+export async function receiveTransfer({ admin, id, toCaisseId, force = false, note, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('SELECT * FROM office_transfers WHERE id = $1 FOR UPDATE', [id]);
     const t = rows[0];
     if (!t) throw errors.notFound('Transfert introuvable.');
     if (t.status !== 'envoye') throw errors.conflict('Transfert déjà reçu.');
 
-    const cRes = await c.query("SELECT * FROM caisses WHERE id = $1 AND kind = 'office'", [toCaisseId]);
-    const to = cRes.rows[0];
-    if (!to) throw errors.notFound('Caisse bureau introuvable.');
-    if (to.office !== t.to_office) throw errors.conflict(`La caisse doit être celle du bureau « ${t.to_office} ».`);
+    // The destination was chosen when the transfer was created; a caller may
+    // still name it, and then it has to be the same one.
+    const destinationId = t.received_caisse_id ?? toCaisseId;
+    const to = await loadOfficeCaisse(c, destinationId, 'Caisse de destination');
+    if (toCaisseId && Number(toCaisseId) !== to.id) {
+      throw errors.conflict('Ce transfert est destiné à une autre caisse.');
+    }
 
-    const { txId } = await postMovement(c, {
-      caisseId: toCaisseId, currency: t.currency_code, direction: 'in', amount: t.amount, type: 'transfer',
-      note: note ?? `Réception transfert ${t.reference}`, adminId: admin.id,
-    });
+    const available = await balanceOf(c, t.sent_caisse_id, t.currency_code);
+    const short = Number(t.amount) - available;
+    if (short > 0 && !force) {
+      throw errors.insufficientFunds({
+        currency: t.currency_code,
+        available: available.toFixed(2),
+        required: Number(t.amount).toFixed(2),
+      });
+    }
+
+    // Locked in ascending id order, the same rule the rest of the ledger
+    // follows, so two confirmations in opposite directions cannot deadlock.
+    const legs = [
+      { caisseId: t.sent_caisse_id, direction: 'out', note: note ?? `Transfert ${t.reference} vers ${t.to_office}` },
+      { caisseId: to.id, direction: 'in', note: note ?? `Réception transfert ${t.reference}` },
+    ].sort((a, b) => a.caisseId - b.caisseId);
+
+    const txIds = {};
+    for (const leg of legs) {
+      const { txId } = await postMovement(c, {
+        caisseId: leg.caisseId, currency: t.currency_code, direction: leg.direction,
+        amount: t.amount, type: 'transfer', note: leg.note, adminId: admin.id,
+        allowNegative: force && leg.direction === 'out',
+      });
+      txIds[leg.direction] = txId;
+    }
+
     const upd = await c.query(
-      `UPDATE office_transfers SET status='recu', received_caisse_id=$2, received_tx_id=$3,
-              received_by=$4, received_at=now(), note=COALESCE($5, note)
+      `UPDATE office_transfers SET status='recu', received_caisse_id=$2, sent_tx_id=$3, received_tx_id=$4,
+              received_by=$5, received_at=now(), forced=$6, note=COALESCE($7, note)
         WHERE id=$1 RETURNING *`,
-      [id, toCaisseId, txId, admin.id, note ?? null]
+      [id, to.id, txIds.out, txIds.in, admin.id, short > 0, note ?? null]
     );
-    await writeAudit(c, { adminId: admin.id, action: 'transfer.receive', entity: 'office_transfer', entityId: id, details: { toCaisseId, amount: t.amount }, ip });
+    await writeAudit(c, {
+      adminId: admin.id,
+      action: short > 0 ? 'transfer.receive.forced' : 'transfer.receive',
+      entity: 'office_transfer', entityId: id,
+      details: { toCaisseId: to.id, amount: t.amount, ...(short > 0 ? { manque: short.toFixed(2) } : {}) },
+      ip,
+    });
     return upd.rows[0];
   });
 }

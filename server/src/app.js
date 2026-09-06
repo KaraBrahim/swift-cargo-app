@@ -9,8 +9,7 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { ratesRouter } from './modules/rates/rates.routes.js';
 import { caisseRouter } from './modules/caisse/caisse.routes.js';
 import { auditRouter } from './modules/audit/audit.routes.js';
-import { fournisseursRouter } from './modules/fournisseurs/fournisseurs.routes.js';
-import { passagersRouter } from './modules/passagers/passagers.routes.js';
+import { peopleRouter } from './modules/people/people.routes.js';
 import { stockRouter } from './modules/stock/stock.routes.js';
 import { bonsRouter } from './modules/bons/bons.routes.js';
 import { ordersRouter } from './modules/orders/orders.routes.js';
@@ -25,6 +24,7 @@ import { reportsRouter } from './modules/reports/reports.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { printingRouter } from './modules/printing/printing.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
+import { scrubResponses } from './lib/visibility.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // server/src -> swift-cargo-app/client/dist
@@ -78,14 +78,17 @@ export function createApp() {
   app.use(express.json({ limit: '256kb' }));
   app.use(cookieParser());
 
+  // A normal admin must never see the super-admin's name. Applied to every
+  // response centrally rather than per route — see lib/visibility.js.
+  app.use(scrubResponses);
+
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'swift-cargo', time: new Date().toISOString() }));
 
   app.use('/api/auth', authRouter);
   app.use('/api', ratesRouter);
   app.use('/api', caisseRouter);
   app.use('/api', auditRouter);
-  app.use('/api', fournisseursRouter);
-  app.use('/api', passagersRouter);
+  app.use('/api', peopleRouter);
   app.use('/api', stockRouter);
   app.use('/api', bonsRouter);
   app.use('/api', ordersRouter);

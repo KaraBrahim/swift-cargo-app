@@ -4,6 +4,10 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
 const STORAGE_KEY = 'sc_theme';
+// The section headings in the sidebar (OPÉRATIONS, RÉPERTOIRE…). Kept here with
+// the theme because it is the same kind of setting: how this desk looks, not
+// what the business does — so it lives in the browser, not on the server.
+const GROUPS_KEY = 'sc_nav_groups';
 
 export const THEMES = [
   {
@@ -77,10 +81,29 @@ export function ThemeProvider({ children }) {
     }
   }, [themeId]);
 
+  const [navGroups, setNavGroupsState] = useState(() => {
+    try {
+      return localStorage.getItem(GROUPS_KEY) !== '0';
+    } catch {
+      return true;
+    }
+  });
+
+  const setNavGroups = useCallback((on) => {
+    setNavGroupsState(on);
+    try {
+      localStorage.setItem(GROUPS_KEY, on ? '1' : '0');
+    } catch {
+      /* private mode — the preference just won't persist */
+    }
+  }, []);
+
   const setTheme = useCallback((id) => setThemeId(themeById(id).id), []);
 
   return (
-    <ThemeContext.Provider value={{ themeId, theme: themeById(themeId), themes: THEMES, setTheme }}>
+    <ThemeContext.Provider
+      value={{ themeId, theme: themeById(themeId), themes: THEMES, setTheme, navGroups, setNavGroups }}
+    >
       {children}
     </ThemeContext.Provider>
   );

@@ -54,9 +54,21 @@ export function AnimatedBackground() {
     const text = readVar('--brand-text', '#f1da97');   // bright on dark, dark on light
     const deep = readVar('--brand-deep', '#9a7c34');   // dark on dark, pale on light
 
+    // The palette's module hues, not just the brand: on the sober palette every
+    // --c-* resolves to var(--brand), so the constellation stays gold exactly as
+    // before; on the vivid palette they are the real spread (violet, blue,
+    // green, amber…) and the background finally shows the theme it is in
+    // instead of one flat colour.
+    const hues = ['--c-dash', '--c-order', '--c-caisse', '--c-bon', '--c-people']
+      .map((name) => readVar(name, ''))
+      .filter(Boolean);
+
     // Light: lean on the darker tones and push opacity UP so the constellation
     // actually reads against a near-white surface.
-    const colors = isLight ? [text, brand, brand2] : [brand, text, deep];
+    const base = isLight ? [text, brand, brand2] : [brand, text, deep];
+    // Deduplicated, because on the sober palette the hues ARE the brand and a
+    // list of five identical colours only wastes work.
+    const colors = [...new Set([...base, ...hues])];
     const linkColor = isLight ? brand2 : brand;
     const opacity = isLight ? { min: 0.35, max: 0.85 } : { min: 0.2, max: 0.7 };
     const linkOpacity = isLight ? 0.38 : 0.32;

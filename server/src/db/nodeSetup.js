@@ -6,7 +6,7 @@ import { config, ID_OFFSETS } from '../config.js';
 import { logger } from '../lib/logger.js';
 
 const OPERATIONAL = [
-  'fournisseurs', 'passagers', 'stock_categories', 'stock_items', 'stock_inventory',
+  'people', 'stock_categories', 'stock_items', 'stock_inventory',
   'exchange_rates', 'orders', 'bons', 'bon_lines', 'bon_status_history',
   'transactions', 'conversions', 'person_ledger', 'audit_log', 'office_transfers',
 ];

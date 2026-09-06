@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
 import { Spinner, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
-import { SourceLineEditor, emptySourceLine, sourceLineValid, sourceLineTotal, sourceLineMargin } from '../components/SourceLineEditor.jsx';
+import { GoodsPicker, pickedValid, pickedToLine } from '../components/GoodsPicker.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 
 export default function BonsPage() {
@@ -14,26 +14,19 @@ export default function BonsPage() {
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const bons = useApi(`/bons${status ? `?status=${status}` : ''}`);
-  const fournisseurs = useApi('/fournisseurs');
-  const passagers = useApi('/passagers');
+  const passagers = useApi('/people?role=passager');
   const currencies = useApi('/currencies');
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [form, setForm] = useState({ fournisseurId: '', passagerId: '', transportCurrency: 'DZD', notes: '', lines: [emptySourceLine()] });
+  const [form, setForm] = useState({ passagerId: '', transportCurrency: 'DZD', notes: '', lines: [] });
 
-  // A bon passager carries goods that a specific fournisseur handed over, so the
-  // choices are the still-unallocated lines of that fournisseur's bons.
-  const allocatable = useApi(form.fournisseurId ? `/bons/allocatable?fournisseurId=${form.fournisseurId}` : null);
+  // Tout ce qui peut partir aujourd'hui, tous fournisseurs confondus : le bon
+  // n'appartient plus à l'un d'eux, il porte ce que le passager emmène.
+  const allocatable = useApi('/bons/allocatable');
 
-  const setLine = (i, next) => setForm((f) => ({ ...f, lines: f.lines.map((l, idx) => (idx === i ? next : l)) }));
-  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, emptySourceLine()] }));
-  const removeLine = (i) => setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
-
-  const total = form.lines.reduce((s, l) => s + sourceLineTotal(l), 0);
-  const margin = form.lines.reduce((s, l) => s + sourceLineMargin(l), 0);
-  const canSubmit = form.fournisseurId && form.lines.length > 0 && form.lines.every(sourceLineValid);
+  const canSubmit = form.lines.length > 0 && form.lines.every(pickedValid);
 
   const doDelete = async () => {
     setBusy(true);
@@ -51,7 +44,10 @@ export default function BonsPage() {
     if (!canSubmit) return;
     setBusy(true);
     try {
-      const { bon } = await api('/bons', { method: 'POST', body: form });
+      const { bon } = await api('/bons', {
+        method: 'POST',
+        body: { ...form, lines: form.lines.map(pickedToLine) },
+      });
       toast.success(`Bon passager ${bon.reference} créé.`);
       navigate(`/bons-passager/${bon.id}`);
     } catch (err) {
@@ -61,7 +57,7 @@ export default function BonsPage() {
     }
   };
 
-  if (bons.loading || fournisseurs.loading) return <Spinner />;
+  if (bons.loading || !bons.data) return <Spinner />;
   const curList = currencies.data?.currencies ?? [];
   const allocatableList = allocatable.data?.lines ?? [];
 
@@ -72,24 +68,18 @@ export default function BonsPage() {
           <div className="page-ico"><IconEl name="bon" /></div>
           <h1>Bons passagers</h1>
         </div>
-        <button className="btn btn-gold" onClick={() => setOpen(!open)}>{open ? 'Fermer' : 'Nouveau bon passager'}</button>
+        <button className="btn btn-gold" onClick={() => setOpen(!open)}>
+          <IconEl name={open ? 'close' : 'plus'} />{open ? 'Fermer' : 'Nouveau bon passager'}
+        </button>
       </div>
 
       {open && (
         <form className="panel" onSubmit={submit}>
           <div className="op-form">
-            <label className="field"><span>Fournisseur</span>
-              <select
-                value={form.fournisseurId}
-                onChange={(e) => setForm({ ...form, fournisseurId: e.target.value, lines: [emptySourceLine()] })}
-              >
-                <option value="">— choisir —</option>
-                {(fournisseurs.data?.fournisseurs ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select></label>
-            <label className="field"><span>Passager</span>
+            <label className="field field-grow"><span>Passager</span>
               <select value={form.passagerId} onChange={(e) => setForm({ ...form, passagerId: e.target.value })}>
                 <option value="">— aucun —</option>
-                {(passagers.data?.passagers ?? []).map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                {(passagers.data?.people ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select></label>
             <label className="field"><span>Devise transport</span>
               <select value={form.transportCurrency} onChange={(e) => setForm({ ...form, transportCurrency: e.target.value })}>
@@ -97,42 +87,14 @@ export default function BonsPage() {
               </select></label>
           </div>
 
-          <div className="lines-head">
-            <span>Marchandises confiées au passager</span>
-            <button type="button" className="btn btn-ghost" disabled={!form.fournisseurId} onClick={addLine}>+ Ligne</button>
-          </div>
-          <p className="muted line-hint">
-            Chaque ligne prend tout ou partie d’un bon fournisseur — un même bon passager peut puiser dans plusieurs bons.
-            Le prix saisi est le <strong>prix de revient payé au passager</strong> ; la marge est l’écart avec le prix de vente du fournisseur.
-          </p>
+          <GoodsPicker
+            options={allocatableList}
+            picked={form.lines}
+            currency={form.transportCurrency}
+            loading={allocatable.loading}
+            onChange={(lines) => setForm((f) => ({ ...f, lines }))}
+          />
 
-          {!form.fournisseurId ? (
-            <p className="muted line-hint">Choisissez d’abord un fournisseur pour voir ses marchandises disponibles.</p>
-          ) : allocatableList.length === 0 && !allocatable.loading ? (
-            <p className="muted line-hint">Aucune marchandise disponible : tous les bons de ce fournisseur sont déjà confiés.</p>
-          ) : (
-            form.lines.map((l, i) => (
-              <SourceLineEditor
-                key={i}
-                line={l}
-                options={allocatableList}
-                currency={form.transportCurrency}
-                onPatch={(nl) => setLine(i, nl)}
-                onRemove={() => removeLine(i)}
-                removable={form.lines.length > 1}
-                autoFocus={i === form.lines.length - 1}
-              />
-            ))
-          )}
-
-          <div className="form-total">
-            <span>À payer au passager</span>
-            <strong>{formatMoney(total, form.transportCurrency)}</strong>
-          </div>
-          <div className="form-total form-total-sub">
-            <span>Marge estimée (vente fournisseur − coût passager)</span>
-            <strong className={margin < 0 ? 'neg' : 'pos'}>{formatMoney(margin, form.transportCurrency)}</strong>
-          </div>
           <div style={{ marginTop: 14 }}>
             <button className="btn btn-gold" disabled={busy || !canSubmit}>{busy ? '…' : 'Créer le bon passager'}</button>
           </div>
@@ -149,13 +111,13 @@ export default function BonsPage() {
       <div className="panel">
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Référence</th><th>Fournisseur</th><th>Passager</th><th>Statut</th><th className="right">À payer</th><th>Date</th><th className="right">Actions</th></tr></thead>
+            <thead><tr><th>Référence</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th><th className="right">À payer</th><th>Date</th><th className="right">Actions</th></tr></thead>
             <tbody>
               {bons.data.bons.map((b) => (
                 <tr key={b.id} className="clickable" onClick={() => navigate(`/bons-passager/${b.id}`)}>
                   <td><span className="gold">{b.reference}</span></td>
-                  <td>{b.fournisseur_name}</td>
                   <td>{b.passager_name || '—'}</td>
+                  <td className="muted">{b.fournisseur_name || '—'}</td>
                   <td><span className={`status-badge ${BON_STATUS[b.status].cls}`}>{BON_STATUS[b.status].label}</span></td>
                   <td className="right">{formatMoney(b.transport_fee, b.transport_currency)}</td>
                   <td>{new Date(b.created_at).toLocaleDateString('fr-FR')}</td>

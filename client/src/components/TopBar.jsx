@@ -11,6 +11,8 @@ import { SettingsMenu, useDismiss } from './SettingsMenu.jsx';
 import { SHORTCUT_LABEL } from './CommandPalette.jsx';
 import { activityLine, entityHref } from './activityLabels.js';
 import { relativeTime } from './SyncCard.jsx';
+import { ConnectionChip } from './ConnectionBanner.jsx';
+import NavArrows from './NavArrows.jsx';
 
 function NotificationsBell() {
   const [open, setOpen] = useState(false);
@@ -83,8 +85,10 @@ function NotificationsBell() {
                   <span className="notif-ico"><IconEl name={icon} /></span>
                   <span className="notif-body">
                     <span className="notif-label">{label}</span>
+                    {/* D'abord DE QUOI il s'agit, ensuite qui l'a fait : dix
+                        lignes « Fiche créée » ne se distinguent que par là. */}
                     <span className="notif-meta">
-                      {n.admin_name}{sub ? ` · ${sub}` : ''}
+                      {[sub, n.admin_name && `par ${n.admin_name}`].filter(Boolean).join(' · ')}
                     </span>
                   </span>
                   <span className="notif-time">{relativeTime(n.created_at)}</span>
@@ -149,6 +153,10 @@ export function TopBar({ onToggleSidebar, onOpenSearch }) {
         <IconEl name="menu" />
       </button>
 
+      {/* Back / forward sit with the other navigation, at the head of the bar —
+          the same place every browser puts them. */}
+      <NavArrows />
+
       <button className="search-trigger" onClick={onOpenSearch}>
         <IconEl name="search" />
         <span>Rechercher un bon, passager, fournisseur…</span>
@@ -156,6 +164,9 @@ export function TopBar({ onToggleSidebar, onOpenSearch }) {
       </button>
 
       <div className="topbar-actions">
+        {/* Only rendered while the connection is down — a permanent reminder
+            that the app is working blind, wherever you are in it. */}
+        <ConnectionChip />
         <NotificationsBell />
         <SettingsMenu compact />
         <UserMenu />

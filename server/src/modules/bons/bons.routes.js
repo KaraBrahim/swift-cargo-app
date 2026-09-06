@@ -33,7 +33,9 @@ const lineSchema = z.object({
 });
 
 const createSchema = z.object({
-  fournisseurId: z.coerce.number().int().positive(),
+  // Only a bon fournisseur names one. A bon passager takes its goods from the
+  // source lines it draws, which may belong to several fournisseurs.
+  fournisseurId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
   passagerId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
   transportCurrency: z.string().trim().toUpperCase().length(3).default('DZD'),
   transportFee: num.optional(),
@@ -54,7 +56,9 @@ const updateSchema = z.object({
 
 bonsRouter.get(
   '/bons',
-  validate({ query: z.object({ status: status.optional(), search: z.string().trim().max(80).optional(), fournisseurId: z.coerce.number().int().positive().optional(), passagerId: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }) }),
+  // Without `orderId` this lists bons PASSAGERS only; with it, the bons held by
+  // that order (see listBons).
+  validate({ query: z.object({ status: status.optional(), search: z.string().trim().max(80).optional(), fournisseurId: z.coerce.number().int().positive().optional(), passagerId: z.coerce.number().int().positive().optional(), orderId: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }) }),
   asyncHandler(async (req, res) => res.json({ bons: await svc.listBons(req.validatedQuery) }))
 );
 

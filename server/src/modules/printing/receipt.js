@@ -21,15 +21,19 @@ const TYPES = { epson: PrinterTypes.EPSON, star: PrinterTypes.STAR, tanca: Print
 // Deliberately not toLocaleString(): recent ICU emits a narrow no-break space as
 // the group separator, which has no place in the printer's code page and comes
 // out as '?'. A plain space always survives.
+//
+// A space groups the digits and a DOT marks the decimals — the same rule the
+// screen follows (client/src/lib/format.js). A receipt that reads 8 000,00
+// beside a screen reading 8 000.00 invites someone to wonder which is right.
 const money = (v, c) => {
   const n = Number(v ?? 0);
   const [int, dec] = Math.abs(n).toFixed(2).split('.');
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `${n < 0 ? '-' : ''}${grouped},${dec}${c ? ' ' + c : ''}`;
+  return `${n < 0 ? '-' : ''}${grouped}.${dec}${c ? ' ' + c : ''}`;
 };
 const qty = (v) => {
   const n = Number(v ?? 0);
-  return (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')).replace('.', ',');
+  return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 };
 const dt = (v) => {
   if (!v) return '-';
@@ -126,7 +130,10 @@ export function bonReceipt({ bon, societe, cfg }) {
   const cur = bon.transport_currency;
   header(p, societe, 'Bon passager', bon.reference);
 
-  kv(p, 'Fournisseur', bon.fournisseur_name);
+  // Un bon passager peut porter la marchandise de plusieurs fournisseurs : on
+  // les nomme tous, sinon le ticket désigne le mauvais propriétaire.
+  const fournisseurs = (bon.fournisseurs || []).map((f) => f.name).join(', ');
+  kv(p, fournisseurs.includes(',') ? 'Fournisseurs' : 'Fournisseur', fournisseurs || bon.fournisseur_name || '-');
   kv(p, 'Passager', bon.passager_name);
   kv(p, 'Statut', STATUS_FR[bon.status] || bon.status);
   kv(p, 'Cree le', dt(bon.created_at));

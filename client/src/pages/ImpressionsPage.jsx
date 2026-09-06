@@ -81,11 +81,12 @@ const DOCS = {
   },
   compte: {
     label: 'Relevé de compte', icon: 'passager', group: 'Finance',
-    hint: 'Compte d’un fournisseur ou d’un passager.',
+    hint: 'Compte d’une personne — fournisseur, passager, ou les deux.',
     person: true,
-    list: (personType) => (personType === 'fournisseur' ? '/fournisseurs' : '/passagers'),
-    options: (d) => ((d.fournisseurs ?? d.passagers) ?? []).map((p) => ({ id: p.id, label: p.name || p.full_name })),
-    load: (id, { personType }) => api(`/reports/person/${personType}/${id}?currency=DZD`),
+    // Un seul compte par personne : plus de type à choisir avant le nom.
+    list: (role) => `/people${role ? `?role=${role}` : ''}`,
+    options: (d) => (d.people ?? []).map((p) => ({ id: p.id, label: p.name })),
+    load: (id) => api(`/reports/person/personne/${id}?currency=DZD`),
     title: (d) => `Relevé ${d.person.name}`,
     docTitle: 'Relevé de compte',
     a4: personStatementBody,
@@ -160,18 +161,18 @@ const LISTS = {
     totals: (rows) => [{ label: 'TOTAL', value: formatMoney(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }],
   },
   'liste-fournisseurs': {
-    label: 'Répertoire fournisseurs', icon: 'fournisseur', group: 'Listes', endpoint: '/fournisseurs',
-    pick: (d) => d.fournisseurs ?? [],
+    label: 'Répertoire fournisseurs', icon: 'fournisseur', group: 'Listes', endpoint: '/people?role=fournisseur',
+    pick: (d) => d.people ?? [],
     columns: [
       { key: 'name', label: 'Nom' }, { key: 'phone', label: 'Téléphone' },
-      { key: 'city', label: 'Ville' }, { key: 'notes', label: 'Notes' },
+      { key: 'notes', label: 'Notes' },
     ],
   },
   'liste-passagers': {
-    label: 'Répertoire passagers', icon: 'passager', group: 'Listes', endpoint: '/passagers',
-    pick: (d) => d.passagers ?? [],
+    label: 'Répertoire passagers', icon: 'passager', group: 'Listes', endpoint: '/people?role=passager',
+    pick: (d) => d.people ?? [],
     columns: [
-      { key: 'full_name', label: 'Nom' }, { key: 'type', label: 'Type' },
+      { key: 'name', label: 'Nom' }, { key: 'passager_type', label: 'Type' },
       { key: 'phone', label: 'Téléphone' }, { key: 'notes', label: 'Notes' },
     ],
   },
@@ -191,7 +192,7 @@ export default function ImpressionsPage() {
   const toast = useToast();
   const [doc, setDoc] = useState('bon');
   const [target, setTarget] = useState('');
-  const [personType, setPersonType] = useState('fournisseur');
+  const [personType, setPersonType] = useState('');
   const [period, setPeriod] = useState('mois');
   const [format, setFormat] = useState('a4');
   const [busy, setBusy] = useState(false);
@@ -290,10 +291,11 @@ export default function ImpressionsPage() {
         <h2 className="panel-title">2. {needsTarget ? 'Choisir la cible et le format' : 'Choisir le format'}</h2>
         <div className="op-form">
           {spec?.person && (
-            <label className="field"><span>Type</span>
+            <label className="field"><span>Filtrer par rôle</span>
               <select value={personType} onChange={(e) => { setPersonType(e.target.value); setTarget(''); }}>
-                <option value="fournisseur">Fournisseur</option>
-                <option value="passager">Passager</option>
+                <option value="">Toutes les personnes</option>
+                <option value="fournisseur">Fournisseurs</option>
+                <option value="passager">Passagers</option>
               </select></label>
           )}
 

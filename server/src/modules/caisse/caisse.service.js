@@ -7,7 +7,7 @@ import { Decimal, parseAmount, money } from '../../lib/money.js';
 import { convert } from '../../lib/rates.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
-import { getCurrentRates } from '../rates/rates.service.js';
+import { getCurrentRates, directRateFor } from '../rates/rates.service.js';
 
 const DZD_SCALE = 2;
 
@@ -66,7 +66,13 @@ export async function listCaisses() {
        FROM caisses c
        LEFT JOIN caisse_balances b ON b.caisse_id = c.id
       GROUP BY c.id
-      ORDER BY c.kind, c.id`
+      -- Algeria first: it is the office the money is managed from day to day,
+      -- so it should be the caisse in front of you and the default in every
+      -- selector. This one ORDER BY drives the cards, the dropdowns and the
+      -- transfer form alike — the client renders in the order it receives.
+      ORDER BY c.kind,
+               CASE c.office WHEN 'algeria' THEN 0 WHEN 'china' THEN 1 ELSE 2 END,
+               c.id`
   );
   return rows;
 }
@@ -82,6 +88,30 @@ export async function getCaisseDetail(caisseId) {
   return { ...caisse, balances };
 }
 
+// Who has moved money in this caisse, and how often — the tabs above the
+// movements are built from this rather than from the list of all admins, so a
+// colleague who never touched this till does not get an empty tab.
+//
+// The super-admin is left out for everyone, including a super-admin viewer:
+// there is to be no tab bearing that name. Their movements stay in "Tous",
+// where the balance needs them and where the name is already masked.
+export async function ledgerActors(caisseId, db = getPool()) {
+  const [{ rows }, { rows: totals }] = await Promise.all([
+    db.query(
+      `SELECT t.admin_id, a.full_name, COUNT(*)::int AS n
+         FROM transactions t JOIN admins a ON a.id = t.admin_id
+        WHERE t.caisse_id = $1 AND a.role <> 'superadmin'
+        GROUP BY t.admin_id, a.full_name
+        ORDER BY a.full_name`,
+      [caisseId]
+    ),
+    // "Tous" counts every movement, including the ones the tabs leave out, so
+    // the number matches the rows actually listed under it.
+    db.query('SELECT COUNT(*)::int AS n FROM transactions WHERE caisse_id = $1', [caisseId]),
+  ]);
+  return { actors: rows, total: totals[0].n };
+}
+
 export async function ledger(caisseId, { limit = 100, currency, adminId } = {}) {
   const params = [caisseId, limit];
   let where = 'WHERE t.caisse_id = $1';
@@ -94,7 +124,7 @@ export async function ledger(caisseId, { limit = 100, currency, adminId } = {}) 
     where += ` AND t.admin_id = $${params.length}`;
   }
   const { rows } = await getPool().query(
-    `SELECT t.*, a.full_name AS admin_name
+    `SELECT t.*, a.full_name AS admin_name, a.role AS admin_role
        FROM transactions t JOIN admins a ON a.id = t.admin_id
        ${where}
       ORDER BY t.created_at DESC, t.id DESC
@@ -107,14 +137,16 @@ export async function ledger(caisseId, { limit = 100, currency, adminId } = {}) 
 // Reusable single-leg caisse movement for callers that need it inside their OWN
 // transaction (e.g. auto-posting an order's fee/payment atomically with a
 // person-account entry). Locks the balance, guards overdraft, writes the ledger.
-export async function postMovement(client, { caisseId, currency, direction, amount, type, note, adminId }) {
+// `allowNegative` is opt-in and has exactly one caller: confirming a transfer
+// whose sending caisse has since been emptied. See 019_transfer_forced.sql.
+export async function postMovement(client, { caisseId, currency, direction, amount, type, note, adminId, allowNegative = false }) {
   await loadCaisse(client, caisseId);
   const cur = await loadCurrency(client, currency);
   const amt = parseAmount(amount, cur.minor_units);
   const bal = await lockBalance(client, caisseId, currency);
   let newBal;
   if (direction === 'out') {
-    if (bal.lt(amt)) {
+    if (bal.lt(amt) && !allowNegative) {
       throw errors.insufficientFunds({
         currency, available: money(bal, cur.minor_units), required: money(amt, cur.minor_units),
       });
@@ -136,6 +168,21 @@ export async function postMovement(client, { caisseId, currency, direction, amou
 // invalidates every later row of the same caisse+currency. Rather than patch a
 // single row, replay the whole chain from the movements themselves — and refuse
 // if the replay would ever drive the till negative.
+// A caisse that was deliberately forced negative (a transfer confirmed while its
+// origin was empty) must stay CORRECTABLE — otherwise the missing deposit that
+// would repair it could never be entered, and the caisse would be frozen at a
+// wrong figure forever. So the negative-balance guard below refuses a dip an
+// operation CREATES, but steps aside on a caisse whose dip is already explained.
+async function hasForcedTransfer(c, caisseId, currency) {
+  const { rows } = await c.query(
+    `SELECT 1 FROM office_transfers
+      WHERE forced AND currency_code = $2 AND (sent_caisse_id = $1 OR received_caisse_id = $1)
+      LIMIT 1`,
+    [caisseId, currency]
+  );
+  return rows.length > 0;
+}
+
 export async function replayChain(c, caisseId, currency) {
   const { rows } = await c.query(
     `WITH ordered AS (
@@ -146,7 +193,7 @@ export async function replayChain(c, caisseId, currency) {
      SELECT id, running FROM ordered ORDER BY running ASC LIMIT 1`,
     [caisseId, currency]
   );
-  if (rows[0] && new Decimal(rows[0].running).lt(0)) {
+  if (rows[0] && new Decimal(rows[0].running).lt(0) && !(await hasForcedTransfer(c, caisseId, currency))) {
     throw errors.conflict('Opération refusée : le solde de la caisse deviendrait négatif à un moment de son historique.');
   }
   await c.query(
@@ -175,7 +222,7 @@ async function loadEditableTx(c, id) {
   const tx = rows[0];
   if (!tx) throw errors.notFound('Opération introuvable.');
   if (tx.ref_conversion_id) throw errors.conflict('Cette opération fait partie d’une conversion : modifiez la conversion elle-même.');
-  if (tx.ref_transfer_id) throw errors.conflict('Cette opération fait partie d’un transfert : modifiez le transfert dans « Transferts inter-bureaux ».');
+  if (tx.ref_transfer_id) throw errors.conflict('Cette opération fait partie d’un transfert : modifiez-le depuis « Transferts ».');
   if (!['deposit', 'withdrawal', 'adjustment'].includes(tx.type)) {
     throw errors.conflict('Cette opération provient d’un bon : modifiez-la depuis le bon concerné.');
   }
@@ -216,7 +263,7 @@ export async function deleteMovement({ admin, id, ip }) {
 
 export async function listConversions(caisseId, { limit = 100 } = {}) {
   const { rows } = await getPool().query(
-    `SELECT cv.*, a.full_name AS admin_name
+    `SELECT cv.*, a.full_name AS admin_name, a.role AS admin_role
        FROM conversions cv JOIN admins a ON a.id = cv.admin_id
       WHERE cv.caisse_id = $1
       ORDER BY cv.created_at DESC, cv.id DESC LIMIT $2`,
@@ -332,9 +379,14 @@ export async function convertCurrency({ admin, caisseId, fromCurrency, toCurrenc
     if (fromRate == null) throw errors.noRate(fromCurrency);
     if (toRate == null) throw errors.noRate(toCurrency);
 
-    const { dzdValue, toAmount, effectiveRate } = convert({
+    // A pair quoted by hand is the price this house trades at; without one the
+    // conversion routes through the dinar exactly as it always has.
+    const directRate = await directRateFor(client, fromCurrency, toCurrency);
+
+    const { dzdValue, toAmount, effectiveRate, toRateDzd } = convert({
       fromAmount: amt, fromRateDzd: fromRate, toRateDzd: toRate,
       fromCode: fromCurrency, toCode: toCurrency, toScale: toCur.minor_units,
+      directRate,
     });
     if (toAmount.lte(0)) {
       throw errors.invalidAmount('Montant converti trop faible (arrondi à zéro).');
@@ -363,8 +415,11 @@ export async function convertCurrency({ admin, caisseId, fromCurrency, toCurrenc
          (caisse_id, from_currency, to_currency, from_amount, to_amount,
           from_rate_dzd, to_rate_dzd, dzd_value, effective_rate, admin_id, note)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      // to_rate_dzd is what convert() returns, not the board rate: with a quoted
+      // pair they differ, and storing the board rate would leave the row saying
+      // to_amount = dzd_value / to_rate_dzd when it does not.
       [caisseId, fromCurrency, toCurrency, money(amt, fromCur.minor_units),
-       money(toAmount, toCur.minor_units), fromRate, toRate, money(dzdValue, DZD_SCALE),
+       money(toAmount, toCur.minor_units), fromRate, toRateDzd.toFixed(8), money(dzdValue, DZD_SCALE),
        effectiveRate.toFixed(8), admin.id, note ?? null]
     );
     const conversion = conv.rows[0];
@@ -383,7 +438,8 @@ export async function convertCurrency({ admin, caisseId, fromCurrency, toCurrenc
       details: {
         caisseId, fromCurrency, toCurrency, from_amount: money(amt, fromCur.minor_units),
         to_amount: money(toAmount, toCur.minor_units), dzd_value: money(dzdValue, DZD_SCALE),
-        from_rate_dzd: fromRate, to_rate_dzd: toRate,
+        from_rate_dzd: fromRate, to_rate_dzd: toRateDzd.toFixed(8),
+        ...(directRate ? { taux_paire: String(directRate) } : {}),
       }, ip,
     });
 
@@ -394,52 +450,8 @@ export async function convertCurrency({ admin, caisseId, fromCurrency, toCurrenc
   });
 }
 
-// Same-currency transfer between two caisses (e.g. admin -> global).
-export async function transfer({ admin, fromCaisseId, toCaisseId, currency, amount, note, ip }) {
-  if (fromCaisseId === toCaisseId) {
-    throw errors.validation([{ field: 'toCaisseId', message: 'Caisses source et cible identiques.' }]);
-  }
-  return withTx(async (client) => {
-    await loadCaisse(client, fromCaisseId);
-    await loadCaisse(client, toCaisseId);
-    const cur = await loadCurrency(client, currency);
-    const amt = parseAmount(amount, cur.minor_units);
+// The instant caisse-to-caisse transfer that used to live here is gone. Every
+// caisse belongs to exactly one office, so a transfer between two caisses IS a
+// transfer between two offices — one feature, not two — and it must not move
+// money before the receiving side confirms it. See modules/transfers.
 
-    // Lock in ascending caisse-id order to avoid deadlocks.
-    const [firstId, secondId] = [fromCaisseId, toCaisseId].sort((a, b) => a - b);
-    const balances = {};
-    balances[firstId] = await lockBalance(client, firstId, currency);
-    balances[secondId] = await lockBalance(client, secondId, currency);
-
-    if (balances[fromCaisseId].lt(amt)) {
-      throw errors.insufficientFunds({
-        currency, caisseId: fromCaisseId,
-        available: money(balances[fromCaisseId], cur.minor_units),
-        required: money(amt, cur.minor_units),
-      });
-    }
-
-    const newFrom = money(balances[fromCaisseId].minus(amt), cur.minor_units);
-    const newTo = money(balances[toCaisseId].plus(amt), cur.minor_units);
-    await setBalance(client, fromCaisseId, currency, newFrom);
-    await setBalance(client, toCaisseId, currency, newTo);
-
-    const outId = await insertTx(client, {
-      caisseId: fromCaisseId, currency, direction: 'out', amount: money(amt, cur.minor_units),
-      balanceAfter: newFrom, type: 'transfer', note, adminId: admin.id,
-    });
-    const inId = await insertTx(client, {
-      caisseId: toCaisseId, currency, direction: 'in', amount: money(amt, cur.minor_units),
-      balanceAfter: newTo, type: 'transfer', refTransferId: outId, note, adminId: admin.id,
-    });
-    await client.query('UPDATE transactions SET ref_transfer_id = $1 WHERE id = $2', [outId, outId]);
-
-    await writeAudit(client, {
-      adminId: admin.id, action: 'caisse.transfer', entity: 'transaction', entityId: outId,
-      details: { fromCaisseId, toCaisseId, currency, amount: money(amt, cur.minor_units) }, ip,
-    });
-
-    return { fromTransactionId: outId, toTransactionId: inId,
-      balances: { [fromCaisseId]: newFrom, [toCaisseId]: newTo } };
-  });
-}

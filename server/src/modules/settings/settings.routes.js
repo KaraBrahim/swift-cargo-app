@@ -13,6 +13,7 @@ import { getPool, withTx } from '../../db/pool.js';
 import { writeAudit } from '../../lib/audit.js';
 import { errors } from '../../lib/AppError.js';
 import { PRINT_DEFAULTS } from '../printing/printing.service.js';
+import { TAUX_DEFAULTS, alignAlpToCny } from '../rates/rates.service.js';
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -33,6 +34,12 @@ const SCHEMAS = {
       telephone: '',
       pied_de_page: 'Document généré par Swift Cargo',
     },
+  },
+  // Alipay yuan and cash yuan are the same money here, so the app keeps them
+  // equal rather than trusting two humans to remember. See rates.service.js.
+  taux: {
+    schema: z.object({ alp_suit_cny: z.boolean() }),
+    defaults: TAUX_DEFAULTS,
   },
   // Unlike the theme, this IS shared server state — but each desk runs its own
   // server, so "shared" already means "this desk and its printer".
@@ -92,6 +99,12 @@ settingsRouter.put(
         adminId: req.admin.id, action: 'settings.update', entity: 'app_setting',
         entityId: req.params.key, details: parsed.data, ip: req.ip,
       });
+      // Switching the link on has to make the claim true immediately: leaving
+      // ALP on its old value until the next CNY change would mean the setting
+      // says one thing and the rates say another.
+      if (req.params.key === 'taux' && parsed.data.alp_suit_cny) {
+        await alignAlpToCny(c, { adminId: req.admin.id, ip: req.ip });
+      }
       return parsed.data;
     });
 

@@ -31,7 +31,7 @@ reportsRouter.get(
 reportsRouter.get(
   '/reports/person/:type/:id',
   validate({
-    params: z.object({ type: z.enum(['fournisseur', 'passager']), id: z.coerce.number().int().positive() }),
+    params: z.object({ type: z.enum(['personne', 'utilisateur']), id: z.coerce.number().int().positive() }),
     query: z.object({ currency }),
   }),
   asyncHandler(async (req, res) => {

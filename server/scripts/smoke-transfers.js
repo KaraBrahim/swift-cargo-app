@@ -41,18 +41,21 @@ try {
 
   await call('POST', `/api/caisses/${china.id}/deposit`, { currency: 'DZD', amount: '10000' }, 201);
 
-  const t = (await call('POST', '/api/office-transfers', { fromCaisseId: china.id, toOffice: 'algeria', currency: 'DZD', amount: '4000' }, 201)).transfer;
+  const t = (await call('POST', '/api/office-transfers', { fromCaisseId: china.id, toCaisseId: algeria.id, currency: 'DZD', amount: '4000' }, 201)).transfer;
   out.push(`Transfert créé: ${t.reference}, statut ${t.status}`);
-  chk('caisse Chine après envoi', dzd((await call('GET', `/api/caisses/${china.id}`)).caisse), '6000.00');
+  // Sending moves nothing at all now — both tills must be untouched until the
+  // destination confirms.
+  chk('caisse Chine après envoi (inchangée)', dzd((await call('GET', `/api/caisses/${china.id}`)).caisse), '10000.00');
   chk('caisse Algérie avant réception', dzd((await call('GET', `/api/caisses/${algeria.id}`)).caisse), '0.00');
 
-  await call('POST', `/api/office-transfers/${t.id}/receive`, { toCaisseId: algeria.id });
+  await call('POST', `/api/office-transfers/${t.id}/receive`, {});
+  chk('caisse Chine après réception', dzd((await call('GET', `/api/caisses/${china.id}`)).caisse), '6000.00');
   chk('caisse Algérie après réception', dzd((await call('GET', `/api/caisses/${algeria.id}`)).caisse), '4000.00');
   const list = (await call('GET', '/api/office-transfers?status=recu')).transfers;
   chk('transfert marqué reçu', list[0]?.status, 'recu');
 
   // Guard: receiving again is rejected
-  await call('POST', `/api/office-transfers/${t.id}/receive`, { toCaisseId: algeria.id }, 409);
+  await call('POST', `/api/office-transfers/${t.id}/receive`, {}, 409);
 
   console.log(out.join('\n'));
   console.log(out.every((l) => !l.startsWith('XX')) ? '\nSMOKE-TRANSFERS PASSED' : '\nSMOKE-TRANSFERS FAILED');

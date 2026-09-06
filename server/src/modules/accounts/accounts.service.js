@@ -1,4 +1,4 @@
-// Per-person accounts for fournisseurs & passagers. Append-only ledger; the
+// Per-person accounts. Append-only ledger; the
 // balance is the running sum. Convention: balance = net the BUSINESS OWES the
 // person (payable > 0, receivable < 0). appendEntry runs inside a caller's tx so
 // it posts atomically with the caisse movement that caused it.
@@ -68,9 +68,11 @@ export async function replayPersonLedger(c, personType, personId, currency) {
 }
 
 export async function getAccount(personType, personId) {
-  const table = PERSON_TABLE[personType] ?? 'passagers';
-  const nameCol = personType === 'fournisseur' ? 'name' : 'full_name';
-  // Full profile record (phone, city/type, notes, created_at) + a display name.
+  const table = PERSON_TABLE[personType] ?? 'people';
+  // `admins` names the column full_name, `people` names it name. Both come back
+  // as `name`, so a caller never has to know which table answered.
+  const nameCol = table === 'admins' ? 'full_name' : 'name';
+  // Full profile record (phone, roles, notes, created_at) + a display name.
   const { rows: person } = await getPool().query(
     `SELECT *, ${nameCol} AS name FROM ${table} WHERE id=$1`, [personId]
   );
@@ -84,7 +86,7 @@ export async function getAccount(personType, personId) {
       [personType, personId]
     ),
     getPool().query(
-      `SELECT pl.*, a.full_name AS admin_name,
+      `SELECT pl.*, a.full_name AS admin_name, a.role AS admin_role,
               o.reference AS order_reference, b.reference AS bon_reference
          FROM person_ledger pl
          JOIN admins a ON a.id = pl.admin_id
@@ -95,34 +97,46 @@ export async function getAccount(personType, personId) {
       [personType, personId]
     ),
   ]);
-  // NOTE: keep the row's own `type` column (passager: regular|auto) intact —
-  // expose the person kind separately as `person_type`.
+  // NOTE: keep the row's own `passager_type` (regular|auto) intact — expose the
+  // ledger's person kind separately as `person_type`.
   return { person: { ...person[0], person_type: personType }, balances: balances.rows, entries: entries.rows };
 }
 
 // Settle a person's running balance from their profile, independently of any one
-// bon — a fournisseur paying down their debt, or us paying a passager what we
-// owe. Cash moves through an office caisse and the ledger entry closes the gap.
-// Direction is implied by who they are: fournisseurs pay IN, passagers are paid OUT.
-export async function settleAccount({ admin, personType, personId, caisseId, amount, currency = 'DZD', note, ip }) {
-  const table = personType === 'fournisseur' ? 'fournisseurs' : 'passagers';
+// bon — them paying down what they owe, or us paying what we owe them. Cash
+// moves through an office caisse and the ledger entry closes the gap.
+//
+// The direction can no longer be read off the person: the same human may owe as
+// a fournisseur and be owed as a passager. The caller states it; left unsaid it
+// follows the sign of the balance — negative means they owe us, so money comes
+// IN — which is exactly what the button on the profile offers.
+export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, note, ip }) {
+  const personType = 'personne';
   return withTx(async (c) => {
-    const person = await c.query(`SELECT 1 FROM ${table} WHERE id=$1 AND active=TRUE`, [personId]);
+    const person = await c.query('SELECT 1 FROM people WHERE id=$1 AND active=TRUE', [personId]);
     if (!person.rows.length) throw errors.notFound('Personne introuvable ou inactive.');
 
     const amt = new Decimal(amount);
     if (!amt.gt(0)) throw errors.invalidAmount('Le montant doit être supérieur à zéro.');
     if (amt.decimalPlaces() > 2) throw errors.invalidAmount('Montant : maximum 2 décimales.');
 
-    const incoming = personType === 'fournisseur';
+    let incoming;
+    if (direction === 'in' || direction === 'out') incoming = direction === 'in';
+    else {
+      const { rows } = await c.query(
+        'SELECT balance FROM person_balances WHERE person_type=$1 AND person_id=$2 AND currency_code=$3',
+        [personType, personId, currency]
+      );
+      incoming = new Decimal(rows[0]?.balance ?? 0).lte(0);
+    }
     const { txId } = await postMovement(c, {
       caisseId, currency, direction: incoming ? 'in' : 'out', amount: amt.toFixed(2),
       type: incoming ? 'order_fee' : 'passager_payment',
-      note: note ?? (incoming ? 'Règlement dette fournisseur' : 'Paiement passager'),
+      note: note ?? (incoming ? 'Règlement de dette' : 'Paiement'),
       adminId: admin.id,
     });
-    // Paying a fournisseur's debt moves their (negative) balance up; paying a
-    // passager moves their (positive) balance down.
+    // Money received moves a negative balance up; money paid moves a positive
+    // balance down. One account, whichever role the movement came from.
     const entry = await appendEntry(c, {
       personType, personId, currency,
       amount: incoming ? amt.toFixed(2) : amt.negated().toFixed(2),
@@ -130,22 +144,23 @@ export async function settleAccount({ admin, personType, personId, caisseId, amo
       caisseTxId: txId, adminId: admin.id, note,
     });
     await writeAudit(c, {
-      adminId: admin.id, action: `${personType}.settle`, entity: personType, entityId: personId,
+      adminId: admin.id, action: 'person.settle', entity: 'person', entityId: personId,
       details: { amount: amt.toFixed(2), currency, caisseId }, ip,
     });
     return { entry, balance: entry.balance_after };
   });
 }
 
-// Totals for the dashboard: receivables (fournisseurs owe us) and payables (we owe
-// passagers), per currency.
 // ── Generic person transaction ───────────────────────────────────────
-// Beyond the automatic bon flows, any person — fournisseur, passager, or an
-// utilisateur (admin: advance, salary, reimbursement) — can receive a free-form
-// entry. `direction` says which way the cash goes: 'in' = they hand money over,
-// 'out' = the business pays them. Passing a caisse makes it a real cash movement;
-// omitting it books a paper entry only (a due, a correction).
-const PERSON_TABLE = { fournisseur: 'fournisseurs', passager: 'passagers', utilisateur: 'admins' };
+// Beyond the automatic bon flows, any person — or an utilisateur (admin:
+// advance, salary, reimbursement) — can receive a free-form entry. `direction`
+// says which way the cash goes: 'in' = they hand money over, 'out' = the
+// business pays them. Passing a caisse makes it a real cash movement; omitting
+// it books a paper entry only (a due, a correction).
+//
+// 'personne' covers fournisseurs and passagers alike — since migration 022 they
+// are two roles of one record. 'utilisateur' stays apart: that is an admin.
+const PERSON_TABLE = { personne: 'people', utilisateur: 'admins' };
 
 export async function createPersonTransaction({
   admin, personType, personId, direction, amount, currency = 'DZD',
@@ -198,7 +213,7 @@ export async function listCharges({ category, period, limit = 200 } = {}) {
   if (period) { params.push(period); conds.push(`ch.period = $${params.length}`); }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   const { rows } = await getPool().query(
-    `SELECT ch.*, c.label AS caisse_label, a.full_name AS admin_name
+    `SELECT ch.*, c.label AS caisse_label, a.full_name AS admin_name, a.role AS admin_role
        FROM charges ch
        JOIN caisses c ON c.id = ch.caisse_id
        JOIN admins a ON a.id = ch.admin_id
@@ -337,19 +352,17 @@ export async function deletePayment({ admin, entryId, ip }) {
   });
 }
 
-// Every open obligation, both directions: what fournisseurs still owe us and
-// what we still owe passagers. Balance convention: > 0 = we owe them.
+// Every open obligation, both directions: what people still owe us and what we
+// still owe them. Balance convention: > 0 = we owe them.
 export async function listDebts() {
   const { rows } = await getPool().query(
     `SELECT pb.person_type, pb.person_id, pb.currency_code, pb.balance,
-            COALESCE(f.name, p.full_name) AS person_name,
-            COALESCE(f.phone, p.phone) AS phone,
+            pe.name AS person_name, pe.phone, pe.is_fournisseur, pe.is_passager,
             (SELECT MAX(pl.created_at) FROM person_ledger pl
               WHERE pl.person_type = pb.person_type AND pl.person_id = pb.person_id
                 AND pl.currency_code = pb.currency_code) AS last_activity
        FROM person_balances pb
-       LEFT JOIN fournisseurs f ON pb.person_type='fournisseur' AND f.id = pb.person_id
-       LEFT JOIN passagers    p ON pb.person_type='passager'    AND p.id = pb.person_id
+       LEFT JOIN people pe ON pb.person_type='personne' AND pe.id = pb.person_id
       WHERE pb.balance <> 0
       ORDER BY ABS(pb.balance) DESC`
   );
@@ -371,13 +384,12 @@ export async function listPayments({ personType, limit = 200 } = {}) {
   const { rows } = await getPool().query(
     `SELECT pl.id, pl.person_type, pl.person_id, pl.type, pl.amount, pl.currency_code,
             pl.created_at, pl.note, pl.caisse_tx_id,
-            COALESCE(f.name, p.full_name) AS person_name,
-            a.full_name AS admin_name, c.label AS caisse_label,
+            pe.name AS person_name,
+            a.full_name AS admin_name, a.role AS admin_role, c.label AS caisse_label,
             b.reference AS bon_reference, b.id AS bon_id
        FROM person_ledger pl
        JOIN admins a ON a.id = pl.admin_id
-       LEFT JOIN fournisseurs f ON pl.person_type='fournisseur' AND f.id = pl.person_id
-       LEFT JOIN passagers    p ON pl.person_type='passager'    AND p.id = pl.person_id
+       LEFT JOIN people pe ON pl.person_type='personne' AND pe.id = pl.person_id
        LEFT JOIN transactions t ON t.id = pl.caisse_tx_id
        LEFT JOIN caisses c ON c.id = t.caisse_id
        LEFT JOIN bons b ON b.id = pl.ref_bon_id
@@ -395,9 +407,11 @@ export async function listPayments({ personType, limit = 200 } = {}) {
 
 export async function getSummary() {
   const { rows } = await getPool().query(
+    // By the sign, not by the role: one person can owe you as a fournisseur and
+    // be owed as a passager, and their balance is already that net.
     `SELECT currency_code,
-            SUM(CASE WHEN person_type='fournisseur' AND balance < 0 THEN -balance ELSE 0 END) AS receivable,
-            SUM(CASE WHEN person_type='passager'   AND balance > 0 THEN  balance ELSE 0 END) AS payable
+            SUM(CASE WHEN balance < 0 THEN -balance ELSE 0 END) AS receivable,
+            SUM(CASE WHEN balance > 0 THEN  balance ELSE 0 END) AS payable
        FROM person_balances GROUP BY currency_code`
   );
   const receivables = {}, payables = {};

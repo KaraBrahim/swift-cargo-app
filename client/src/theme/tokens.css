@@ -89,10 +89,29 @@
   --bg-glow-2: rgba(216, 180, 95, 0.035);
 
   color-scheme: dark;
+  /* The exchange-rate plate. Built from the theme's own surfaces rather than a
+     colour of its own: a card in a different family reads as a different app.
+     It earns its emphasis from depth and the map behind it, not from hue. */
+  --rate-plate-1: var(--surface-1);
+  --rate-plate-2: var(--bg);
+  --rate-plate-edge: var(--border-strong);
+  --rate-glass: rgba(255, 255, 255, 0.035);
+  --rate-glass-edge: rgba(216, 180, 95, 0.16);
+  --rate-map-opacity: 0.15;
 }
+
+
 
 /* ═══ LIGHT ════════════════════════════════════════════════════════ */
 :root[data-mode='light'] {
+  /* Same idea in light mode: the page's own surfaces, one step apart. */
+  --rate-plate-1: var(--surface-1);
+  --rate-plate-2: var(--bg);
+  --rate-plate-edge: var(--border-strong);
+  --rate-glass: rgba(255, 255, 255, 0.72);
+  --rate-glass-edge: rgba(154, 124, 52, 0.18);
+  --rate-map-opacity: 0.09;
+
   --bg: #f4f5f8;
   --surface-1: #ffffff;
   --surface-2: #f7f8fa;

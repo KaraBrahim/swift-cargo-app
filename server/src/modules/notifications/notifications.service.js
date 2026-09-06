@@ -4,24 +4,32 @@
 // office shows up here once it replicates. The only stored state is a per-admin
 // read cursor (notification_cursor).
 import { getPool } from '../../db/pool.js';
+import { notSuperadmin } from '../../lib/visibility.js';
 
 // Sign-ins/outs are not "activity" worth surfacing — same exclusion the
 // dashboard feed uses.
+//
+// The super-admin is excluded outright: a normal admin is notified of what the
+// OTHER normal admins are doing, never of what the super-admin does. The
+// super-admin's own feed is built by superadminFilter() below, which keeps
+// everything.
 const ACTIVITY_FILTER = `al.admin_id <> $1 AND al.action NOT LIKE 'auth.%'`;
+const filterFor = (viewerIsSuperadmin) =>
+  viewerIsSuperadmin ? ACTIVITY_FILTER : `${ACTIVITY_FILTER} AND ${notSuperadmin('al.admin_id')}`;
 
 async function cursorFor(db, adminId) {
   const { rows } = await db.query('SELECT last_seen_id FROM notification_cursor WHERE admin_id = $1', [adminId]);
   return Number(rows[0]?.last_seen_id ?? 0);
 }
 
-export async function listNotifications(adminId, { limit = 20 } = {}, db = getPool()) {
+export async function listNotifications(adminId, { limit = 20, isSuper = false } = {}, db = getPool()) {
   const cursor = await cursorFor(db, adminId);
   const { rows } = await db.query(
     `SELECT al.id, al.action, al.entity, al.entity_id, al.details, al.created_at,
-            a.full_name AS admin_name, (al.id > $2) AS unread
+            a.full_name AS admin_name, a.role AS admin_role, (al.id > $2) AS unread
        FROM audit_log al
        LEFT JOIN admins a ON a.id = al.admin_id
-      WHERE ${ACTIVITY_FILTER}
+      WHERE ${filterFor(isSuper)}
       ORDER BY al.id DESC
       LIMIT $3`,
     [adminId, cursor, limit]
@@ -29,19 +37,19 @@ export async function listNotifications(adminId, { limit = 20 } = {}, db = getPo
   return { notifications: rows, cursor };
 }
 
-export async function unreadCount(adminId, db = getPool()) {
+export async function unreadCount(adminId, isSuper = false, db = getPool()) {
   const cursor = await cursorFor(db, adminId);
   const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS n FROM audit_log al WHERE ${ACTIVITY_FILTER} AND al.id > $2`,
+    `SELECT COUNT(*)::int AS n FROM audit_log al WHERE ${filterFor(isSuper)} AND al.id > $2`,
     [adminId, cursor]
   );
   return rows[0].n;
 }
 
 // Mark everything up to the current newest activity as seen.
-export async function markSeen(adminId, db = getPool()) {
+export async function markSeen(adminId, isSuper = false, db = getPool()) {
   const { rows } = await db.query(
-    `SELECT COALESCE(MAX(al.id), 0) AS max_id FROM audit_log al WHERE ${ACTIVITY_FILTER}`,
+    `SELECT COALESCE(MAX(al.id), 0) AS max_id FROM audit_log al WHERE ${filterFor(isSuper)}`,
     [adminId]
   );
   const maxId = Number(rows[0].max_id);

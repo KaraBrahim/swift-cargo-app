@@ -45,28 +45,45 @@ try {
   chk('nombre de caisses (2 bureaux)', caisses.length, 2);
   const algeria = caisses.find((c) => c.office === 'algeria');
 
-  const f = (await call('POST', '/api/fournisseurs', { name: 'Fourn. Ordre' }, 201)).fournisseur;
-  const p1 = (await call('POST', '/api/passagers', { full_name: 'Passager A' }, 201)).passager;
-  const p2 = (await call('POST', '/api/passagers', { full_name: 'Passager B' }, 201)).passager;
+  const f = (await call('POST', '/api/people', { name: 'Fourn. Ordre', isFournisseur: true }, 201)).person;
+  const p1 = (await call('POST', '/api/people', { name: 'Passager A', isPassager: true }, 201)).person;
+  const p2 = (await call('POST', '/api/people', { name: 'Passager B', isPassager: true }, 201)).person;
 
-  // Order with 2 bons (2 passagers), fees 5000 + 3000 DZD
+  // Le bon fournisseur reçoit la marchandise : la caisse dans laquelle elle
+  // attend qu'un passager l'emporte. Le montant facturé est DÉRIVÉ des lignes
+  // (prix x quantité) : 10 x 500 et 4 x 750.
   const order = (await call('POST', '/api/orders', {
     fournisseurId: f.id,
-    bons: [
-      // The fee is DERIVED from the lines (unit price x quantity), not taken from
-      // `transportFee` - so the lines must carry a price: 10 x 500 and 4 x 750.
-      { passagerId: p1.id, transportCurrency: 'DZD', lines: [{ designation: 'Colis A', measure: 'quantite', value: '10', unitPrice: '500' }] },
-      { passagerId: p2.id, transportCurrency: 'DZD', lines: [{ designation: 'Colis B', measure: 'quantite', value: '4', unitPrice: '750' }] },
-    ],
+    bons: [{ transportCurrency: 'DZD', lines: [
+      { designation: 'Colis A', measure: 'quantite', value: '10', unitPrice: '500' },
+      { designation: 'Colis B', measure: 'quantite', value: '4', unitPrice: '750' },
+    ] }],
   }, 201)).order;
-  out.push(`Ordre créé: ${order.reference}, statut ${order.status}, ${order.bons.length} bons`);
+  const crate = order.bons[0];
+  out.push(`Ordre créé: ${order.reference}, statut ${order.status}, ${order.bons.length} bon`);
   chk('total frais ordre', order.totals.transport_fee, 8000);
 
   // Fournisseur now owes 8000 (receivable => balance -8000)
-  let facc = (await call('GET', `/api/fournisseurs/${f.id}/account`)).account;
+  let facc = (await call('GET', `/api/people/${f.id}/account`)).account;
   chk('solde fournisseur (doit -8000)', facc.balances.find((b) => b.currency_code === 'DZD')?.balance, '-8000.00');
 
-  const [b1, b2] = order.bons;
+  // Deux passagers se partagent la marchandise : un lot chacun. Le statut de
+  // l'ordre suit ces bons-là — ce sont eux qui voyagent.
+  const lots = (await call('GET', '/api/bons/allocatable')).lines;
+  const lotA = lots.find((l) => l.designation === 'Colis A');
+  const lotB = lots.find((l) => l.designation === 'Colis B');
+  chk('lots disponibles après réception', lots.length, 2);
+
+  const b1 = (await call('POST', '/api/bons', {
+    passagerId: p1.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: lotA.line_id, measure: 'quantite', value: '10', unitPrice: '500' }],
+  }, 201)).bon;
+  const b2 = (await call('POST', '/api/bons', {
+    passagerId: p2.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: lotB.line_id, measure: 'quantite', value: '4', unitPrice: '750' }],
+  }, 201)).bon;
+  chk('un bon passager n\u2019appartient \u00e0 aucun fournisseur', b1.fournisseur_id, null);
+
   for (const b of [b1, b2]) {
     await call('POST', `/api/bons/${b.id}/advance`, {}); // -> en_transit
     await call('POST', `/api/bons/${b.id}/advance`, {}); // -> arrive
@@ -80,17 +97,19 @@ try {
   chk('statut ordre après règlement', ord2.status, 'cloturee');
 
   // Passager A is owed 5000
-  let pacc = (await call('GET', `/api/passagers/${p1.id}/account`)).account;
+  let pacc = (await call('GET', `/api/people/${p1.id}/account`)).account;
   chk('solde passager A (dû +5000)', pacc.balances.find((b) => b.currency_code === 'DZD')?.balance, '5000.00');
 
-  // Collect 5000 fee from fournisseur into Algeria caisse
-  await call('POST', `/api/bons/${b1.id}/collect-fee`, { caisseId: algeria.id, amount: '5000' });
-  facc = (await call('GET', `/api/fournisseurs/${f.id}/account`)).account;
+  // Le fournisseur règle 5 000 des 8 000 : sur SON bon, le seul qui porte une
+  // dette — un bon passager n'a jamais rien facturé.
+  await call('POST', `/api/bons/${crate.id}/collect-fee`, { caisseId: algeria.id, amount: '5000' });
+  await call('POST', `/api/bons/${b1.id}/collect-fee`, { caisseId: algeria.id, amount: '100' }, 409);
+  facc = (await call('GET', `/api/people/${f.id}/account`)).account;
   chk('solde fournisseur après encaissement 5000', facc.balances.find((b) => b.currency_code === 'DZD')?.balance, '-3000.00');
 
   // Pay passager A from Algeria caisse
   await call('POST', `/api/bons/${b1.id}/pay-passager`, { caisseId: algeria.id });
-  pacc = (await call('GET', `/api/passagers/${p1.id}/account`)).account;
+  pacc = (await call('GET', `/api/people/${p1.id}/account`)).account;
   chk('solde passager A après paiement', pacc.balances.find((b) => b.currency_code === 'DZD')?.balance, '0.00');
 
   // Algeria caisse DZD = +5000 (fee) - 5000 (payment) = 0

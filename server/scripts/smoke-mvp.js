@@ -41,8 +41,8 @@ try {
 
   token = (await call('POST', '/api/auth/login', { username: 'admin1', password: config.seedAdminPassword })).token;
 
-  const f = (await call('POST', '/api/fournisseurs', { name: 'Fournisseur Test', phone: '0550', city: 'Guangzhou' }, 201)).fournisseur;
-  const p = (await call('POST', '/api/passagers', { type: 'regular', full_name: 'Passager Test', phone: '0770' }, 201)).passager;
+  const f = (await call('POST', '/api/people', { name: 'Fournisseur Test', phone: '0550', isFournisseur: true }, 201)).person;
+  const p = (await call('POST', '/api/people', { name: 'Passager Test', phone: '0770', isPassager: true, passagerType: 'regular' }, 201)).person;
 
   const cat = (await call('POST', '/api/stock/categories', { name: 'Électronique' }, 201)).category;
   const item = (await call('POST', '/api/stock/items', { category_id: cat.id, name: 'Téléphone' }, 201)).item;

@@ -2,6 +2,8 @@
 // or CBM) — the user chooses one and fills only that value. Used by both the bon
 // fournisseur (OrdersPage) and bon passager (BonsPage) forms.
 import { ArticlePicker } from './ArticlePicker.jsx';
+import AmountInput from './AmountInput.jsx';
+import { formatNumber, formatQty } from '../lib/format.js';
 
 export const emptyLine = () => ({
   designation: '', itemId: null, createItem: false, categoryId: '',
@@ -41,7 +43,7 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
     <div className="line-editor">
       <div className="line-article">
         <ArticlePicker line={line} items={items} categories={categories} onPatch={patch} autoFocus={autoFocus} allowCreate={allowCreate} />
-        {avail != null && <span className="line-avail">Disponible : {Number(avail).toLocaleString('fr-FR', { maximumFractionDigits: 3 })}</span>}
+        {avail != null && <span className="line-avail">Disponible : {formatQty(avail)}</span>}
       </div>
 
       <div className="line-measure">
@@ -58,12 +60,11 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
           ))}
         </div>
 
-        <input
+        <AmountInput decimals={3}
           className="line-value"
-          inputMode="decimal"
           placeholder={line.measure === 'quantite' ? 'Qté' : line.measure === 'poids' ? 'kg' : 'm³'}
           value={line.value}
-          onChange={(e) => patch({ value: e.target.value.replace(',', '.') })}
+          onChange={(v) => patch({ value: v })}
         />
 
         {line.measure === 'quantite' && (
@@ -73,12 +74,11 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
         )}
 
         <div className="line-price">
-          <input
+          <AmountInput
             className="line-value"
-            inputMode="decimal"
             placeholder="Prix de revient"
             value={line.unitPrice}
-            onChange={(e) => patch({ unitPrice: e.target.value.replace(',', '.') })}
+            onChange={(v) => patch({ unitPrice: v })}
           />
           <span className="line-per">{perUnit(line.measure)}</span>
         </div>
@@ -89,7 +89,7 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
       </div>
 
       {Number(line.value) > 0 && Number(line.unitPrice) > 0 && (
-        <div className="line-total">= {lineTotal(line).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}</div>
+        <div className="line-total">= {formatNumber(lineTotal(line), { decimals: 2, trim: true })}</div>
       )}
     </div>
   );

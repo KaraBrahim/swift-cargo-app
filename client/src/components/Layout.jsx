@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { useTheme } from '../theme/ThemeContext.jsx';
 import { IconEl, initialsOf } from './icons.jsx';
 import { useSyncPresence } from './SyncStatus.jsx';
 import { TopBar } from './TopBar.jsx';
 import { CommandPalette } from './CommandPalette.jsx';
+import ConnectionBanner from './ConnectionBanner.jsx';
+import { TabsProvider, TabPaneProvider, useTabs } from './TabsContext.jsx';
+import { TabStrip } from './TabStrip.jsx';
+import { AppPages } from '../routes.jsx';
+import { useToast } from './ui.jsx';
 
 // Both a fournisseur and a passager receive a physical "bon": the fournisseur's
 // bon (the shipment) groups the passagers' bons (one per carrier).
@@ -50,8 +56,41 @@ const COLLAPSE_KEY = 'sc_sidebar_collapsed';
 
 const PRESENCE_TITLE = { on: 'En ligne — synchronisé', off: 'Hors ligne — données locales', hub: 'Serveur central' };
 
+// Toutes les pages ouvertes sont montées ; seule celle de l'onglet actif est
+// affichée. C'est ce qui fait qu'un formulaire à moitié rempli est encore là au
+// retour, au lieu d'être reconstruit à neuf comme après un rechargement.
+function TabPanes() {
+  const { tabs, activeId } = useTabs();
+  return (
+    <div className="content">
+      {tabs.map((t) => (
+        <div key={t.id} className="tabpane" hidden={t.id !== activeId}>
+          <TabPaneProvider value={t.id}>
+            <AppPages path={t.path} />
+          </TabPaneProvider>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Le shell a besoin du contexte des onglets ; le fournisseur doit donc être
+// au-dessus de lui, pas dedans.
 export function Layout() {
+  const toast = useToast();
+  return (
+    <TabsProvider onRefused={(m) => toast.error(m)}>
+      <Shell />
+    </TabsProvider>
+  );
+}
+
+function Shell() {
   const { admin, logout } = useAuth();
+  const { open: openTab } = useTabs();
+  // Whether the sidebar shows its section headings — a per-desk preference,
+  // kept with the theme. See ThemeContext.
+  const { navGroups } = useTheme();
   const { state: presence } = useSyncPresence();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -104,6 +143,10 @@ export function Layout() {
 
   return (
     <div className={`app-shell ${collapsed ? 'collapsed' : ''} ${navOpen ? 'nav-open' : ''}`}>
+      {/* Inside the application only. The sign-in page states its own problems
+          in its own card — a floating banner over it would say the same thing
+          twice, and cover the message about the credentials while doing it. */}
+      <ConnectionBanner />
       {/* Phone only (see shell.css): tapping beside the drawer closes it. */}
       <div className="nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />
 
@@ -122,14 +165,29 @@ export function Layout() {
         <nav className="sb-nav">
           {NAV.map((section) => (
             <div key={section.group}>
-              <div className="sb-group-label">{section.group}</div>
+              {navGroups && <div className="sb-group-label">{section.group}</div>}
               {section.items.filter((it) => it.to !== '/utilisateurs' || admin?.role === 'superadmin').map((it) => (
                 <NavLink
                   key={it.to}
                   to={it.to}
                   end={it.end}
-                  title={collapsed ? it.label : undefined}
+                  title={collapsed ? `${it.label} — ctrl+clic : nouvel onglet` : undefined}
                   className={({ isActive }) => (isActive ? 'sb-link active' : 'sb-link')}
+                  // Le geste que tout le monde connaît des navigateurs :
+                  // ctrl/⌘+clic ouvre à côté sans quitter la page en cours,
+                  // clic du milieu de même.
+                  onClick={(e) => {
+                    if (e.ctrlKey || e.metaKey) {
+                      e.preventDefault();
+                      openTab(it.to, { background: true });
+                    }
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      openTab(it.to, { background: true });
+                    }
+                  }}
                 >
                   <IconEl name={it.icon} />
                   <span>{it.label}</span>
@@ -166,9 +224,8 @@ export function Layout() {
 
       <div className="main">
         <TopBar onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
-        <div className="content">
-          <Outlet />
-        </div>
+        <TabStrip />
+        <TabPanes />
       </div>
 
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />

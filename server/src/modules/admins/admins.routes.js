@@ -4,6 +4,7 @@ import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth, requireSuperadmin } from '../../middleware/auth.js';
 import * as admins from './admins.service.js';
+import { isSuperadmin } from '../../lib/visibility.js';
 
 export const adminsRouter = Router();
 adminsRouter.use(requireAuth);
@@ -22,7 +23,9 @@ adminsRouter.get(
   '/admins',
   validate({ query: z.object({ includeInactive: z.coerce.boolean().optional() }) }),
   asyncHandler(async (req, res) => {
-    res.json({ admins: await admins.listAdmins(req.validatedQuery) });
+    res.json({
+      admins: await admins.listAdmins({ ...req.validatedQuery, viewerIsSuperadmin: isSuperadmin(req.admin) }),
+    });
   })
 );
 

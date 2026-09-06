@@ -65,7 +65,6 @@ export default function ArticlesPage() {
       <PageHeader
         icon="box" accent={ACCENT} title="Articles"
         subtitle="Catalogue de référence — sans quantités. Les quantités par bureau se règlent dans Stock."
-        back={<Link to="/stock" className="btn-back"><IconEl name="chevronLeft" />Retour au stock</Link>}
       >
         <Link to="/categories" className="btn"><IconEl name="tag" />Catégories</Link>
         <button className="btn btn-gold" onClick={() => setForm(form ? null : { ...EMPTY })}>

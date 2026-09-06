@@ -64,7 +64,6 @@ export default function CategoriesPage() {
       <PageHeader
         icon="tag" accent={ACCENT} title="Catégories"
         subtitle="Classement des articles. Une catégorie utilisée ne peut pas être supprimée, seulement désactivée."
-        back={<Link to="/stock" className="btn-back"><IconEl name="chevronLeft" />Retour au stock</Link>}
       >
         <Link to="/articles" className="btn"><IconEl name="box" />Articles</Link>
       </PageHeader>
@@ -80,7 +79,7 @@ export default function CategoriesPage() {
           <label className="field field-grow"><span>Renommer la catégorie</span>
             <input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
           <button className="btn btn-gold" disabled={busy || !edit.name.trim()}>Enregistrer</button>
-          <button type="button" className="btn btn-ghost" onClick={() => setEdit(null)}>Annuler</button>
+          <button type="button" className="btn btn-ghost" onClick={() => setEdit(null)}><IconEl name="close" />Annuler</button>
         </form>
       )}
 

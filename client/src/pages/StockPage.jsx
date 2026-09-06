@@ -8,10 +8,12 @@ import { useApi } from '../api/useApi.js';
 import { Spinner, PageHeader, EmptyState, errorMessage, useToast } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { fuzzyRank } from '../lib/fuzzy.js';
+import AmountInput from '../components/AmountInput.jsx';
+import { formatQty } from '../lib/format.js';
 
 const ACCENT = 'var(--c-stock)';
 const OFFICES = [{ key: 'china', label: 'Chine' }, { key: 'algeria', label: 'Algérie' }];
-const q3 = (v) => Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+const q3 = (v) => formatQty(v);
 const held = (it) => Number(it.quantity) > 0 || Number(it.weight_kg) > 0 || Number(it.cbm) > 0;
 
 export default function StockPage() {
@@ -110,13 +112,13 @@ export default function StockPage() {
               </select></label>
           )}
           <label className="field"><span>Quantité</span>
-            <input autoFocus inputMode="decimal" value={lvl.quantity} onChange={(e) => setLvl({ ...lvl, quantity: e.target.value.replace(',', '.') })} /></label>
+            <AmountInput decimals={3} autoFocus value={lvl.quantity} onChange={(v) => setLvl({ ...lvl, quantity: v })} /></label>
           <label className="field"><span>Poids (kg)</span>
-            <input inputMode="decimal" value={lvl.weight_kg} onChange={(e) => setLvl({ ...lvl, weight_kg: e.target.value.replace(',', '.') })} /></label>
+            <AmountInput decimals={3} value={lvl.weight_kg} onChange={(v) => setLvl({ ...lvl, weight_kg: v })} /></label>
           <label className="field"><span>CBM</span>
-            <input inputMode="decimal" value={lvl.cbm} onChange={(e) => setLvl({ ...lvl, cbm: e.target.value.replace(',', '.') })} /></label>
+            <AmountInput decimals={3} value={lvl.cbm} onChange={(v) => setLvl({ ...lvl, cbm: v })} /></label>
           <button className="btn btn-gold" disabled={busy || !lvl.id}>Confirmer</button>
-          <button type="button" className="btn btn-ghost" onClick={() => setLvl(null)}>Annuler</button>
+          <button type="button" className="btn btn-ghost" onClick={() => setLvl(null)}><IconEl name="close" />Annuler</button>
         </form>
       )}
 

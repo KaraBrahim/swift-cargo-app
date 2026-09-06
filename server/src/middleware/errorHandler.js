@@ -25,8 +25,14 @@ export function errorHandler(err, req, res, _next) {
   }
 
   // Anything else is unexpected: log full detail, return a safe generic message.
-  logger.error(`Unhandled error on ${req.method} ${req.originalUrl}`, err?.stack || err);
+  //
+  // The reference is the bridge between the two. The user sees « référence
+  // E-7f3a2c » and can read it out or send a screenshot; the same string sits
+  // in the log next to the stack, so the exact failure is one search away.
+  // Without it, "j'ai eu une erreur tout à l'heure" is unfindable.
+  const ref = 'E-' + Math.random().toString(16).slice(2, 8);
+  logger.error(`Unhandled error [${ref}] on ${req.method} ${req.originalUrl}`, err?.stack || err);
   return res
     .status(500)
-    .json({ error: { code: 'INTERNAL', message: 'Erreur interne du serveur.' } });
+    .json({ error: { code: 'INTERNAL', message: 'Erreur interne du serveur.', ref } });
 }

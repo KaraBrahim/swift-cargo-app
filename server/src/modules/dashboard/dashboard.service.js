@@ -10,6 +10,7 @@
 //      DZD/CNY/ALP/USD/EUR — adding them together would be meaningless — so the
 //      caller passes a currency and the response echoes which one it used.
 import { getPool } from '../../db/pool.js';
+import { notSuperadmin } from '../../lib/visibility.js';
 import { Decimal } from '../../lib/money.js';
 
 // Window + sparkline resolution per period.
@@ -117,13 +118,15 @@ export async function financial(period = 'mois', currency = 'DZD', db = getPool(
 export async function tile(key, period = 'mois', currency = 'DZD', db = getPool()) {
   switch (key) {
     case 'bons': {
-      const m = await metric(db, period, { from: 'bons b', dateCol: 'b.created_at', sumExpr: '1' });
-      const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM bons WHERE status <> 'regle'`);
+      // order_id IS NULL : un bon fournisseur crée aussi une ligne dans `bons`
+      // pour stocker sa marchandise — ce n'est pas un bon passager.
+      const m = await metric(db, period, { from: 'bons b', dateCol: 'b.created_at', sumExpr: '1', where: 'b.order_id IS NULL' });
+      const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM bons WHERE status <> 'regle' AND order_id IS NULL`);
       return { ...m, value: String(rows[0].n), created: m.value };
     }
     case 'passagers': {
-      const m = await metric(db, period, { from: 'passagers p', dateCol: 'p.created_at', sumExpr: '1' });
-      const { rows } = await db.query('SELECT COUNT(*)::int AS n FROM passagers WHERE active = TRUE');
+      const m = await metric(db, period, { from: 'people p', dateCol: 'p.created_at', sumExpr: '1', where: 'p.is_passager' });
+      const { rows } = await db.query('SELECT COUNT(*)::int AS n FROM people WHERE active = TRUE AND is_passager');
       return { ...m, value: String(rows[0].n), created: m.value };
     }
     case 'stock':
@@ -188,13 +191,16 @@ export async function revenue(period = 'mois', currency = 'DZD', db = getPool())
     params: [currency],
   });
 
+  // Volumes = la marchandise REÇUE (bons fournisseurs). La compter aussi sur les
+  // bons passagers reviendrait à compter deux fois les mêmes cartons : ils sont
+  // reçus une fois, puis transportés.
   const [{ rows: bulk }, { rows: byUnit }] = await Promise.all([
     db.query(
       `SELECT COALESCE(SUM(bl.weight_kg),0)::text AS kg,
               COALESCE(SUM(bl.cbm),0)::text      AS cbm,
               COUNT(DISTINCT b.id)::int          AS bons
          FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
-        WHERE b.created_at >= now() - $1::interval`,
+        WHERE b.created_at >= now() - $1::interval AND b.order_id IS NOT NULL`,
       [interval]
     ),
     // Quantities are NEVER summed across units — "3 cartons + 5 kg" is not a
@@ -202,7 +208,7 @@ export async function revenue(period = 'mois', currency = 'DZD', db = getPool())
     db.query(
       `SELECT bl.unit, SUM(bl.quantity)::text AS qty
          FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
-        WHERE b.created_at >= now() - $1::interval
+        WHERE b.created_at >= now() - $1::interval AND b.order_id IS NOT NULL
         GROUP BY bl.unit
         ORDER BY SUM(bl.quantity) DESC`,
       [interval]
@@ -236,7 +242,7 @@ export async function pipeline(db = getPool()) {
        COUNT(*) FILTER (WHERE status = 'arrive')     ::int AS arrive,
        COUNT(*) FILTER (WHERE status = 'regle')      ::int AS regle,
        COUNT(*)                                      ::int AS total
-       FROM bons`
+       FROM bons WHERE order_id IS NULL`
   );
   const r = rows[0];
   const steps = [
@@ -290,16 +296,17 @@ export async function stockByCategory(db = getPool(), top = 5) {
 }
 
 // ── activité récente ─────────────────────────────────────────────────
-export async function activity(limit = 8, db = getPool()) {
+export async function activity(limit = 8, isSuper = false, db = getPool()) {
   // Sign-ins are audit noise on a dashboard — four admins logging in all day
   // would bury the business events this panel exists to show. They remain in
   // the full audit journal.
   const { rows } = await db.query(
     `SELECT al.id, al.action, al.entity, al.entity_id, al.details, al.created_at,
-            a.full_name AS admin_name
+            a.full_name AS admin_name, a.role AS admin_role
        FROM audit_log al
        LEFT JOIN admins a ON a.id = al.admin_id
       WHERE al.action NOT LIKE 'auth.%'
+        ${isSuper ? '' : `AND ${notSuperadmin('al.admin_id')}`}
       ORDER BY al.created_at DESC, al.id DESC
       LIMIT $1`,
     [limit]
@@ -311,10 +318,15 @@ export async function activity(limit = 8, db = getPool()) {
 export async function recentBons(limit = 5, db = getPool()) {
   const { rows } = await db.query(
     `SELECT b.id, b.reference, b.status, b.created_at, b.transport_fee, b.transport_currency,
-            f.name AS fournisseur_name, p.full_name AS passager_name
+            p.name AS passager_name,
+            (SELECT string_agg(DISTINCT sf.name, ', ' ORDER BY sf.name)
+               FROM bon_lines l JOIN bon_lines src ON src.id = l.source_line_id
+               JOIN bons sb ON sb.id = src.bon_id
+               JOIN people sf ON sf.id = sb.fournisseur_id
+              WHERE l.bon_id = b.id) AS fournisseur_name
        FROM bons b
-       JOIN fournisseurs f ON f.id = b.fournisseur_id
-       LEFT JOIN passagers p ON p.id = b.passager_id
+       LEFT JOIN people p ON p.id = b.passager_id
+      WHERE b.order_id IS NULL
       ORDER BY b.created_at DESC, b.id DESC
       LIMIT $1`,
     [limit]
@@ -323,7 +335,7 @@ export async function recentBons(limit = 5, db = getPool()) {
 }
 
 // ── one call for the whole page ──────────────────────────────────────
-export async function overview({ period = 'mois', currency = 'DZD' } = {}) {
+export async function overview({ period = 'mois', currency = 'DZD', isSuper = false } = {}) {
   const db = getPool();
   const [s, fin, rev, pipe, stock, act, bons] = await Promise.all([
     stats(period, currency, db),
@@ -331,7 +343,7 @@ export async function overview({ period = 'mois', currency = 'DZD' } = {}) {
     revenue(period, currency, db),
     pipeline(db),
     stockByCategory(db),
-    activity(4, db),
+    activity(4, isSuper, db),
     recentBons(4, db),
   ]);
   return {

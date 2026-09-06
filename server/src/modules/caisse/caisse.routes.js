@@ -53,9 +53,15 @@ caisseRouter.get(
     params: z.object({ id }),
     query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), currency: code.optional(), adminId: z.coerce.number().int().positive().optional() }),
   }),
-  asyncHandler(async (req, res) =>
-    res.json({ transactions: await caisse.ledger(req.params.id, req.validatedQuery) })
-  )
+  asyncHandler(async (req, res) => {
+    // The actor list comes back with every page: it is computed over the whole
+    // caisse, so filtering to one admin must not shrink the tabs.
+    const [transactions, { actors, total }] = await Promise.all([
+      caisse.ledger(req.params.id, req.validatedQuery),
+      caisse.ledgerActors(req.params.id),
+    ]);
+    res.json({ transactions, actors, total });
+  })
 );
 
 // Correct or remove a hand-entered movement. Anything produced by a bon, a
@@ -107,10 +113,6 @@ caisseRouter.post(
   )
 );
 
-caisseRouter.post(
-  '/transfer',
-  validate({ body: z.object({ fromCaisseId: id, toCaisseId: id, currency: code, amount, note }) }),
-  asyncHandler(async (req, res) =>
-    res.status(201).json(await caisse.transfer({ admin: req.admin, ip: req.ip, ...req.body }))
-  )
-);
+// POST /transfer is gone: a caisse-to-caisse transfer is now the same thing as
+// an office transfer, and goes through POST /office-transfers so that it waits
+// for the destination to confirm before any money moves.

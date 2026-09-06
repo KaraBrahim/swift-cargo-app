@@ -65,7 +65,12 @@ try {
   };
 
   // ── Utilisateurs (super-admin only) ───────────────────────────────
-  check('seed = 4 admins + 1 super', (await call('GET', '/api/admins')).admins.length, 5);
+  // The list obeys the invisibility rule: a normal admin sees the four normal
+  // admins and no trace of the super-admin; the super-admin sees all five.
+  const asAdmin = (await call('GET', '/api/admins')).admins;
+  check('admin normal : 4 comptes, pas de super-admin', asAdmin.length, 4);
+  check('aucun super-admin dans la liste', asAdmin.some((a) => a.role === 'superadmin'), 'false');
+  check('super-admin : voit les 5', (await callAs(superToken, 'GET', '/api/admins')).admins.length, 5);
   check('super-admin a le rôle superadmin', superLogin.admin.role, 'superadmin');
   check('admin1 a le rôle admin', login.admin.role, 'admin');
   check('login renseigne last_login_at',
@@ -138,7 +143,7 @@ try {
   // admin1 (the module `token`) has already done deposits/withdrawals above.
   // admin2 now does something; admin1 should be notified, and vice-versa.
   const t2 = (await call('POST', '/api/auth/login', { username: 'admin2', password: config.seedAdminPassword })).token;
-  await fetch(`${base}/api/fournisseurs`, { method: 'POST', headers: bearer(t2), body: JSON.stringify({ name: 'Fournisseur Notif' }) });
+  await fetch(`${base}/api/people`, { method: 'POST', headers: bearer(t2), body: JSON.stringify({ name: 'Fournisseur Notif', isFournisseur: true }) });
 
   const n1 = await fetch(`${base}/api/notifications/count`, { headers: bearer(token) }).then(asJson);
   check('admin1 a des notifications non lues', n1.unread > 0, 'true');

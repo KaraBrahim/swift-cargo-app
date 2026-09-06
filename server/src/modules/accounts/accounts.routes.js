@@ -20,7 +20,7 @@ accountsRouter.get('/accounts/debts', asyncHandler(async (_req, res) => res.json
 accountsRouter.get(
   '/accounts/payments',
   validate({ query: z.object({
-    personType: z.enum(['fournisseur', 'passager']).optional(),
+    personType: z.enum(['personne', 'utilisateur']).optional(),
     limit: z.coerce.number().int().min(1).max(500).optional(),
   }) }),
   asyncHandler(async (req, res) => res.json(await listPayments(req.validatedQuery)))
@@ -50,11 +50,12 @@ accountsRouter.delete(
 
 const money = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
 
-// Free-form entry on anyone's account: fournisseur, passager or utilisateur.
+// Free-form entry on anyone's account: a personne (fournisseur, passager, or
+// both) or an utilisateur.
 accountsRouter.post(
   '/person-transactions',
   validate({ body: z.object({
-    personType: z.enum(['fournisseur', 'passager', 'utilisateur']),
+    personType: z.enum(['personne', 'utilisateur']),
     personId: z.coerce.number().int().positive(),
     direction: z.enum(['in', 'out']),
     amount: money,

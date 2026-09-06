@@ -119,9 +119,9 @@ export async function listAllocatable({ fournisseurId, orderId, forBonId } = {})
        FROM bon_lines bl
        JOIN bons b   ON b.id = bl.bon_id
        JOIN orders o ON o.id = b.order_id
-       JOIN fournisseurs f ON f.id = b.fournisseur_id
+       JOIN people f ON f.id = b.fournisseur_id
       WHERE ${conds.join(' AND ')}
-      ORDER BY o.created_at, bl.id`,
+      ORDER BY f.name, o.created_at, bl.id`,
     params
   );
   return rows
@@ -147,9 +147,10 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
       if (!srcBon || srcBon.order_id == null) {
         throw errors.validation([{ field: 'lines', message: 'La source doit être une ligne de bon fournisseur.' }]);
       }
-      if (srcBon.fournisseur_id !== bon.fournisseur_id) {
-        throw errors.validation([{ field: 'lines', message: 'La marchandise appartient à un autre fournisseur.' }]);
-      }
+      // Deliberately no check that the lot belongs to the bon's fournisseur: a
+      // passager travels with one suitcase and fills it wherever the goods are
+      // ready. What each fournisseur is owed stays right because every credit is
+      // computed from the SOURCE line (see missingSaleCredits).
       if (src.measure !== l.measure) {
         throw errors.validation([{ field: 'lines', message: `« ${src.designation} » se mesure en ${src.measure}.` }]);
       }
@@ -209,14 +210,14 @@ async function recomputeAffectedOrders(c, bon) {
 async function postFournisseurCharge(c, { bon, fournisseurId, currency, fee, discount, orderId, adminId }) {
   if (new Decimal(fee).gt(0)) {
     await appendEntry(c, {
-      personType: 'fournisseur', personId: fournisseurId, currency,
+      personType: 'personne', personId: fournisseurId, currency,
       amount: new Decimal(fee).negated().toFixed(2), type: 'transport_fee',
       refOrderId: orderId, refBonId: bon.id, adminId, note: `Frais transport ${bon.reference}`,
     });
   }
   if (new Decimal(discount).gt(0)) {
     await appendEntry(c, {
-      personType: 'fournisseur', personId: fournisseurId, currency,
+      personType: 'personne', personId: fournisseurId, currency,
       amount: new Decimal(discount).toFixed(2), type: 'adjustment',
       refOrderId: orderId, refBonId: bon.id, adminId, note: `Remise ${bon.reference}`,
     });
@@ -235,10 +236,14 @@ export async function insertChildBon(c, { admin, orderId = null, fournisseurId, 
   const transportFee = linesTotal(lines).toFixed(2);
   const discount = parseMoney(data.discount, 'Remise');
 
-  const f = await c.query('SELECT 1 FROM fournisseurs WHERE id=$1 AND active=TRUE', [fournisseurId]);
-  if (!f.rows.length) throw errors.notFound('Fournisseur introuvable ou inactif.');
+  // Only a bon FOURNISSEUR names a fournisseur: it is that person's shipment.
+  // A bon passager's fournisseurs are whoever supplied the lots it carries.
+  if (orderId) {
+    const f = await c.query('SELECT 1 FROM people WHERE id=$1 AND active=TRUE AND is_fournisseur', [fournisseurId]);
+    if (!f.rows.length) throw errors.notFound('Fournisseur introuvable ou inactif.');
+  }
   if (data.passagerId) {
-    const p = await c.query('SELECT 1 FROM passagers WHERE id=$1 AND active=TRUE', [data.passagerId]);
+    const p = await c.query('SELECT 1 FROM people WHERE id=$1 AND active=TRUE AND is_passager', [data.passagerId]);
     if (!p.rows.length) throw errors.notFound('Passager introuvable ou inactif.');
   }
   const cur = await c.query('SELECT 1 FROM currencies WHERE code=$1 AND active=TRUE', [transportCurrency]);
@@ -247,7 +252,7 @@ export async function insertChildBon(c, { admin, orderId = null, fournisseurId, 
   const bonRes = await c.query(
     `INSERT INTO bons (order_id, fournisseur_id, passager_id, transport_currency, transport_fee, discount, notes, created_by)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [orderId, fournisseurId, data.passagerId ?? null, transportCurrency, transportFee, discount, data.notes ?? null, admin.id]
+    [orderId, orderId ? fournisseurId : null, data.passagerId ?? null, transportCurrency, transportFee, discount, data.notes ?? null, admin.id]
   );
   const bon = bonRes.rows[0];
 
@@ -289,7 +294,7 @@ export async function updateBon({ admin, id, data, ip }) {
     if ('passagerId' in data) {
       newPassagerId = data.passagerId ? Number(data.passagerId) : null;
       if (newPassagerId) {
-        const p = await c.query('SELECT 1 FROM passagers WHERE id=$1 AND active=TRUE', [newPassagerId]);
+        const p = await c.query('SELECT 1 FROM people WHERE id=$1 AND active=TRUE AND is_passager', [newPassagerId]);
         if (!p.rows.length) throw errors.notFound('Passager introuvable ou inactif.');
       }
     }
@@ -316,14 +321,14 @@ export async function updateBon({ admin, id, data, ip }) {
     if (bon.order_id != null) {
       if (new Decimal(bon.transport_fee).gt(0)) {
         await appendEntry(c, {
-          personType: 'fournisseur', personId: bon.fournisseur_id, currency: bon.transport_currency,
+          personType: 'personne', personId: bon.fournisseur_id, currency: bon.transport_currency,
           amount: new Decimal(bon.transport_fee).toFixed(2), type: 'adjustment',
           refOrderId: bon.order_id, refBonId: id, adminId: admin.id, note: `Annulation frais ${bon.reference} (modification)`,
         });
       }
       if (new Decimal(bon.discount).gt(0)) {
         await appendEntry(c, {
-          personType: 'fournisseur', personId: bon.fournisseur_id, currency: bon.transport_currency,
+          personType: 'personne', personId: bon.fournisseur_id, currency: bon.transport_currency,
           amount: new Decimal(bon.discount).negated().toFixed(2), type: 'adjustment',
           refOrderId: bon.order_id, refBonId: id, adminId: admin.id, note: `Annulation remise ${bon.reference} (modification)`,
         });
@@ -433,14 +438,14 @@ export async function deleteBon({ admin, id, ip }) {
       }
       if (new Decimal(fresh.transport_fee).gt(0)) {
         await appendEntry(c, {
-          personType: 'fournisseur', personId: fresh.fournisseur_id, currency: fresh.transport_currency,
+          personType: 'personne', personId: fresh.fournisseur_id, currency: fresh.transport_currency,
           amount: new Decimal(fresh.transport_fee).toFixed(2), type: 'adjustment',
           refBonId: id, adminId: admin.id, note: `Annulation frais ${fresh.reference} (suppression)`,
         });
       }
       if (new Decimal(fresh.discount).gt(0)) {
         await appendEntry(c, {
-          personType: 'fournisseur', personId: fresh.fournisseur_id, currency: fresh.transport_currency,
+          personType: 'personne', personId: fresh.fournisseur_id, currency: fresh.transport_currency,
           amount: new Decimal(fresh.discount).negated().toFixed(2), type: 'adjustment',
           refBonId: id, adminId: admin.id, note: `Annulation remise ${fresh.reference} (suppression)`,
         });
@@ -464,21 +469,47 @@ export async function deleteBon({ admin, id, ip }) {
 }
 
 // ── Queries ───────────────────────────────────────────────────────────
+// Bons PASSAGERS by default.
+//
+// Creating a bon fournisseur also writes a `bons` row — that row is the crate
+// the goods sit in until a passager takes them, and `listAllocatable` below
+// reads exactly those. It is not a document anybody files under "bons
+// passagers", and the whole codebase already says so: `order_id IS NULL` means
+// passager bon in getBonDetail, shipLinesStock, deleteBon and the client. This
+// query was the one place that forgot, which is why fournisseur shipments were
+// turning up in the passagers table. Pass an explicit `orderId` to look inside
+// an order instead.
 export async function listBons({ status, search, fournisseurId, passagerId, orderId, limit = 100 } = {}) {
   const params = [];
   const conds = [];
-  if (status) { params.push(status); conds.push(`b.status = $${params.length}`); }
-  if (fournisseurId) { params.push(fournisseurId); conds.push(`b.fournisseur_id = $${params.length}`); }
-  if (passagerId) { params.push(passagerId); conds.push(`b.passager_id = $${params.length}`); }
   if (orderId) { params.push(orderId); conds.push(`b.order_id = $${params.length}`); }
-  if (search) { params.push(`%${search}%`); conds.push(`(b.reference ILIKE $${params.length} OR f.name ILIKE $${params.length})`); }
+  else conds.push('b.order_id IS NULL');
+  if (status) { params.push(status); conds.push(`b.status = $${params.length}`); }
+  if (passagerId) { params.push(passagerId); conds.push(`b.passager_id = $${params.length}`); }
+  // A bon passager has no fournisseur of its own any more — it carries lots from
+  // as many as it likes — so filtering by one means "the bons carrying this
+  // person's goods", found through the source lines.
+  if (fournisseurId) {
+    params.push(fournisseurId);
+    conds.push(`(b.fournisseur_id = $${params.length} OR EXISTS (
+      SELECT 1 FROM bon_lines l JOIN bon_lines src ON src.id = l.source_line_id
+        JOIN bons sb ON sb.id = src.bon_id
+       WHERE l.bon_id = b.id AND sb.fournisseur_id = $${params.length}))`);
+  }
+  if (search) { params.push(`%${search}%`); conds.push(`(b.reference ILIKE $${params.length} OR p.name ILIKE $${params.length})`); }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   params.push(limit);
   const { rows } = await getPool().query(
-    `SELECT b.*, f.name AS fournisseur_name, p.full_name AS passager_name, o.reference AS order_reference
+    `SELECT b.*, p.name AS passager_name, o.reference AS order_reference,
+            COALESCE(bf.name, (
+              SELECT string_agg(DISTINCT sf.name, ', ' ORDER BY sf.name)
+                FROM bon_lines l JOIN bon_lines src ON src.id = l.source_line_id
+                JOIN bons sb ON sb.id = src.bon_id
+                JOIN people sf ON sf.id = sb.fournisseur_id
+               WHERE l.bon_id = b.id)) AS fournisseur_name
        FROM bons b
-       JOIN fournisseurs f ON f.id = b.fournisseur_id
-       LEFT JOIN passagers p ON p.id = b.passager_id
+       LEFT JOIN people bf ON bf.id = b.fournisseur_id
+       LEFT JOIN people p ON p.id = b.passager_id
        LEFT JOIN orders o ON o.id = b.order_id
        ${where} ORDER BY b.created_at DESC, b.id DESC LIMIT $${params.length}`,
     params
@@ -489,11 +520,11 @@ export async function listBons({ status, search, fournisseurId, passagerId, orde
 export async function getBonDetail(id, client = getPool()) {
   const { rows } = await client.query(
     `SELECT b.*, f.name AS fournisseur_name, f.phone AS fournisseur_phone,
-            p.full_name AS passager_name, p.phone AS passager_phone, p.type AS passager_type,
-            a.full_name AS created_by_name, o.reference AS order_reference
+            p.name AS passager_name, p.phone AS passager_phone, p.passager_type,
+            a.full_name AS created_by_name, a.role AS created_by_role, o.reference AS order_reference
        FROM bons b
-       JOIN fournisseurs f ON f.id = b.fournisseur_id
-       LEFT JOIN passagers p ON p.id = b.passager_id
+       LEFT JOIN people f ON f.id = b.fournisseur_id
+       LEFT JOIN people p ON p.id = b.passager_id
        LEFT JOIN orders o ON o.id = b.order_id
        JOIN admins a ON a.id = b.created_by
       WHERE b.id = $1`,
@@ -505,14 +536,13 @@ export async function getBonDetail(id, client = getPool()) {
   const payments = await client.query(
     `SELECT pl.id, pl.person_type, pl.person_id, pl.type, pl.amount, pl.currency_code,
             pl.caisse_tx_id, pl.created_at, pl.note,
-            a.full_name AS admin_name, t.caisse_id, c.label AS caisse_label,
-            COALESCE(f.name, p.full_name) AS person_name
+            a.full_name AS admin_name, a.role AS admin_role, t.caisse_id, c.label AS caisse_label,
+            pe.name AS person_name
        FROM person_ledger pl
        JOIN admins a ON a.id = pl.admin_id
        LEFT JOIN transactions t ON t.id = pl.caisse_tx_id
        LEFT JOIN caisses c ON c.id = t.caisse_id
-       LEFT JOIN fournisseurs f ON pl.person_type='fournisseur' AND f.id = pl.person_id
-       LEFT JOIN passagers p    ON pl.person_type='passager'    AND p.id = pl.person_id
+       LEFT JOIN people pe ON pl.person_type='personne' AND pe.id = pl.person_id
       WHERE pl.ref_bon_id = $1 AND pl.type IN ('fee_payment','passager_payment')
       ORDER BY pl.created_at DESC, pl.id DESC`,
     [id]
@@ -527,9 +557,28 @@ export async function getBonDetail(id, client = getPool()) {
          LEFT JOIN bons sb   ON sb.id = src.bon_id
          LEFT JOIN orders so ON so.id = sb.order_id
         WHERE bl.bon_id=$1 ORDER BY bl.id`, [id]),
-    client.query('SELECT h.*, a.full_name AS admin_name FROM bon_status_history h JOIN admins a ON a.id=h.admin_id WHERE h.bon_id=$1 ORDER BY h.created_at, h.id', [id]),
+    client.query('SELECT h.*, a.full_name AS admin_name, a.role AS admin_role FROM bon_status_history h JOIN admins a ON a.id=h.admin_id WHERE h.bon_id=$1 ORDER BY h.created_at, h.id', [id]),
   ]);
-  return { ...rows[0], lines: lines.rows, history: history.rows, payments: payments.rows };
+  // Who the goods came from. A bon fournisseur has one, named on the row above;
+  // a bon passager has as many as the lots it carries, so they are read off the
+  // lines rather than stored — nothing can then drift from what it holds.
+  const fournisseurs = await client.query(
+    `SELECT DISTINCT f.id, f.name, sb.reference AS source_bon_reference, so.reference AS order_reference
+       FROM bon_lines l
+       JOIN bon_lines src ON src.id = l.source_line_id
+       JOIN bons sb ON sb.id = src.bon_id
+       JOIN people f ON f.id = sb.fournisseur_id
+       LEFT JOIN orders so ON so.id = sb.order_id
+      WHERE l.bon_id = $1 ORDER BY f.name`,
+    [id]
+  );
+  return {
+    ...rows[0],
+    fournisseurs: fournisseurs.rows,
+    lines: lines.rows,
+    history: history.rows,
+    payments: payments.rows,
+  };
 }
 
 // ── Status transitions ────────────────────────────────────────────────
@@ -664,14 +713,14 @@ async function bookSettlement(c, bon, admin, payment, note) {
   await c.query('INSERT INTO bon_status_history (bon_id, status, admin_id, note) VALUES ($1,$2,$3,$4)', [bon.id, 'regle', admin.id, note ?? 'Réglé']);
   if (bon.passager_id && new Decimal(payment).gt(0)) {
     await appendEntry(c, {
-      personType: 'passager', personId: bon.passager_id, currency: bon.transport_currency,
+      personType: 'personne', personId: bon.passager_id, currency: bon.transport_currency,
       amount: payment, type: 'passager_due', refOrderId: bon.order_id, refBonId: bon.id,
       adminId: admin.id, note: `Dû transport ${bon.reference}`,
     });
   }
   for (const cr of await missingSaleCredits(c, bon.id)) {
     await appendEntry(c, {
-      personType: 'fournisseur', personId: cr.fournisseur_id, currency: cr.currency,
+      personType: 'personne', personId: cr.fournisseur_id, currency: cr.currency,
       amount: new Decimal(cr.credit).toFixed(2), type: 'adjustment', refOrderId: cr.order_id, refBonId: bon.id,
       adminId: admin.id, note: `Avoir manquants ${bon.reference}`,
     });
@@ -689,14 +738,14 @@ async function reverseSettlement(c, bon, admin, note) {
   }
   if (bon.passager_id && bon.passager_payment && new Decimal(bon.passager_payment).gt(0)) {
     await appendEntry(c, {
-      personType: 'passager', personId: bon.passager_id, currency: bon.transport_currency,
+      personType: 'personne', personId: bon.passager_id, currency: bon.transport_currency,
       amount: new Decimal(bon.passager_payment).negated().toFixed(2), type: 'adjustment', refOrderId: bon.order_id, refBonId: bon.id,
       adminId: admin.id, note: `Annulation dû ${bon.reference}`,
     });
   }
   for (const cr of await missingSaleCredits(c, bon.id)) {
     await appendEntry(c, {
-      personType: 'fournisseur', personId: cr.fournisseur_id, currency: cr.currency,
+      personType: 'personne', personId: cr.fournisseur_id, currency: cr.currency,
       amount: new Decimal(cr.credit).negated().toFixed(2), type: 'adjustment', refOrderId: cr.order_id, refBonId: bon.id,
       adminId: admin.id, note: `Annulation avoir manquants ${bon.reference}`,
     });
@@ -801,6 +850,12 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
     const { rows } = await c.query('SELECT * FROM bons WHERE id=$1', [id]);
     const bon = rows[0];
     if (!bon) throw errors.notFound('Bon introuvable.');
+    // Only a bon fournisseur ever billed anyone: the sale was charged once, at
+    // reception. A bon passager moves the same goods and owes nothing — cashing
+    // against it would credit a debt that does not exist.
+    if (bon.order_id == null) {
+      throw errors.conflict('Un bon passager n’encaisse pas de frais : la vente a été facturée au fournisseur à la réception.');
+    }
     const amt = amount != null && amount !== '' ? parseMoney(amount, 'Montant', { allowZero: false }) : bon.transport_fee;
     if (!(new Decimal(amt).gt(0))) throw errors.invalidAmount('Aucun montant à encaisser.');
 
@@ -809,7 +864,7 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
       type: 'order_fee', note: note ?? `Encaissement frais ${bon.reference}`, adminId: admin.id,
     });
     await appendEntry(c, {
-      personType: 'fournisseur', personId: bon.fournisseur_id, currency: bon.transport_currency,
+      personType: 'personne', personId: bon.fournisseur_id, currency: bon.transport_currency,
       amount: amt, type: 'fee_payment', refOrderId: bon.order_id, refBonId: bon.id,
       caisseTxId: txId, adminId: admin.id, note,
     });
@@ -834,7 +889,7 @@ export async function payPassager({ admin, id, caisseId, amount, note, ip }) {
       type: 'passager_payment', note: note ?? `Paiement passager ${bon.reference}`, adminId: admin.id,
     });
     await appendEntry(c, {
-      personType: 'passager', personId: bon.passager_id, currency: bon.transport_currency,
+      personType: 'personne', personId: bon.passager_id, currency: bon.transport_currency,
       amount: new Decimal(amt).negated().toFixed(2), type: 'passager_payment',
       refOrderId: bon.order_id, refBonId: bon.id, caisseTxId: txId, adminId: admin.id, note,
     });

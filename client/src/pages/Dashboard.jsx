@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../api/useApi.js';
 import { api } from '../api/client.js';
-import { Spinner, formatMoney } from '../components/ui.jsx';
+import { Spinner, formatMoney, fitStyle } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { Sparkline, TrendBadge, Donut, Pipeline, RouteMap } from '../components/charts.jsx';
+import { formatQty } from '../lib/format.js';
 import { SyncCard, relativeTime } from '../components/SyncCard.jsx';
 import { useDismiss } from '../components/SettingsMenu.jsx';
 import { activityLine } from '../components/activityLabels.js';
@@ -64,7 +65,7 @@ function Stat({ icon, accent, value, unit, label, deltaPct, series, period, onPe
         <div className="stat-label">{label}</div>
         <PeriodMenu period={period} onPick={onPeriod} />
       </div>
-      <div className="stat-val">
+      <div className="stat-val" style={fitStyle(value)}>
         {value}
         {unit && <span className="stat-unit">{unit}</span>}
       </div>
@@ -91,7 +92,7 @@ function FinRow({ icon, accent, label, value, currency, deltaPct, series, period
           <TrendBadge deltaPct={deltaPct} suffix={periodLabel} />
         </div>
       </div>
-      <Sparkline values={series} stroke={accent} width={82} height={34} />
+      <Sparkline values={series} stroke={accent} width={72} height={24} />
     </div>
   );
 }
@@ -169,7 +170,7 @@ export default function Dashboard() {
         />
         <Stat
           icon="coins" accent="var(--c-caisse)" label="Chiffre d’affaires"
-          value={caMode === 'argent' ? formatMoney(revTile.money.value) : formatMoney(revTile.quantity.weightKg)}
+          value={caMode === 'argent' ? formatMoney(revTile.money.value) : formatQty(revTile.quantity.weightKg)}
           unit={caMode === 'argent' ? currency : 'kg'}
           deltaPct={caMode === 'argent' ? revTile.money.deltaPct : null}
           series={caMode === 'argent' ? revTile.money.series : null}
@@ -189,7 +190,7 @@ export default function Dashboard() {
         />
         <Stat
           icon="stock" accent="var(--c-stock)" label="Stock total"
-          value={formatMoney(stockTile.value)}
+          value={formatQty(stockTile.value)}
           deltaPct={stockTile.deltaPct} series={stockTile.series}
           period={tilePeriod.stock} onPeriod={(p) => changeTile('stock', p)}
         />
@@ -202,12 +203,12 @@ export default function Dashboard() {
         <div className="panel qty-panel">
           <h2 className="panel-title">Chiffre d’affaires — quantité expédiée ({revPeriodLabel})</h2>
           <div className="qty-grid">
-            <div className="qty-cell"><span className="qty-v">{formatMoney(revTile.quantity.weightKg)}</span><span className="qty-k">kg au total</span></div>
-            <div className="qty-cell"><span className="qty-v">{formatMoney(revTile.quantity.cbm)}</span><span className="qty-k">CBM au total</span></div>
+            <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.weightKg)}</span><span className="qty-k">kg au total</span></div>
+            <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.cbm)}</span><span className="qty-k">CBM au total</span></div>
             <div className="qty-cell"><span className="qty-v">{revTile.quantity.bons}</span><span className="qty-k">bons expédiés</span></div>
             {revTile.quantity.byUnit.map((u) => (
               <div key={u.unit} className="qty-cell">
-                <span className="qty-v">{formatMoney(u.quantity)}</span>
+                <span className="qty-v">{formatQty(u.quantity)}</span>
                 <span className="qty-k">{u.unit}</span>
               </div>
             ))}
@@ -257,7 +258,7 @@ export default function Dashboard() {
           <h2 className="panel-title">Stock par catégorie</h2>
           <Donut
             slices={stockByCategory.slices}
-            total={formatMoney(stockByCategory.total)}
+            total={formatQty(stockByCategory.total)}
             unit="Total"
             size={148}
             thickness={21}
@@ -270,7 +271,7 @@ export default function Dashboard() {
           <ul className="feed">
             {activity.map((e) => {
               const { label, icon, sub } = activityLine(e);
-              const meta = [e.admin_name && `par ${e.admin_name}`, sub].filter(Boolean).join(' · ');
+              const meta = [sub, e.admin_name && `par ${e.admin_name}`].filter(Boolean).join(' · ');
               return (
                 <li key={e.id} className="feed-row">
                   <span className="feed-ico"><IconEl name={icon} /></span>

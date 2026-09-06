@@ -107,7 +107,13 @@ export async function login({ username, password, ip, remember = false }) {
         ip,
       });
     });
-    throw errors.unauthorized('Identifiants incorrects.');
+    // Deliberately the SAME message whether the username exists or not — see
+    // timingDecoy() above, which hides the difference in timing for the same
+    // reason. Naming which half was wrong would let anyone with the login page
+    // discover valid usernames, then attack only those.
+    // The wording still says both halves are suspect, so a real user knows to
+    // check the username too instead of retyping the password ten times.
+    throw errors.unauthorized("Nom d'utilisateur ou mot de passe incorrect.");
   }
 
   // « Rester connecté » buys a longer session, nothing more. No password is

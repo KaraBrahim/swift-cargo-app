@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
+import { useTabTitle } from '../components/TabsContext.jsx';
 import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor } from '../lib/offices.js';
+import AmountInput from '../components/AmountInput.jsx';
+import { RolePicker, RoleBadges, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 
 const ENTRY_LABEL = {
   transport_fee: 'Frais de transport (dû)',
@@ -17,25 +20,28 @@ const ENTRY_LABEL = {
 };
 const TYPE_LABEL = { regular: 'Régulier', auto: 'Auto-entrepreneur' };
 
-// balance > 0 → we owe them (payable). < 0 → they owe us (receivable).
-function balanceState(type, value) {
+// One account, whichever role the movement came from. The sign says everything:
+// > 0 = we owe them, < 0 = they owe us. A person who sells goods AND carries
+// them has a single net figure, which is the whole point of merging the two.
+function balanceState(value) {
   const n = Number(value);
   if (n === 0) return { text: 'Soldé', cls: 'muted' };
-  if (type === 'fournisseur') return n < 0 ? { text: 'À recevoir', cls: 'neg' } : { text: 'Avoir', cls: 'pos' };
-  return n > 0 ? { text: 'À payer', cls: 'pos' } : { text: 'Trop-perçu', cls: 'neg' };
+  return n > 0 ? { text: 'Vous lui devez', cls: 'pos' } : { text: 'Il vous doit', cls: 'neg' };
 }
 
-export default function ProfilePage({ type }) {
+export default function ProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const isFournisseur = type === 'fournisseur';
-  const base = isFournisseur ? 'fournisseurs' : 'passagers';
-  const accent = isFournisseur ? 'var(--c-people)' : 'var(--c-stock)';
+  const accent = 'var(--c-people)';
 
-  const account = useApi(`/${base}/${id}/account`);
-  const bons = useApi(`/bons?${isFournisseur ? 'fournisseurId' : 'passagerId'}=${id}&limit=200`);
-  const orders = useApi(isFournisseur ? `/orders?fournisseurId=${id}&limit=200` : null);
+  const account = useApi(`/people/${id}/account`);
+  // A bon passager carries this person's goods (through its source lines) when
+  // they are a fournisseur, and is theirs to carry when they are a passager —
+  // the server answers both from the same query.
+  const bons = useApi(`/bons?fournisseurId=${id}&limit=200`);
+  const carried = useApi(`/bons?passagerId=${id}&limit=200`);
+  const orders = useApi(`/orders?fournisseurId=${id}&limit=200`);
 
   const [tab, setTab] = useState('apercu');
   const [edit, setEdit] = useState(null);
@@ -43,7 +49,7 @@ export default function ProfilePage({ type }) {
   const caisses = useApi('/caisses');
   const currencies = useApi('/currencies');
   const [pay, setPay] = useState({ caisseId: '', amount: '', note: '', currency: 'DZD' });
-  const allPayments = useApi(`/accounts/payments?personType=${type}`);
+  const allPayments = useApi('/accounts/payments?personType=personne');
   const [editPay, setEditPay] = useState(null);
   const [confirmPay, setConfirmPay] = useState(null);
   const [txForm, setTxForm] = useState(null);
@@ -62,23 +68,34 @@ export default function ProfilePage({ type }) {
     finally { setBusy(false); }
   };
 
+  // L'onglet porte le nom de la fiche, pas celui de sa section : « BP-…-00003 »
+  // se retrouve dans une barre d'onglets, « Bons passagers · fiche » non.
+  useTabTitle(account.data?.account?.person?.name);
   if (account.loading) return <Spinner />;
   if (account.error) return <div className="alert alert-error">{account.error}</div>;
 
   const { person, balances, entries } = account.data.account;
-  const bonList = bons.data?.bons ?? [];
+  const isFournisseur = Boolean(person.is_fournisseur);
+  const isPassager = Boolean(person.is_passager);
+  // Merge without double counting: a bon can be in both lists when the person
+  // carries goods they supplied themselves.
+  const bonMap = new Map();
+  for (const b of [...(bons.data?.bons ?? []), ...(carried.data?.bons ?? [])]) bonMap.set(b.id, b);
+  const bonList = [...bonMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const orderList = orders.data?.orders ?? [];
 
   const officeCaisses = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
   const personPayments = (allPayments.data?.payments ?? []).filter((p) => String(p.person_id) === String(id));
   const dzd = balances.find((b) => b.currency_code === 'DZD')?.balance ?? '0';
-  const state = balanceState(type, dzd);
+  const state = balanceState(dzd);
+  // Which way the money goes is no longer decided by what they are, but by what
+  // the account says — a person can owe as a fournisseur and be owed as a
+  // passager, and only the net has a direction.
+  const incoming = Number(dzd) <= 0;
   const totalFees = bonList.reduce((s, b) => s + Number(b.transport_fee || 0), 0);
   const activeBons = bonList.filter((b) => b.status !== 'regle').length;
 
-  const openEdit = () => setEdit(isFournisseur
-    ? { name: person.name, phone: person.phone || '', city: person.city || '', notes: person.notes || '' }
-    : { full_name: person.name, type: person.type || 'regular', phone: person.phone || '', notes: person.notes || '' });
+  const openEdit = () => setEdit(personToForm(person));
 
   // Settle the running balance directly from the profile: a fournisseur pays
   // down their debt (cash in), or we pay a passager what we owe (cash out).
@@ -86,11 +103,14 @@ export default function ProfilePage({ type }) {
     e.preventDefault();
     setBusy(true);
     try {
-      await api(`/${base}/${id}/payment`, {
+      await api(`/people/${id}/payment`, {
         method: 'POST',
-        body: { caisseId: Number(pay.caisseId), amount: pay.amount, currency: pay.currency, note: pay.note || undefined },
+        body: {
+          caisseId: Number(pay.caisseId), amount: pay.amount, currency: pay.currency,
+          direction: incoming ? 'in' : 'out', note: pay.note || undefined,
+        },
       });
-      toast.success(isFournisseur ? 'Encaissement enregistré.' : 'Paiement enregistré.');
+      toast.success(incoming ? 'Encaissement enregistré.' : 'Paiement enregistré.');
       setPay({ caisseId: '', amount: '', note: '', currency: 'DZD' });
       account.reload();
     } catch (err) { toast.error(errorMessage(err)); }
@@ -101,7 +121,7 @@ export default function ProfilePage({ type }) {
     e.preventDefault();
     setBusy(true);
     try {
-      await api(`/${base}/${id}`, { method: 'PUT', body: edit });
+      await api(`/people/${id}`, { method: 'PUT', body: personBody(edit) });
       toast.success('Profil mis à jour.');
       setEdit(null);
       account.reload();
@@ -112,9 +132,6 @@ export default function ProfilePage({ type }) {
   return (
     <div style={{ '--accent': accent }}>
       <div className="page-head page-head-bar">
-        <Link to={`/${base}`} className="btn-back">
-          <IconEl name="chevronLeft" />Retour aux {isFournisseur ? 'fournisseurs' : 'passagers'}
-        </Link>
         <span className="page-head-name">{person.name}</span>
       </div>
 
@@ -124,12 +141,12 @@ export default function ProfilePage({ type }) {
 
         <div className="profile-id">
           <div className="profile-name">{person.name}</div>
-          <div style={{ marginTop: 7 }}>
-            <span className="badge badge-gold">{isFournisseur ? 'Fournisseur' : TYPE_LABEL[person.type] || 'Passager'}</span>
+          <div className="profile-roles">
+            <RoleBadges person={person} />
+            {isPassager && <span className="type-badge">{TYPE_LABEL[person.passager_type] || 'Régulier'}</span>}
           </div>
           <div className="profile-meta">
             {person.phone && <span className="profile-meta-item"><IconEl name="phone" />{person.phone}</span>}
-            {isFournisseur && person.city && <span className="profile-meta-item"><IconEl name="pin" />{person.city}</span>}
             {person.created_at && <span className="profile-meta-item"><IconEl name="calendar" />Depuis le {new Date(person.created_at).toLocaleDateString('fr-FR')}</span>}
             {person.notes && <span className="profile-meta-item"><IconEl name="note" />{person.notes}</span>}
           </div>
@@ -137,7 +154,7 @@ export default function ProfilePage({ type }) {
 
         <div className="profile-actions">
           <button className="btn" onClick={() => (edit ? setEdit(null) : openEdit())}>
-            <IconEl name="edit" />{edit ? 'Fermer' : 'Modifier'}
+            <IconEl name={edit ? 'close' : 'edit'} />{edit ? 'Fermer' : 'Modifier'}
           </button>
         </div>
 
@@ -163,31 +180,16 @@ export default function ProfilePage({ type }) {
 
       {edit && (
         <form className="panel op-form" onSubmit={save}>
-          {isFournisseur ? (
-            <>
-              <label className="field field-grow"><span>Nom</span>
-                <input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
-              <label className="field"><span>Téléphone</span>
-                <input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></label>
-              <label className="field"><span>Ville</span>
-                <input value={edit.city} onChange={(e) => setEdit({ ...edit, city: e.target.value })} /></label>
-            </>
-          ) : (
-            <>
-              <label className="field field-grow"><span>Nom complet</span>
-                <input autoFocus value={edit.full_name} onChange={(e) => setEdit({ ...edit, full_name: e.target.value })} /></label>
-              <label className="field"><span>Type</span>
-                <select value={edit.type} onChange={(e) => setEdit({ ...edit, type: e.target.value })}>
-                  <option value="regular">Régulier</option>
-                  <option value="auto">Auto-entrepreneur</option>
-                </select></label>
-              <label className="field"><span>Téléphone</span>
-                <input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></label>
-            </>
-          )}
+          <label className="field field-grow"><span>Nom</span>
+            <input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
+          <label className="field"><span>Téléphone</span>
+            <input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></label>
           <label className="field field-grow"><span>Notes</span>
             <input value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></label>
-          <button className="btn btn-gold" disabled={busy}>Enregistrer</button>
+          {/* Ajouter le rôle manquant se fait ici, en un clic : la fiche, les
+              bons et le compte restent les mêmes. */}
+          <RolePicker value={edit} onChange={setEdit} />
+          <button className="btn btn-gold" disabled={busy || !personValid(edit)}>Enregistrer</button>
         </form>
       )}
 
@@ -206,7 +208,7 @@ export default function ProfilePage({ type }) {
           <div className="balances-row">
             {balances.length === 0 && <div className="muted">Aucun mouvement.</div>}
             {balances.map((b) => {
-              const st = balanceState(type, b.balance);
+              const st = balanceState(b.balance);
               return (
                 <div key={b.currency_code} className={`balance-card ${b.currency_code === 'DZD' ? 'balance-primary balance-own' : ''}`}>
                   <div className="balance-code">{b.currency_code}</div>
@@ -217,19 +219,19 @@ export default function ProfilePage({ type }) {
             })}
           </div>
           <div className="panel">
-            <h2 className="panel-title">{isFournisseur ? 'Encaisser une dette' : 'Payer le passager'}</h2>
+            <h2 className="panel-title">{incoming ? 'Encaisser une dette' : 'Payer cette personne'}</h2>
             <div className="money-head">
-              <span className={`money-dir ${isFournisseur ? 'in' : 'out'}`}>{isFournisseur ? 'Entrée de caisse' : 'Sortie de caisse'}</span>
+              <span className={`money-dir ${incoming ? 'in' : 'out'}`}>{incoming ? 'Entrée de caisse' : 'Sortie de caisse'}</span>
               <span>
                 {Number(dzd) === 0
                   ? 'Ce compte est soldé.'
-                  : isFournisseur
-                    ? <>Ce fournisseur doit <strong className="neg">{formatMoney(Math.abs(Number(dzd)))} DZD</strong>.</>
-                    : <>Vous devez <strong className="pos">{formatMoney(Math.abs(Number(dzd)))} DZD</strong> à ce passager.</>}
+                  : incoming
+                    ? <>Cette personne doit <strong className="neg">{formatMoney(Math.abs(Number(dzd)))} DZD</strong>.</>
+                    : <>Vous lui devez <strong className="pos">{formatMoney(Math.abs(Number(dzd)))} DZD</strong>.</>}
               </span>
             </div>
             <form className="op-form" onSubmit={submitPayment}>
-              <label className="field"><span>{isFournisseur ? 'Caisse qui reçoit' : 'Caisse qui paie'}</span>
+              <label className="field"><span>{incoming ? 'Caisse qui reçoit' : 'Caisse qui paie'}</span>
                 <select
                   value={pay.caisseId}
                   onChange={(e) => {
@@ -245,16 +247,16 @@ export default function ProfilePage({ type }) {
                   {(currencies.data?.currencies ?? []).map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
                 </select></label>
               <label className="field"><span>Montant</span>
-                <input inputMode="decimal" value={pay.amount} placeholder={formatMoney(Math.abs(Number(dzd)))}
-                  onChange={(e) => setPay({ ...pay, amount: e.target.value.replace(',', '.') })} /></label>
+                <AmountInput value={pay.amount} placeholder={formatMoney(Math.abs(Number(dzd)))}
+                  onChange={(v) => setPay({ ...pay, amount: v })} /></label>
               <label className="field field-grow"><span>Note</span>
                 <input value={pay.note} onChange={(e) => setPay({ ...pay, note: e.target.value })} placeholder="acompte, règlement partiel…" /></label>
               <button className="btn btn-gold" disabled={busy || !pay.caisseId || !(Number(pay.amount) > 0)}>
-                {busy ? '…' : isFournisseur ? 'Encaisser' : 'Payer'}
+                {busy ? '…' : incoming ? 'Encaisser' : 'Payer'}
               </button>
             </form>
             <p className="muted line-hint">
-              Un montant partiel est accepté : le solde restant demeure {isFournisseur ? 'dû par le fournisseur' : 'dû au passager'}.
+              Un montant partiel est accepté : le solde restant reste {incoming ? 'dû par cette personne' : 'dû à cette personne'}.
             </p>
 
             {/* Anything that is not a plain settlement: an advance, a refund, a
@@ -262,14 +264,14 @@ export default function ProfilePage({ type }) {
             <div className="lines-head" style={{ marginTop: 18 }}>
               <span>Autre opération</span>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTxForm(txForm ? null : { direction: 'out', type: 'avance', amount: '', caisseId: '', note: '' })}>
-                {txForm ? 'Fermer' : '+ Opération libre'}
+                <IconEl name={txForm ? 'close' : 'plus'} />{txForm ? 'Fermer' : 'Opération libre'}
               </button>
             </div>
             {txForm && (
               <form className="op-form" onSubmit={(e) => {
                 e.preventDefault();
                 runPay(() => api('/person-transactions', { method: 'POST', body: {
-                  personType: type, personId: Number(id), direction: txForm.direction,
+                  personType: 'personne', personId: Number(id), direction: txForm.direction,
                   amount: txForm.amount, type: txForm.type,
                   caisseId: txForm.caisseId || undefined, note: txForm.note || undefined,
                 } }), 'Opération enregistrée.');
@@ -290,7 +292,7 @@ export default function ProfilePage({ type }) {
                     <option value="autre">Autre</option>
                   </select></label>
                 <label className="field"><span>Montant</span>
-                  <input inputMode="decimal" value={txForm.amount} onChange={(e) => setTxForm({ ...txForm, amount: e.target.value.replace(',', '.') })} /></label>
+                  <AmountInput value={txForm.amount} onChange={(v) => setTxForm({ ...txForm, amount: v })} /></label>
                 <label className="field"><span>Caisse (optionnel)</span>
                   <select value={txForm.caisseId} onChange={(e) => setTxForm({ ...txForm, caisseId: e.target.value })}>
                     <option value="">— écriture seule, sans mouvement d’argent —</option>
@@ -347,12 +349,12 @@ export default function ProfilePage({ type }) {
                     <div className="field field-grow"><span>Corriger le paiement</span>
                       <span className="muted">La caisse et ce compte sont réajustés ensemble.</span></div>
                     <label className="field"><span>Montant ({editPay.currency})</span>
-                      <input autoFocus inputMode="decimal" value={editPay.amount}
-                        onChange={(e) => setEditPay({ ...editPay, amount: e.target.value.replace(',', '.') })} /></label>
+                      <AmountInput autoFocus value={editPay.amount}
+                        onChange={(v) => setEditPay({ ...editPay, amount: v })} /></label>
                     <label className="field field-grow"><span>Note</span>
                       <input value={editPay.note} onChange={(e) => setEditPay({ ...editPay, note: e.target.value })} /></label>
                     <button className="btn btn-gold" disabled={busy || !(Number(editPay.amount) > 0)}>Enregistrer</button>
-                    <button type="button" className="btn btn-ghost" onClick={() => setEditPay(null)}>Annuler</button>
+                    <button type="button" className="btn btn-ghost" onClick={() => setEditPay(null)}><IconEl name="close" />Annuler</button>
                   </form>
                 )}
               </>
@@ -412,12 +414,13 @@ export default function ProfilePage({ type }) {
           {bonList.length ? (
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Référence</th><th>{isFournisseur ? 'Passager' : 'Fournisseur'}</th><th>Statut</th><th className="right">Frais</th><th className="right">Perte</th><th>Date</th></tr></thead>
+                <thead><tr><th>Référence</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th><th className="right">Frais</th><th className="right">Perte</th><th>Date</th></tr></thead>
                 <tbody>
                   {bonList.map((b) => (
                     <tr key={b.id} className="clickable" onClick={() => navigate(`/bons-passager/${b.id}`)}>
                       <td><span className="gold">{b.reference}</span></td>
-                      <td>{isFournisseur ? (b.passager_name || '—') : b.fournisseur_name}</td>
+                      <td>{b.passager_name || '—'}</td>
+                      <td className="muted">{b.fournisseur_name || '—'}</td>
                       <td><span className={`status-badge ${BON_STATUS[b.status].cls}`}>{BON_STATUS[b.status].label}</span></td>
                       <td className="right">{formatMoney(b.transport_fee, b.transport_currency)}</td>
                       <td className={`right ${Number(b.loss_total) > 0 ? 'neg' : ''}`}>{formatMoney(b.loss_total)}</td>
@@ -464,7 +467,7 @@ export default function ProfilePage({ type }) {
           : ''}
         bullets={[
           confirmPay?.caisse_label ? `Retiré de la caisse « ${confirmPay.caisse_label} ».` : 'Retiré de la caisse.',
-          isFournisseur ? 'La dette du fournisseur remonte du même montant.' : 'Ce que vous devez au passager remonte du même montant.',
+          'Le solde de cette personne remonte du même montant.',
         ]}
         confirmLabel="Annuler le paiement"
         busy={busy}

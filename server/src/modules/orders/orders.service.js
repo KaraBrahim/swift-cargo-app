@@ -14,7 +14,7 @@ export async function createOrder({ admin, data, ip }) {
     throw errors.validation([{ field: 'bons', message: 'Au moins un bon (un passager) est requis.' }]);
   }
   return withTx(async (c) => {
-    const f = await c.query('SELECT 1 FROM fournisseurs WHERE id=$1 AND active=TRUE', [data.fournisseurId]);
+    const f = await c.query('SELECT 1 FROM people WHERE id=$1 AND active=TRUE AND is_fournisseur', [data.fournisseurId]);
     if (!f.rows.length) throw errors.notFound('Fournisseur introuvable ou inactif.');
 
     const oRes = await c.query(
@@ -77,7 +77,7 @@ export async function listOrders({ status, search, fournisseurId, limit = 100 } 
             COALESCE(SUM(b.transport_fee),0) AS total_fee,
             COALESCE(SUM(b.loss_total),0) AS total_loss
        FROM orders o
-       JOIN fournisseurs f ON f.id = o.fournisseur_id
+       JOIN people f ON f.id = o.fournisseur_id
        LEFT JOIN bons b ON b.order_id = o.id
        ${where}
       GROUP BY o.id, f.name
@@ -89,9 +89,9 @@ export async function listOrders({ status, search, fournisseurId, limit = 100 } 
 
 export async function getOrderDetail(id, client = getPool()) {
   const { rows } = await client.query(
-    `SELECT o.*, f.name AS fournisseur_name, f.phone AS fournisseur_phone, a.full_name AS created_by_name
+    `SELECT o.*, f.name AS fournisseur_name, f.phone AS fournisseur_phone, a.full_name AS created_by_name, a.role AS created_by_role
        FROM orders o
-       JOIN fournisseurs f ON f.id = o.fournisseur_id
+       JOIN people f ON f.id = o.fournisseur_id
        JOIN admins a ON a.id = o.created_by
       WHERE o.id = $1`,
     [id]
@@ -99,9 +99,9 @@ export async function getOrderDetail(id, client = getPool()) {
   if (!rows[0]) throw errors.notFound('Ordre introuvable.');
 
   const { rows: bons } = await client.query(
-    `SELECT b.*, p.full_name AS passager_name,
+    `SELECT b.*, p.name AS passager_name,
             (SELECT COUNT(*) FROM bon_lines bl WHERE bl.bon_id = b.id) AS line_count
-       FROM bons b LEFT JOIN passagers p ON p.id = b.passager_id
+       FROM bons b LEFT JOIN people p ON p.id = b.passager_id
       WHERE b.order_id = $1 ORDER BY b.id`,
     [id]
   );
@@ -124,12 +124,12 @@ export async function getOrderDetail(id, client = getPool()) {
   // The bons passagers actually carrying this order's goods.
   const { rows: carriers } = await client.query(
     `SELECT DISTINCT cb.id, cb.reference, cb.status, cb.transport_fee, cb.transport_currency,
-            cb.passager_payment, p.full_name AS passager_name
+            cb.passager_payment, p.name AS passager_name
        FROM bon_lines bl
        JOIN bons b ON b.id = bl.bon_id
        JOIN bon_lines cl ON cl.source_line_id = bl.id
        JOIN bons cb ON cb.id = cl.bon_id
-       LEFT JOIN passagers p ON p.id = cb.passager_id
+       LEFT JOIN people p ON p.id = cb.passager_id
       WHERE b.order_id = $1
       ORDER BY cb.reference`,
     [id]
