@@ -131,10 +131,26 @@ function startServer(cfg) {
   child.on('exit', (code) => {
     child = null;
     if (app.isQuitting || code === 0) return;
+
+    // PostgreSQL embarqué remet les droits d'exécution sur ses binaires au
+    // démarrage. Dans « C:\Program Files », un utilisateur ordinaire n'a pas le
+    // droit d'écrire : chmod échoue et rien ne démarre. L'installeur pose donc
+    // l'application dans le dossier de l'utilisateur — mais une installation
+    // faite avant cette correction, ou déplacée à la main, tombe encore dessus,
+    // et le message brut ne dit pas quoi faire.
+    const readOnly = /EPERM|EACCES/.test(tail) && /chmod/.test(tail);
     dialog.showErrorBox(
       'Swift Cargo n’a pas pu démarrer',
-      `Le service s’est arrêté (code ${code}).\n\n${tail.slice(-1500)}\n\n`
-      + `Configuration : ${CONFIG_FILE}`
+      readOnly
+        ? 'L’application est installée dans un dossier protégé par Windows '
+          + `(${app.getAppPath()}).\n\n`
+          + 'PostgreSQL a besoin d’écrire dans son propre dossier pour démarrer.\n\n'
+          + 'Désinstallez Swift Cargo, puis réinstallez-le en laissant le dossier '
+          + 'proposé par défaut — il s’installe alors dans votre profil utilisateur.\n\n'
+          + 'Vos données ne sont pas concernées : elles sont ailleurs, dans\n'
+          + DATA_DIR
+        : `Le service s’est arrêté (code ${code}).\n\n${tail.slice(-1500)}\n\n`
+          + `Configuration : ${CONFIG_FILE}`
     );
     app.quit();
   });

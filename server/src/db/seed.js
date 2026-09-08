@@ -82,14 +82,28 @@ export async function runSeed() {
     const adminHash = await bcrypt.hash(config.seedAdminPassword, config.bcryptRounds);
     SEED_USERS.push(...ADMINS.map((a) => ({ ...a, hash: adminHash })));
   }
-  for (const a of SEED_USERS) {
-    // Password is set only on first insert; role/name/office are kept in sync.
-    await pool.query(
-      `INSERT INTO admins (username, full_name, password_hash, office, role) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name, office = EXCLUDED.office, role = EXCLUDED.role`,
-      [a.username, a.full_name, a.hash, a.office, a.role]
-    );
-  }
+  // Les comptes se répliquent depuis la migration 026. Or CHAQUE machine sème
+  // son propre super-admin au premier démarrage, avec un mot de passe qui lui
+  // est propre : si un poste poussait le sien, il écraserait celui du hub — et
+  // le compte unique redeviendrait trois comptes qui se battent.
+  //
+  // Le hub sème et diffuse ; un poste sème pour lui-même, en silence. C'est à
+  // cela que sert `app.sync_applying` : le déclencheur de capture le lit et
+  // n'enregistre rien. Le poste démarre donc utilisable seul, et adopte le
+  // compte du hub dès la première synchronisation.
+  await withTx(async (client) => {
+    if (config.site !== 'cloud') {
+      await client.query("SELECT set_config('app.sync_applying', 'on', true)");
+    }
+    for (const a of SEED_USERS) {
+      // Password is set only on first insert; role/name/office are kept in sync.
+      await client.query(
+        `INSERT INTO admins (username, full_name, password_hash, office, role) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name, office = EXCLUDED.office, role = EXCLUDED.role`,
+        [a.username, a.full_name, a.hash, a.office, a.role]
+      );
+    }
+  });
 
   // Two office caisses (+ a balance row per currency).
   for (const o of OFFICES) {
