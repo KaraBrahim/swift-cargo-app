@@ -23,7 +23,8 @@
       { "from": "payload", "to": "payload" }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
