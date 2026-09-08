@@ -17,6 +17,9 @@ import CategoriesPage from './pages/CategoriesPage.jsx';
 import ChargesPage from './pages/ChargesPage.jsx';
 import OrdersPage from './pages/OrdersPage.jsx';
 import OrderDetailPage from './pages/OrderDetailPage.jsx';
+import OrderGoodsPage from './pages/OrderGoodsPage.jsx';
+import NewOrderPage from './pages/NewOrderPage.jsx';
+import NewBonPage from './pages/NewBonPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import RapportsPage from './pages/RapportsPage.jsx';
 import ImpressionsPage from './pages/ImpressionsPage.jsx';
@@ -64,8 +67,13 @@ export function AppPages({ path }) {
       <Route path="/caisses/:id" element={<CaisseDetailPage />} />
       <Route path="/charges" element={<ChargesPage />} />
       <Route path="/bons-fournisseur" element={<OrdersPage />} />
+      <Route path="/bons-fournisseur/nouveau" element={<NewOrderPage />} />
       <Route path="/bons-fournisseur/:id" element={<OrderDetailPage />} />
+      {/* Modifier les marchandises d'un bon fournisseur, sans sortir de sa
+          section : l'écran est celui d'un bon, l'adresse reste celle de l'ordre. */}
+      <Route path="/bons-fournisseur/:id/marchandises" element={<OrderGoodsPage />} />
       <Route path="/bons-passager" element={<BonsPage />} />
+      <Route path="/bons-passager/nouveau" element={<NewBonPage />} />
       <Route path="/bons-passager/:id" element={<BonDetailPage />} />
       <Route path="/stock" element={<StockPage />} />
       <Route path="/articles" element={<ArticlesPage />} />

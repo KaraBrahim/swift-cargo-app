@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi, useDebounced } from '../api/useApi.js';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 import { Spinner, errorMessage, useToast, PageHeader, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
 import { RolePicker, RoleBadges, emptyPerson, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
@@ -13,6 +14,7 @@ const ACCENT = 'var(--c-people)';
 // someone who does both is in both lists — with one fiche and one balance.
 export default function FournisseursPage() {
   const toast = useToast();
+  const isSuper = useIsSuper();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   // The box follows your typing; the request waits for you to stop.
@@ -94,7 +96,12 @@ export default function FournisseursPage() {
                     <td className="muted">{f.notes || '—'}</td>
                     <td className="right nowrap">
                       <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setForm(personToForm(f)); }}>Modifier</button>{' '}
-                      <button className="btn btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); remove(f.id); }}>Retirer</button>
+                      {/* Retirer une fiche est un geste de super-administrateur :
+                          un clic, aucune confirmation, et la personne disparaît de
+                          toutes les listes. Voir useIsSuper. */}
+                      {isSuper && (
+                        <button className="btn btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); remove(f.id); }}>Retirer</button>
+                      )}
                     </td>
                   </tr>
                 ))}

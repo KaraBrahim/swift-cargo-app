@@ -1,0 +1,147 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Swift Cargo — les modales de notification (SweetAlert2), aux couleurs
+   de la maison.
+
+   Rien n'est écrit en dur ici : chaque valeur pointe vers un token de
+   tokens.css. C'est ce qui fait que les quatre thèmes (data-mode ×
+   data-palette) suivent tout seuls, sans une seule ligne de plus.
+
+   ── Deux détails de cascade, sinon rien ne s'applique ──
+
+   1. SweetAlert2 est chargé à la demande (import dynamique) et le build
+      « all » INJECTE sa feuille de style dans le <head> à ce moment-là —
+      donc APRÈS celle-ci. À spécificité égale, c'est lui qui gagnerait.
+      D'où le `:root:root` : deux fois la même chose, spécificité (0,2,0)
+      au lieu de (0,1,0), et nos variables passent devant.
+
+   2. Ses règles, elles, sont écrites `div:where(.swal2-icon).swal2-error`.
+      `:where()` ne compte pas dans la spécificité : ça vaut (0,1,1). Une
+      simple double classe `.swal2-icon.swal2-error` vaut (0,2,0) et
+      l'emporte, où qu'elle soit dans le fichier.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root:root {
+  /* La carte : exactement celle de .modal-card (ConfirmDialog). */
+  --swal2-background: var(--surface-1);
+  --swal2-color: var(--text);
+  --swal2-border: 1px solid var(--border-strong);
+  --swal2-border-radius: 1rem;
+  --swal2-width: 26rem;
+  --swal2-padding: 0 0 1.5rem;
+
+  /* Le fond assombri des erreurs — la même formule que .modal-backdrop. */
+  --swal2-backdrop: color-mix(in srgb, var(--bg) 68%, transparent);
+
+  /* Le X. */
+  --swal2-close-button-color: var(--muted);
+  --swal2-close-button-font-size: 1.9rem;
+  --swal2-close-button-box-shadow: none;
+  --swal2-close-button-focus-box-shadow: none;
+
+  /* Le bouton « Fermer » des erreurs, repris de .btn-gold. */
+  --swal2-confirm-button-background-color: var(--brand);
+  --swal2-confirm-button-color: var(--brand-ink);
+  --swal2-confirm-button-border-radius: var(--radius-soft, 0.75rem);
+  --swal2-confirm-button-box-shadow: none;
+
+  --swal2-title-padding: 1.1rem 1.4rem 0;
+  --swal2-html-container-padding: 0.55rem 1.6rem 0.2rem;
+  --swal2-actions-margin: 1.35rem auto 0;
+}
+
+/* ── La carte et son texte ─────────────────────────────────────────── */
+.swal2-popup.swal2-modal {
+  box-shadow: var(--shadow);
+  font-family: inherit;
+}
+.swal2-popup .swal2-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.35;
+}
+.swal2-popup .swal2-html-container {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--muted);
+  /* Un message d'erreur du serveur peut être long (détails de validation,
+     référence de support) : il s'enroule au lieu de déborder. */
+  overflow-wrap: anywhere;
+}
+.swal2-popup .swal2-close:hover {
+  color: var(--text);
+}
+.swal2-popup .swal2-confirm {
+  min-width: 120px;
+  font-weight: 600;
+}
+
+/* ── Les icônes animées, repeintes ─────────────────────────────────── */
+/* Succès — la coche se trace. */
+.swal2-icon.swal2-success {
+  border-color: var(--green-border);
+  color: var(--green);
+}
+.swal2-icon.swal2-success .swal2-success-ring {
+  border-color: var(--green-bg);
+}
+.swal2-icon.swal2-success [class^='swal2-success-line'] {
+  background-color: var(--green);
+}
+
+/* Erreur — la croix se dessine. */
+.swal2-icon.swal2-error {
+  border-color: var(--red-border);
+  color: var(--red);
+}
+.swal2-icon.swal2-error [class^='swal2-x-mark-line'] {
+  background-color: var(--red);
+}
+
+/* Information — l'anneau et le « i ». */
+.swal2-icon.swal2-info {
+  border-color: var(--brand-deep);
+  color: var(--brand-text);
+}
+
+/* ── La barre de temps, à la couleur du type ───────────────────────── */
+/* Le minuteur est un enfant du popup, pas de l'icône : on retrouve le
+   type par la classe que le provider pose sur le popup. */
+.swal2-popup.sc-notify-success .swal2-timer-progress-bar { background: var(--green); }
+.swal2-popup.sc-notify-error   .swal2-timer-progress-bar { background: var(--red); }
+.swal2-popup.sc-notify-info    .swal2-timer-progress-bar { background: var(--brand); }
+
+/* ── Le fond flouté, pour les seules erreurs ───────────────────────── */
+/* Sur un succès, backdrop:false rend le conteneur transparent ET
+   traversant aux clics (body.swal2-no-backdrop, réglé par la lib) : il
+   ne faut donc surtout pas flouter là, ça flouterait toute la page. */
+body:not(.swal2-no-backdrop) .swal2-container.sc-notify-blocking {
+  backdrop-filter: blur(5px);
+}
+
+/* ── Au-dessus de tout le reste ────────────────────────────────────── */
+/* Les couches maison : popover de sélecteur 70, bandeau réseau 95,
+   modale de confirmation 300. Une notification doit pouvoir s'afficher
+   par-dessus une ConfirmDialog ouverte. */
+.swal2-container { z-index: 1060; }
+
+/* ── Petits écrans ─────────────────────────────────────────────────── */
+@media (max-width: 420px) {
+  :root:root {
+    --swal2-width: calc(100vw - 2rem);
+    --swal2-icon-zoom: 0.82;
+  }
+  .swal2-popup .swal2-title { font-size: 1.05rem; }
+}
+
+/* ── Mouvement réduit ──────────────────────────────────────────────── */
+/* Le tracé de la coche est une animation comme une autre : quelqu'un qui
+   a demandé moins de mouvement doit voir l'icône, pas la voir bouger. */
+@media (prefers-reduced-motion: reduce) {
+  .swal2-popup,
+  .swal2-icon,
+  .swal2-icon * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

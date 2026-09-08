@@ -29,3 +29,56 @@ export function formatMoney(value, code) {
 // Quantities, weights and CBM: up to 3 decimals, trailing zeros dropped.
 export const formatQty = (value) =>
   value == null ? '—' : formatNumber(value, { decimals: 3, trim: true });
+
+// ── Dates ────────────────────────────────────────────────────────────
+// Ce fichier ne parlait que de nombres ; les dates étaient écrites à la main,
+// différemment, dans six écrans. Une plage de rapport doit se lire de la même
+// façon à l'écran, sur le papier et dans un nom de fichier.
+
+const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+// Une date ISO (AAAA-MM-JJ) découpée SANS passer par new Date() : construire
+// un Date depuis « 2026-09-01 » le lit en UTC, et à Alger cela peut afficher
+// le 31 août. Le texte est déjà le jour voulu — on ne fait que le relire.
+const parts = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? ''));
+  return m ? { y: +m[1], m: +m[2], d: +m[3] } : null;
+};
+
+// « 1er septembre 2026 ». L'année tombe quand elle est celle en cours et que
+// l'appelant le demande — dans « du 1er au 8 septembre », la répéter deux fois
+// n'apprend rien.
+export function formatDateFr(iso, { year = true } = {}) {
+  const p = parts(iso);
+  if (!p) return String(iso ?? '—');
+  const jour = p.d === 1 ? '1er' : String(p.d);
+  return `${jour} ${MOIS[p.m - 1]}${year ? ` ${p.y}` : ''}`;
+}
+
+// « du 1er au 8 septembre 2026 », et ses cas particuliers : un seul jour se dit
+// « le 8 septembre », un mois entier se dit « septembre 2026 ». Un intitulé qui
+// répète le mois trois fois se lit moins bien qu'une phrase.
+export function formatRangeFr(from, to) {
+  const a = parts(from);
+  const b = parts(to);
+  if (!a || !b) return '—';
+  if (from === to) return `le ${formatDateFr(from)}`;
+  const memeMois = a.y === b.y && a.m === b.m;
+  if (memeMois && a.d === 1 && b.d === lastDayOf(a.y, a.m)) return `${MOIS[a.m - 1]} ${a.y}`;
+  if (memeMois) return `du ${formatDateFr(from, { year: false })} au ${formatDateFr(to)}`;
+  if (a.y === b.y) return `du ${formatDateFr(from, { year: false })} au ${formatDateFr(to)}`;
+  return `du ${formatDateFr(from)} au ${formatDateFr(to)}`;
+}
+
+export const lastDayOf = (y, m) => new Date(y, m, 0).getDate();
+
+// Le nombre de jours couverts, bornes comprises — ce que « 8 jours » veut dire
+// quand on lit « du 1er au 8 ».
+export function daysBetween(from, to) {
+  const a = parts(from);
+  const b = parts(to);
+  if (!a || !b) return 0;
+  const ms = Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d);
+  return Math.round(ms / 86400000) + 1;
+}

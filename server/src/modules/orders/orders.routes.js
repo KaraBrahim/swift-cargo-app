@@ -2,21 +2,26 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireSuperadmin } from '../../middleware/auth.js';
+import { idempotent } from '../../middleware/idempotent.js';
 import * as svc from './orders.service.js';
 
 export const ordersRouter = Router();
 ordersRouter.use(requireAuth);
+// Un réessai après un timeout ne doit pas rejouer l'opération : voir
+// middleware/idempotent.js. Sans l'en-tête, comportement inchangé.
+ordersRouter.use(idempotent);
 
 const id = z.coerce.number().int().positive();
 const num = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const status = z.enum(['ouverte', 'en_transit', 'arrivee', 'cloturee']);
+const status = z.enum(['ouverte', 'en_transit', 'arrivee', 'livree', 'cloturee']);
 
 const bonSchema = z.object({
   passagerId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
   transportCurrency: z.string().trim().toUpperCase().length(3).default('DZD'),
   transportFee: num.optional(),
-  discount: num.optional(),
+  // La marge du bon fournisseur, saisie a la main une fois les details connus.
+  commission: num.optional(),
   notes: z.string().trim().max(1000).optional(),
   lines: z.array(z.object({
     // A line names an article (typed designation OR a reused itemId) and is
@@ -28,6 +33,7 @@ const bonSchema = z.object({
     categoryId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
     measure: z.enum(['quantite', 'poids', 'cbm']).optional(),
     value: num.optional(),
+    missingUnitPrice: num.optional(),
     quantity: num.optional(),
     unit: z.string().trim().max(20).optional(),
     weight_kg: num.optional(),
@@ -68,9 +74,33 @@ ordersRouter.delete(
   asyncHandler(async (req, res) => res.json(await svc.deleteOrder({ admin: req.admin, id: req.params.id, ip: req.ip })))
 );
 
-// Clickable stepper: set every child bon to the stage matching the order stage.
+// Remettre au fournisseur ce qui est arrivé — tout, ou une partie.
+//
+// Il n'y a plus de POST /orders/:id/status : le statut d'un ordre est DÉRIVÉ de
+// cinq portes (affectation, voyage, arrivée, livraison, paiement), et une route
+// qui l'écrivait se faisait écraser par recomputeOrderStatus une ligne plus loin.
+// Le stepper de l'écran est redevenu un indicateur.
 ordersRouter.post(
-  '/orders/:id/status',
-  validate({ params: z.object({ id }), body: z.object({ target: status }) }),
-  asyncHandler(async (req, res) => res.json({ order: await svc.setOrderStatus({ admin: req.admin, id: req.params.id, target: req.body.target, ip: req.ip }) }))
+  '/orders/:id/deliver',
+  validate({
+    params: z.object({ id }),
+    body: z.object({
+      lines: z.array(z.object({
+        lineId: z.coerce.number().int().positive(),
+        quantity: num,
+      })).min(1),
+    }),
+  }),
+  asyncHandler(async (req, res) => res.json({
+    order: await svc.deliverOrder({ admin: req.admin, id: req.params.id, lines: req.body.lines, ip: req.ip }),
+  }))
+);
+
+ordersRouter.post(
+  '/orders/:id/deliver/cancel',
+  requireSuperadmin,
+  validate({ params: z.object({ id }) }),
+  asyncHandler(async (req, res) => res.json({
+    order: await svc.cancelDelivery({ admin: req.admin, id: req.params.id, ip: req.ip }),
+  }))
 );

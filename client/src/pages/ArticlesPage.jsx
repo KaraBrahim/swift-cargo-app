@@ -10,12 +10,14 @@ import { Spinner, PageHeader, EmptyState, errorMessage, useToast } from '../comp
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { fuzzyRank } from '../lib/fuzzy.js';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const ACCENT = 'var(--c-stock)';
 const EMPTY = { category_id: '', name: '', notes: '' };
 
 export default function ArticlesPage() {
   const toast = useToast();
+  const isSuper = useIsSuper();
   const navigate = useNavigate();
   const items = useApi('/stock/items?includeInactive=true');
   const cats = useApi('/stock/categories?includeInactive=true');
@@ -119,14 +121,20 @@ export default function ArticlesPage() {
                         onClick={() => setForm({ id: it.id, name: it.name, category_id: it.category_id || '', notes: it.notes || '' })}>
                         <IconEl name="edit" />
                       </button>
-                      <button className="icon-btn" title={it.active ? 'Désactiver' : 'Réactiver'} aria-label="Activer/Désactiver"
-                        disabled={busy} onClick={() => toggleActive(it)}>
-                        <IconEl name={it.active ? 'close' : 'check'} />
-                      </button>
-                      <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer"
-                        disabled={busy} onClick={() => setConfirm(it)}>
-                        <IconEl name="trash" />
-                      </button>
+                      {/* Desactiver retire la fiche de toutes les listes : reserve au super-administrateur. Reactiver reste ouvert a tous. */}
+                      {(isSuper || !it.active) && (
+                        <button className="icon-btn" title={it.active ? 'Désactiver' : 'Réactiver'} aria-label="Activer/Désactiver"
+                          disabled={busy} onClick={() => toggleActive(it)}>
+                          <IconEl name={it.active ? 'close' : 'check'} />
+                        </button>
+                      )}
+                      {/* Supprimer definitivement : reserve au super-administrateur. */}
+                      {isSuper && (
+                        <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer"
+                          disabled={busy} onClick={() => setConfirm(it)}>
+                          <IconEl name="trash" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

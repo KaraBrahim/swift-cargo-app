@@ -20,7 +20,8 @@
     "smoke:rates": "node scripts/smoke-rates.js",
     "smoke:dashboard": "node scripts/smoke-dashboard.js",
     "smoke:admin": "node scripts/smoke-admin.js",
-    "demo:bon": "node scripts/demo-bon.js"
+    "demo:bon": "node scripts/demo-bon.js",
+    "demo:seed": "node scripts/seed-demo.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -28,10 +29,12 @@
     "cors": "^2.8.5",
     "decimal.js": "^10.4.3",
     "dotenv": "^16.4.5",
-    "embedded-postgres": "^18.4.0-beta.17",
     "express": "^4.21.2",
     "node-thermal-printer": "^4.6.1",
     "pg": "^8.22.0",
     "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "embedded-postgres": "^18.4.0-beta.17"
   }
 }

@@ -7,6 +7,8 @@ import * as rates from '../src/modules/rates/rates.service.js';
 import * as accounts from '../src/modules/accounts/accounts.service.js';
 import * as bons from '../src/modules/bons/bons.service.js';
 import * as orders from '../src/modules/orders/orders.service.js';
+import { resolveScan } from '../src/modules/scan/scan.service.js';
+import { encodeScan } from '../src/lib/scanCode.js';
 import { getPool } from '../src/db/pool.js';
 
 let db, ctx;
@@ -361,7 +363,127 @@ test('a bon passager carries goods from two fournisseurs and credits each one', 
   assert.equal(bal(a1), '-8000.00', 'facturé 10 000, avoir 2 000 pour les manquants');
   assert.equal(bal(a2), '-4000.00', 'tout est arrivé : aucun avoir');
 
-  // The passager is owed what actually travelled, at cost price.
+  // Le passager est paye son portage, moins ce qu'il n'a pas livre — chiffre a
+  // LA VALEUR de la marchandise (celle convenue avec le fournisseur), pas a son
+  // tarif de route : perdre un écran coûte l'écran.
   const ap = await accounts.getAccount('personne', p.id);
-  assert.equal(bal(ap), '7300.00', '8×600 + 10×250');
+  assert.equal(bal(ap), '6500.00', '8500 de portage − 2×1000 de manquants');
+});
+
+test('la commission s’ajoute au prix de revient et reste acquise sur les manquants', async () => {
+  const pool = getPool();
+  const f = (await pool.query(
+    "INSERT INTO people (name, is_fournisseur) VALUES ('Fourn. Commission', true) RETURNING *"
+  )).rows[0];
+
+  // 40 cartons a 300 = 12 000 de marchandises, plus 1 500 de commission.
+  const o = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f.id, bons: [{
+    transportCurrency: 'DZD', commission: '1500',
+    lines: [{ designation: 'Cartons', measure: 'quantite', value: '40', unitPrice: '300' }],
+  }] } });
+  const detail = await orders.getOrderDetail(o.id);
+  // Chaînes à échelle fixe, comme tout montant qui traverse cette API : ces
+  // trois nombres étaient additionnés en doubles avant l'audit.
+  assert.equal(detail.totals.goods, '12000.00', 'les marchandises seules');
+  assert.equal(detail.totals.commission, '1500.00', 'la marge, isolée');
+  assert.equal(detail.totals.billed, '13500.00', 'à facturer = revient + commission');
+
+  const bal = (a) => a.balances.find((b) => b.currency_code === 'DZD')?.balance;
+  assert.equal(bal(await accounts.getAccount('personne', f.id)), '-13500.00');
+
+  // Un passager en emporte 40 et n'en livre que 35.
+  const pas = (await pool.query(
+    "INSERT INTO people (name, is_passager) VALUES ('Passager Commission', true) RETURNING *"
+  )).rows[0];
+  const lot = (await bons.listAllocatable({ fournisseurId: f.id }))[0];
+  const bon = await bons.createBon({ admin: ctx.admin, data: {
+    passagerId: pas.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', value: '40', unitPrice: '50' }],
+  } });
+  await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
+  await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
+  const l = (await bons.getBonDetail(bon.id)).lines[0];
+  assert.equal(l.missing_unit_price, '300.00', 'la valeur du manquant vient du fournisseur');
+  await bons.reconcile({ admin: ctx.admin, id: bon.id, lines: [{ lineId: l.id, missing: '5' }] });
+  await bons.settle({ admin: ctx.admin, id: bon.id });
+
+  // Avoir de 5 × 300 sur la marchandise ; la commission, elle, est gagnée.
+  assert.equal(bal(await accounts.getAccount('personne', f.id)), '-12000.00',
+    '13 500 facturés − 1 500 d’avoir : la commission reste due');
+});
+
+test('un manquant qui dépasse le portage laisse une dette au passager', async () => {
+  const pool = getPool();
+  const f = (await pool.query(
+    "INSERT INTO people (name, is_fournisseur) VALUES ('Fourn. Perte', true) RETURNING *"
+  )).rows[0];
+  const pas = (await pool.query(
+    "INSERT INTO people (name, is_passager) VALUES ('Passager Perte', true) RETURNING *"
+  )).rows[0];
+
+  const o = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f.id, bons: [{
+    transportCurrency: 'DZD',
+    lines: [{ designation: 'Lot précieux', measure: 'quantite', value: '1', unitPrice: '12000' }],
+  }] } });
+  const lot = (await bons.listAllocatable({ orderId: o.id }))[0];
+  // Il gagne 1 500 pour le porter, et le perd.
+  const bon = await bons.createBon({ admin: ctx.admin, data: {
+    passagerId: pas.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', value: '1', unitPrice: '1500' }],
+  } });
+  await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
+  await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
+  const l = (await bons.getBonDetail(bon.id)).lines[0];
+  await bons.reconcile({ admin: ctx.admin, id: bon.id, lines: [{ lineId: l.id, missing: '1' }] });
+  await bons.settle({ admin: ctx.admin, id: bon.id });
+
+  const bal = (a) => a.balances.find((b) => b.currency_code === 'DZD')?.balance;
+  // 1 500 de portage − 12 000 de manquant : il ne doit pas seulement n'être pas
+  // payé, il doit la différence.
+  assert.equal(bal(await accounts.getAccount('personne', pas.id)), '-10500.00');
+
+  // Revenir en arrière la dénoue exactement, sans la compter deux fois.
+  await bons.setBonStatus({ admin: ctx.admin, id: bon.id, target: 'arrive' });
+  assert.equal(bal(await accounts.getAccount('personne', pas.id)) ?? '0.00', '0.00');
+});
+
+test('un code scanné retrouve sa pièce, et refuse ce qu’il ne connaît pas', async () => {
+  const pool = getPool();
+  const f = (await pool.query(
+    "INSERT INTO people (name, phone, is_fournisseur) VALUES ('Fourn. Scan', '+86 1', true) RETURNING *"
+  )).rows[0];
+  const o = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f.id, bons: [{
+    transportCurrency: 'DZD',
+    lines: [{ designation: 'Scanné', measure: 'quantite', value: '2', unitPrice: '100' }],
+  }] } });
+  const order = await orders.getOrderDetail(o.id);
+
+  const hitOrder = await resolveScan(encodeScan('order', order.uuid));
+  assert.equal(hitOrder.path, `/bons-fournisseur/${o.id}`);
+  assert.equal(hitOrder.reference, order.reference);
+
+  // Le bon fournisseur enfant renvoie vers son ordre, pas vers une fiche à lui.
+  const child = await bons.getBonDetail(order.bons[0].id);
+  assert.equal((await resolveScan(encodeScan('bon', child.uuid))).path, `/bons-fournisseur/${o.id}`);
+
+  const person = await resolveScan(encodeScan('person', f.uuid));
+  assert.equal(person.path, `/personnes/${f.id}`);
+
+  // Un bon passager en transit propose l'action attendue au comptoir.
+  const pas = (await pool.query(
+    "INSERT INTO people (name, is_passager) VALUES ('Passager Scan', true) RETURNING *"
+  )).rows[0];
+  const lot = (await bons.listAllocatable({ orderId: o.id }))[0];
+  const bp = await bons.createBon({ admin: ctx.admin, data: {
+    passagerId: pas.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', value: '2', unitPrice: '40' }],
+  } });
+  await bons.advanceStatus({ admin: ctx.admin, id: bp.id });
+  const hit = await resolveScan(encodeScan('bon', bp.uuid));
+  assert.equal(hit.path, `/bons-passager/${bp.id}`);
+  assert.equal(hit.next.action, 'advance');
+  assert.match(hit.next.label, /Arriv/);
+
+  await assert.rejects(() => resolveScan('SC:B:00000000-0000-4000-8000-000000000000'), /aucune pièce/);
+  await assert.rejects(() => resolveScan('pas un code'), /illisible/);
 });

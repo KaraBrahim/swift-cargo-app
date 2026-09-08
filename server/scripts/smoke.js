@@ -11,6 +11,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { rmSync } from 'node:fs';
 
+// Le code de sortie DIT ce qui s'est passe. Avant, ce script se terminait
+// par process.exit(0) dans le finally : il annoncait « reussi » au shell meme
+// quand une assertion avait echoue, et meme quand Postgres n'avait pas
+// demarre. Un test qui ne peut pas echouer ne teste rien. Il vaut 1 par
+// defaut, et ne descend a 0 que si la ligne de verdict dit PASSED.
+let exitCode = 1;
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '..', '.smoke-pgdata');
 const PGPORT = 55531;
@@ -19,10 +26,14 @@ const base = `http://localhost:${APIPORT}`;
 
 let embedded, server, token;
 const results = [];
-const call = async (method, path, body, expect = 200) => {
+const call = async (method, path, body, expect = 200, idem) => {
   const res = await fetch(base + path, {
     method,
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(idem ? { 'idempotency-key': idem } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => ({}));
@@ -61,8 +72,26 @@ try {
   const dzd = detail.caisse.balances.find((b) => b.currency_code === 'DZD');
   results.push(`\nSolde DZD après conversion (taux 30,5) = ${dzd.balance}  [attendu 30500.00]`);
 
+  // ── La clé d'idempotence, sur une route servie par un routeur TARDIF ──────
+  // Tous les routeurs sont montés sur '/api', donc une requête vers `accounts`
+  // traverse d'abord `caisse` et `people`. Les routes de `caisse` — les seules
+  // que ce smoke touchait — sont servies par le PREMIER routeur qui pose la
+  // clé : elles marchaient donc même quand toutes les autres étaient refusées
+  // avec « Opération déjà en cours de traitement ». D'où ce cas-ci, sur une
+  // charge, qui est servie tard dans la chaîne.
+  const chargeBody = { category: 'internet', label: 'Smoke idempotence', amount: '1200', currency: 'DZD', caisseId };
+  const idemKey = `smoke-idem-${Date.now()}`;
+  await call('POST', '/api/charges', chargeBody, 201, idemKey);
+  await call('POST', '/api/charges', chargeBody, 201, idemKey); // même clé : rejouée, pas réexécutée
+  const { charges = [] } = await call('GET', '/api/charges');
+  const posees = charges.filter((c) => c.label === 'Smoke idempotence').length;
+  results.push(`Deux POST portant la même clé ont créé ${posees} charge(s)  [attendu 1]`);
+  if (posees !== 1) results.push('XX  la cle d’idempotence n’a pas protege l’operation');
+
   console.log(results.join('\n'));
-  console.log(results.every((r) => !r.startsWith('XX')) ? '\nSMOKE PASSED' : '\nSMOKE FAILED');
+  const passed = results.every((r) => !r.startsWith('XX'));
+  console.log(passed ? '\nSMOKE PASSED' : '\nSMOKE FAILED');
+  exitCode = passed ? 0 : 1;
 } catch (e) {
   console.error('SMOKE ERROR:', e);
 } finally {
@@ -70,5 +99,5 @@ try {
   try { await closePool(); } catch {}
   try { await embedded?.stop(); } catch {}
   try { rmSync(dataDir, { recursive: true, force: true }); } catch {}
-  process.exit(0);
+  process.exit(exitCode);
 }

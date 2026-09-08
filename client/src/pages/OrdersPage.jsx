@@ -1,28 +1,31 @@
+// La liste des bons fournisseurs : la marchandise reçue, et ce qu'il en reste à
+// confier. La création vit sur son propre écran (/bons-fournisseur/nouveau).
+
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useApi } from '../api/useApi.js';
-import { Spinner, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
+import { useApi, useDebounced } from '../api/useApi.js';
+import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { ORDER_STATUS } from '../components/orderStatus.js';
 import { IconEl } from '../components/icons.jsx';
-import { LineEditor, emptyLine, lineValid, lineTotal } from '../components/LineEditor.jsx';
+import { SearchBar } from '../components/SearchBar.jsx';
+import { Who } from '../components/cells.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
-import AmountInput from '../components/AmountInput.jsx';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
-// A bon fournisseur records the goods received from a fournisseur. It is NOT tied
-// to a passager — assigning goods to a passager happens when creating a bon
-// passager (or from the stock). It carries the transport fee the fournisseur owes.
 export default function OrdersPage() {
   const toast = useToast();
+  const isSuper = useIsSuper();
   const navigate = useNavigate();
   const [status, setStatus] = useState('');
-  const orders = useApi(`/orders${status ? `?status=${status}` : ''}`);
-  const fournisseurs = useApi('/people?role=fournisseur');
-  const currencies = useApi('/currencies');
-  const stockItems = useApi('/stock/items');
-  const cats = useApi('/stock/categories');
+  const [q, setQ] = useState('');
+  const search = useDebounced(q);
 
-  const [open, setOpen] = useState(false);
+  const qs = new URLSearchParams();
+  if (status) qs.set('status', status);
+  if (search.trim()) qs.set('search', search.trim());
+  const orders = useApi(`/orders${qs.toString() ? `?${qs}` : ''}`);
+
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -36,142 +39,84 @@ export default function OrdersPage() {
     } catch (err) { toast.error(errorMessage(err)); }
     finally { setBusy(false); }
   };
-  const [form, setForm] = useState({
-    fournisseurId: '', notes: '', transportCurrency: 'DZD', discount: '0', lines: [emptyLine()],
-  });
 
-  const setLine = (li, next) => setForm((f) => ({ ...f, lines: f.lines.map((l, idx) => (idx === li ? next : l)) }));
-  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }));
-  const removeLine = (li) => setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== li) }));
-
-  const total = form.lines.reduce((s, l) => s + lineTotal(l), 0);
-  const valid = form.fournisseurId && form.lines.length > 0 && form.lines.every(lineValid);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!valid) return;
-    setBusy(true);
-    try {
-      // One goods list, no passager — sent as a single child bon under the hood.
-      const payload = {
-        fournisseurId: form.fournisseurId,
-        notes: form.notes,
-        bons: [{ transportCurrency: form.transportCurrency, discount: form.discount, lines: form.lines }],
-      };
-      const { order } = await api('/orders', { method: 'POST', body: payload });
-      toast.success(`Bon fournisseur ${order.reference} créé.`);
-      navigate(`/bons-fournisseur/${order.id}`);
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (orders.loading || fournisseurs.loading) return <Spinner />;
-  const curList = currencies.data?.currencies ?? [];
+  const rows = orders.data?.orders ?? [];
 
   return (
     <div>
-      <div className="page-head">
-        <div style={{ '--accent': 'var(--c-order)' }}>
-          <div className="page-title-row">
-            <div className="page-ico"><IconEl name="order" /></div>
-            <h1>Bons fournisseurs</h1>
-          </div>
-          <p className="muted">Marchandises reçues d’un fournisseur. L’affectation à un passager se fait dans les bons passagers.</p>
+      <div className="page-head" style={{ '--accent': 'var(--c-order)' }}>
+        <div className="page-title-row">
+          <div className="page-ico"><IconEl name="order" /></div>
+          <h1>Bons fournisseurs</h1>
         </div>
-        <button className="btn btn-gold" onClick={() => setOpen(!open)}>
-          <IconEl name={open ? 'close' : 'plus'} />{open ? 'Fermer' : 'Nouveau bon fournisseur'}
+        <button className="btn btn-gold" onClick={() => navigate('/bons-fournisseur/nouveau')}>
+          <IconEl name="plus" />Nouveau bon
         </button>
       </div>
 
-      {open && (
-        <form className="panel" onSubmit={submit}>
-          <div className="op-form">
-            <label className="field field-grow"><span>Fournisseur</span>
-              <select value={form.fournisseurId} onChange={(e) => setForm({ ...form, fournisseurId: e.target.value })}>
-                <option value="">— choisir —</option>
-                {(fournisseurs.data?.people ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select></label>
-            <label className="field"><span>Devise des frais</span>
-              <select value={form.transportCurrency} onChange={(e) => setForm({ ...form, transportCurrency: e.target.value })}>
-                {curList.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
-              </select></label>
-            <label className="field"><span>Remise</span>
-              <AmountInput value={form.discount} onChange={(v) => setForm({ ...form, discount: v })} /></label>
-            <label className="field field-grow"><span>Notes</span>
-              <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
-          </div>
-
-          <div className="lines-head">
-            <span>Marchandises reçues</span>
-            <button type="button" className="btn btn-ghost" onClick={addLine}>+ Ligne</button>
-          </div>
-          <p className="muted line-hint">
-            Le prix saisi est le <strong>prix de vente facturé au fournisseur</strong>. Le total est sa dette ; la remise la réduit.
-          </p>
-          {form.lines.map((l, li) => (
-            <LineEditor
-              key={li}
-              line={l}
-              items={stockItems.data?.items ?? []}
-              categories={cats.data?.categories ?? []}
-              onPatch={(nl) => setLine(li, nl)}
-              onRemove={() => removeLine(li)}
-              removable={form.lines.length > 1}
-              autoFocus={li === form.lines.length - 1}
-            />
+      <div className="list-tools">
+        <SearchBar value={q} onChange={setQ} placeholder="Référence ou fournisseur…" />
+        <div className="chips">
+          <button className={!status ? 'chip active' : 'chip'} onClick={() => setStatus('')}>Tous</button>
+          {Object.entries(ORDER_STATUS).map(([k, v]) => (
+            <button key={k} className={status === k ? 'chip active' : 'chip'} onClick={() => setStatus(k)}>{v.label}</button>
           ))}
-
-          <div className="form-total">
-            <span>À facturer au fournisseur{Number(form.discount) > 0 ? ' (après remise)' : ''}</span>
-            <strong>{formatMoney(Math.max(total - Number(form.discount || 0), 0), form.transportCurrency)}</strong>
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <button className="btn btn-gold" disabled={busy || !valid}>{busy ? '…' : 'Créer le bon fournisseur'}</button>
-          </div>
-        </form>
-      )}
-
-      <div className="filter-bar">
-        <button className={!status ? 'chip active' : 'chip'} onClick={() => setStatus('')}>Tous</button>
-        {Object.entries(ORDER_STATUS).map(([k, v]) => (
-          <button key={k} className={status === k ? 'chip active' : 'chip'} onClick={() => setStatus(k)}>{v.label}</button>
-        ))}
-      </div>
-
-      <div className="panel">
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th>Référence</th><th>Fournisseur</th><th className="right">Lots</th><th>Statut</th><th className="right">Facturé</th><th>Date</th><th className="right">Actions</th></tr></thead>
-            <tbody>
-              {orders.data.orders.map((o) => (
-                <tr key={o.id} className="clickable" onClick={() => navigate(`/bons-fournisseur/${o.id}`)}>
-                  <td><span className="gold">{o.reference}</span></td>
-                  <td>{o.fournisseur_name}</td>
-                  <td className="right">{o.bon_count}</td>
-                  <td><span className={`status-badge ${ORDER_STATUS[o.status].cls}`}>{ORDER_STATUS[o.status].label}</span></td>
-                  <td className="right">{formatMoney(o.total_fee)}</td>
-                  <td>{new Date(o.created_at).toLocaleDateString('fr-FR')}</td>
-                  <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
-                    <button className="icon-btn" title="Ouvrir" aria-label="Ouvrir" onClick={() => navigate(`/bons-fournisseur/${o.id}`)}>
-                      <IconEl name="search" />
-                    </button>
-                    <button className="icon-btn" title="Modifier" aria-label="Modifier" onClick={() => navigate(`/bons-fournisseur/${o.id}`)}>
-                      <IconEl name="edit" />
-                    </button>
-                    <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer" disabled={busy} onClick={() => setConfirmDelete(o)}>
-                      <IconEl name="trash" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!orders.data.orders.length && <tr><td colSpan="7" className="muted pad">Aucun bon fournisseur.</td></tr>}
-            </tbody>
-          </table>
         </div>
       </div>
+
+      {orders.loading && !orders.data ? <Spinner /> : (
+        <div className="panel">
+          {rows.length ? (
+            <div className="table-wrap">
+              <table className="table list-table">
+                <thead>
+                  <tr>
+                    <th>Bon</th><th>Fournisseur</th><th>Statut</th>
+                    <th className="right">Facturé</th><th className="right" aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((o) => (
+                    <tr key={o.id} className="clickable" onClick={() => navigate(`/bons-fournisseur/${o.id}`)}>
+                      <td>
+                        <span className="cell-stack">
+                          <span className="gold">{o.reference}</span>
+                          <span className="muted">{new Date(o.created_at).toLocaleDateString('fr-FR')}</span>
+                        </span>
+                      </td>
+                      <td><Who name={o.fournisseur_name} icon="fournisseur" /></td>
+                      <td><span className={`status-badge ${ORDER_STATUS[o.status].cls}`}>{ORDER_STATUS[o.status].label}</span></td>
+                      <td className="right">{formatMoney(o.total_fee)}</td>
+                      <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
+                        {/* Supprimer definitivement : reserve au super-administrateur. */}
+                        {isSuper && (
+                          <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer"
+                            disabled={busy} onClick={() => setConfirmDelete(o)}>
+                            <IconEl name="trash" />
+                          </button>
+                        )}
+                        <IconEl name="chevronRight" className="row-go" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              icon="order"
+              title={search || status ? 'Aucun bon ne correspond' : 'Aucun bon fournisseur'}
+              sub={search || status ? 'Changez la recherche ou le filtre.' : 'Un bon fournisseur enregistre la marchandise reçue d’un fournisseur en Chine.'}
+            >
+              {!search && !status && (
+                <button className="btn btn-gold" onClick={() => navigate('/bons-fournisseur/nouveau')}>
+                  <IconEl name="plus" />Créer le premier
+                </button>
+              )}
+            </EmptyState>
+          )}
+        </div>
+      )}
 
       <ConfirmDialog
         open={Boolean(confirmDelete)}

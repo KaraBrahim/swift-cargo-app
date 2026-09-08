@@ -3,10 +3,14 @@ import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { idempotent } from '../../middleware/idempotent.js';
 import * as svc from './bons.service.js';
 
 export const bonsRouter = Router();
 bonsRouter.use(requireAuth);
+// Un réessai après un timeout ne doit pas rejouer l'opération : voir
+// middleware/idempotent.js. Sans l'en-tête, comportement inchangé.
+bonsRouter.use(idempotent);
 
 const id = z.coerce.number().int().positive();
 const num = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
@@ -27,6 +31,9 @@ const lineSchema = z.object({
   weight_kg: num.optional(),
   cbm: num.optional(),
   unitPrice: num.optional(),
+  // Ce que le passager doit par unite non livree. Absent : la valeur convenue
+  // avec le fournisseur pour ce lot.
+  missingUnitPrice: num.optional(),
   // A bon passager line draws from this bon fournisseur line.
   sourceLineId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
   note: z.string().trim().max(300).optional(),
@@ -39,7 +46,8 @@ const createSchema = z.object({
   passagerId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
   transportCurrency: z.string().trim().toUpperCase().length(3).default('DZD'),
   transportFee: num.optional(),
-  discount: num.optional(),
+  // Bon fournisseur : la marge, saisie a la main une fois les details connus.
+  commission: num.optional(),
   notes: z.string().trim().max(1000).optional(),
   lines: z.array(lineSchema).min(1),
 });
@@ -49,7 +57,7 @@ const updateSchema = z.object({
   passagerId: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number().int().positive().nullable()).optional(),
   transportCurrency: z.string().trim().toUpperCase().length(3).optional(),
   transportFee: num.optional(),
-  discount: num.optional(),
+  commission: num.optional(),
   notes: z.string().trim().max(1000).optional(),
   lines: z.array(lineSchema).min(1),
 });
@@ -60,6 +68,20 @@ bonsRouter.get(
   // that order (see listBons).
   validate({ query: z.object({ status: status.optional(), search: z.string().trim().max(80).optional(), fournisseurId: z.coerce.number().int().positive().optional(), passagerId: z.coerce.number().int().positive().optional(), orderId: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }) }),
   asyncHandler(async (req, res) => res.json({ bons: await svc.listBons(req.validatedQuery) }))
+);
+
+// Le dernier prix convenu, par article — avec cette personne d'abord. Derive
+// des bons existants, donc toujours d'accord avec eux.
+bonsRouter.get(
+  '/bons/price-history',
+  validate({
+    query: z.object({
+      fournisseurId: z.coerce.number().int().positive().optional(),
+      passagerId: z.coerce.number().int().positive().optional(),
+      scope: z.enum(['fournisseur', 'passager']).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => res.json(await svc.priceHistory(req.validatedQuery)))
 );
 
 // Goods still waiting in a bon fournisseur for a passager to carry them.

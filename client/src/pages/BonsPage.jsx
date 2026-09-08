@@ -1,32 +1,37 @@
+// La liste des bons passagers : on cherche, on filtre, on ouvre.
+//
+// La création a quitté cette page pour un écran à elle (/bons-passager/nouveau) :
+// un formulaire qui se déplie au-dessus d'un tableau oblige à choisir entre lire
+// et saisir, et donnait deux longueurs de page selon l'humeur.
+
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useApi } from '../api/useApi.js';
-import { Spinner, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
+import { useApi, useDebounced } from '../api/useApi.js';
+import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
+import { Who, Sources } from '../components/cells.jsx';
+import { SearchBar } from '../components/SearchBar.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
-import { GoodsPicker, pickedValid, pickedToLine } from '../components/GoodsPicker.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 export default function BonsPage() {
   const toast = useToast();
+  const isSuper = useIsSuper();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState(searchParams.get('status') || '');
-  const bons = useApi(`/bons${status ? `?status=${status}` : ''}`);
-  const passagers = useApi('/people?role=passager');
-  const currencies = useApi('/currencies');
+  const [q, setQ] = useState('');
+  const search = useDebounced(q);
 
-  const [open, setOpen] = useState(false);
+  const qs = new URLSearchParams();
+  if (status) qs.set('status', status);
+  if (search.trim()) qs.set('search', search.trim());
+  const bons = useApi(`/bons${qs.toString() ? `?${qs}` : ''}`);
+
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [form, setForm] = useState({ passagerId: '', transportCurrency: 'DZD', notes: '', lines: [] });
-
-  // Tout ce qui peut partir aujourd'hui, tous fournisseurs confondus : le bon
-  // n'appartient plus à l'un d'eux, il porte ce que le passager emmène.
-  const allocatable = useApi('/bons/allocatable');
-
-  const canSubmit = form.lines.length > 0 && form.lines.every(pickedValid);
 
   const doDelete = async () => {
     setBusy(true);
@@ -39,27 +44,7 @@ export default function BonsPage() {
     finally { setBusy(false); }
   };
 
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!canSubmit) return;
-    setBusy(true);
-    try {
-      const { bon } = await api('/bons', {
-        method: 'POST',
-        body: { ...form, lines: form.lines.map(pickedToLine) },
-      });
-      toast.success(`Bon passager ${bon.reference} créé.`);
-      navigate(`/bons-passager/${bon.id}`);
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (bons.loading || !bons.data) return <Spinner />;
-  const curList = currencies.data?.currencies ?? [];
-  const allocatableList = allocatable.data?.lines ?? [];
+  const rows = bons.data?.bons ?? [];
 
   return (
     <div>
@@ -68,78 +53,75 @@ export default function BonsPage() {
           <div className="page-ico"><IconEl name="bon" /></div>
           <h1>Bons passagers</h1>
         </div>
-        <button className="btn btn-gold" onClick={() => setOpen(!open)}>
-          <IconEl name={open ? 'close' : 'plus'} />{open ? 'Fermer' : 'Nouveau bon passager'}
+        <button className="btn btn-gold" onClick={() => navigate('/bons-passager/nouveau')}>
+          <IconEl name="plus" />Nouveau bon
         </button>
       </div>
 
-      {open && (
-        <form className="panel" onSubmit={submit}>
-          <div className="op-form">
-            <label className="field field-grow"><span>Passager</span>
-              <select value={form.passagerId} onChange={(e) => setForm({ ...form, passagerId: e.target.value })}>
-                <option value="">— aucun —</option>
-                {(passagers.data?.people ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select></label>
-            <label className="field"><span>Devise transport</span>
-              <select value={form.transportCurrency} onChange={(e) => setForm({ ...form, transportCurrency: e.target.value })}>
-                {curList.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
-              </select></label>
-          </div>
-
-          <GoodsPicker
-            options={allocatableList}
-            picked={form.lines}
-            currency={form.transportCurrency}
-            loading={allocatable.loading}
-            onChange={(lines) => setForm((f) => ({ ...f, lines }))}
-          />
-
-          <div style={{ marginTop: 14 }}>
-            <button className="btn btn-gold" disabled={busy || !canSubmit}>{busy ? '…' : 'Créer le bon passager'}</button>
-          </div>
-        </form>
-      )}
-
-      <div className="filter-bar">
-        <button className={!status ? 'chip active' : 'chip'} onClick={() => setStatus('')}>Tous</button>
-        {Object.entries(BON_STATUS).map(([k, v]) => (
-          <button key={k} className={status === k ? 'chip active' : 'chip'} onClick={() => setStatus(k)}>{v.label}</button>
-        ))}
-      </div>
-
-      <div className="panel">
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th>Référence</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th><th className="right">À payer</th><th>Date</th><th className="right">Actions</th></tr></thead>
-            <tbody>
-              {bons.data.bons.map((b) => (
-                <tr key={b.id} className="clickable" onClick={() => navigate(`/bons-passager/${b.id}`)}>
-                  <td><span className="gold">{b.reference}</span></td>
-                  <td>{b.passager_name || '—'}</td>
-                  <td className="muted">{b.fournisseur_name || '—'}</td>
-                  <td><span className={`status-badge ${BON_STATUS[b.status].cls}`}>{BON_STATUS[b.status].label}</span></td>
-                  <td className="right">{formatMoney(b.transport_fee, b.transport_currency)}</td>
-                  <td>{new Date(b.created_at).toLocaleDateString('fr-FR')}</td>
-                  <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
-                    <button className="icon-btn" title="Ouvrir" aria-label="Ouvrir" onClick={() => navigate(`/bons-passager/${b.id}`)}>
-                      <IconEl name="search" />
-                    </button>
-                    <button className="icon-btn" title={b.status === 'cree' ? 'Modifier' : 'Modifiable seulement au statut « Créé »'} aria-label="Modifier"
-                      disabled={b.status !== 'cree'} onClick={() => navigate(`/bons-passager/${b.id}`)}>
-                      <IconEl name="edit" />
-                    </button>
-                    <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer" disabled={busy} onClick={() => setConfirmDelete(b)}>
-                      <IconEl name="trash" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!bons.data.bons.length && <tr><td colSpan="7" className="muted pad">Aucun bon passager.</td></tr>}
-            </tbody>
-          </table>
+      <div className="list-tools">
+        <SearchBar value={q} onChange={setQ} placeholder="Référence ou passager…" />
+        <div className="chips">
+          <button className={!status ? 'chip active' : 'chip'} onClick={() => setStatus('')}>Tous</button>
+          {Object.entries(BON_STATUS).map(([k, v]) => (
+            <button key={k} className={status === k ? 'chip active' : 'chip'} onClick={() => setStatus(k)}>{v.label}</button>
+          ))}
         </div>
       </div>
+
+      {bons.loading && !bons.data ? <Spinner /> : (
+        <div className="panel">
+          {rows.length ? (
+            <div className="table-wrap">
+              <table className="table list-table">
+                <thead>
+                  <tr>
+                    <th>Bon</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th>
+                    <th className="right">À payer</th><th className="right" aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((b) => (
+                    <tr key={b.id} className="clickable" onClick={() => navigate(`/bons-passager/${b.id}`)}>
+                      <td>
+                        <span className="cell-stack">
+                          <span className="gold">{b.reference}</span>
+                          <span className="muted">{new Date(b.created_at).toLocaleDateString('fr-FR')}</span>
+                        </span>
+                      </td>
+                      <td><Who name={b.passager_name} icon="passager" /></td>
+                      <td><Sources names={b.fournisseur_name} /></td>
+                      <td><span className={`status-badge ${BON_STATUS[b.status].cls}`}>{BON_STATUS[b.status].label}</span></td>
+                      <td className="right">{formatMoney(b.transport_fee, b.transport_currency)}</td>
+                      <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
+                        {/* Supprimer definitivement : reserve au super-administrateur. */}
+                        {isSuper && (
+                          <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer"
+                            disabled={busy} onClick={() => setConfirmDelete(b)}>
+                            <IconEl name="trash" />
+                          </button>
+                        )}
+                        <IconEl name="chevronRight" className="row-go" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              icon="bon"
+              title={search || status ? 'Aucun bon ne correspond' : 'Aucun bon passager'}
+              sub={search || status ? 'Changez la recherche ou le filtre.' : 'Un bon passager confie à un porteur la marchandise arrivée des fournisseurs.'}
+            >
+              {!search && !status && (
+                <button className="btn btn-gold" onClick={() => navigate('/bons-passager/nouveau')}>
+                  <IconEl name="plus" />Créer le premier
+                </button>
+              )}
+            </EmptyState>
+          )}
+        </div>
+      )}
 
       <ConfirmDialog
         open={Boolean(confirmDelete)}

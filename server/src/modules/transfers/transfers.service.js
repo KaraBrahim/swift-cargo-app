@@ -8,6 +8,7 @@
 // pending amount is not reserved and the sending caisse can be emptied
 // meanwhile. See receiveTransfer() for what happens then.
 import { getPool, withTx } from '../../db/pool.js';
+import { Decimal, parseAmount } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { postMovement, replayChain } from '../caisse/caisse.service.js';
@@ -19,12 +20,14 @@ async function loadOfficeCaisse(c, id, label) {
   return rows[0];
 }
 
+// Exact, never a double: this number decides whether a transfer is short, and
+// therefore whether a caisse is knowingly pushed negative.
 const balanceOf = async (c, caisseId, currency) => {
   const { rows } = await c.query(
     'SELECT balance FROM caisse_balances WHERE caisse_id = $1 AND currency_code = $2',
     [caisseId, currency]
   );
-  return Number(rows[0]?.balance ?? 0);
+  return new Decimal(rows[0]?.balance ?? 0);
 };
 
 export async function listTransfers({ status, limit = 100 } = {}) {
@@ -57,10 +60,13 @@ export async function sendTransfer({ admin, fromCaisseId, toCaisseId, currency, 
     // Checked here as a courtesy — you should not be able to promise money the
     // till does not hold. It is checked again at confirmation, because nothing
     // reserves it in between.
+    // Parsed here rather than trusted: the route accepts a numeric string, this
+    // is where it becomes an amount with a scale and a ceiling.
+    const amt = parseAmount(amount, 2, 'Montant');
     const available = await balanceOf(c, from.id, currency);
-    if (available < Number(amount)) {
+    if (available.lt(amt)) {
       throw errors.insufficientFunds({
-        currency, available: available.toFixed(2), required: Number(amount).toFixed(2),
+        currency, available: available.toFixed(2), required: amt.toFixed(2),
       });
     }
 
@@ -68,7 +74,7 @@ export async function sendTransfer({ admin, fromCaisseId, toCaisseId, currency, 
       `INSERT INTO office_transfers
          (from_office, to_office, currency_code, amount, sent_caisse_id, received_caisse_id, sent_by, note)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [from.office, to.office, currency, amount, from.id, to.id, admin.id, note ?? null]
+      [from.office, to.office, currency, amt.toFixed(2), from.id, to.id, admin.id, note ?? null]
     );
     await writeAudit(c, {
       adminId: admin.id, action: 'transfer.send', entity: 'office_transfer', entityId: ins.rows[0].id,
@@ -94,8 +100,9 @@ export async function updateTransfer({ admin, id, amount, note, ip }) {
     if (!t) throw errors.notFound('Transfert introuvable.');
     assertPending(t);
 
-    const next = amount != null && amount !== '' ? String(amount).trim() : t.amount;
-    if (!(Number(next) > 0)) throw errors.invalidAmount('Le montant doit être supérieur à zéro.');
+    const next = amount != null && amount !== ''
+      ? parseAmount(amount, 2, 'Montant').toFixed(2)
+      : t.amount;
 
     // Nothing was posted at send time, so there is no ledger row to reshape and
     // no chain to replay — the pending transfer is just a note to ourselves.
@@ -170,12 +177,13 @@ export async function receiveTransfer({ admin, id, toCaisseId, force = false, no
     }
 
     const available = await balanceOf(c, t.sent_caisse_id, t.currency_code);
-    const short = Number(t.amount) - available;
-    if (short > 0 && !force) {
+    const short = new Decimal(t.amount).minus(available);
+    const isShort = short.gt(0);
+    if (isShort && !force) {
       throw errors.insufficientFunds({
         currency: t.currency_code,
         available: available.toFixed(2),
-        required: Number(t.amount).toFixed(2),
+        required: new Decimal(t.amount).toFixed(2),
       });
     }
 
@@ -200,13 +208,13 @@ export async function receiveTransfer({ admin, id, toCaisseId, force = false, no
       `UPDATE office_transfers SET status='recu', received_caisse_id=$2, sent_tx_id=$3, received_tx_id=$4,
               received_by=$5, received_at=now(), forced=$6, note=COALESCE($7, note)
         WHERE id=$1 RETURNING *`,
-      [id, to.id, txIds.out, txIds.in, admin.id, short > 0, note ?? null]
+      [id, to.id, txIds.out, txIds.in, admin.id, isShort, note ?? null]
     );
     await writeAudit(c, {
       adminId: admin.id,
-      action: short > 0 ? 'transfer.receive.forced' : 'transfer.receive',
+      action: isShort ? 'transfer.receive.forced' : 'transfer.receive',
       entity: 'office_transfer', entityId: id,
-      details: { toCaisseId: to.id, amount: t.amount, ...(short > 0 ? { manque: short.toFixed(2) } : {}) },
+      details: { toCaisseId: to.id, amount: t.amount, ...(isShort ? { manque: short.toFixed(2) } : {}) },
       ip,
     });
     return upd.rows[0];

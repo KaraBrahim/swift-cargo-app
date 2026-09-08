@@ -10,7 +10,10 @@ import ConnectionBanner from './ConnectionBanner.jsx';
 import { TabsProvider, TabPaneProvider, useTabs } from './TabsContext.jsx';
 import { TabStrip } from './TabStrip.jsx';
 import { AppPages } from '../routes.jsx';
-import { useToast } from './ui.jsx';
+import { useToast, errorMessage } from './ui.jsx';
+import { api } from '../api/client.js';
+import { useScanner } from '../lib/useScanner.js';
+import { setScanHit } from '../lib/scanSignal.js';
 
 // Both a fournisseur and a passager receive a physical "bon": the fournisseur's
 // bon (the shipment) groups the passagers' bons (one per carrier).
@@ -87,7 +90,22 @@ export function Layout() {
 
 function Shell() {
   const { admin, logout } = useAuth();
-  const { open: openTab } = useTabs();
+  const toast = useToast();
+  const { open: openTab, openOrFocus } = useTabs();
+
+  // La douchette, ecoutee une seule fois pour toute l'application. Le scan
+  // ouvre la fiche et signale son arrivee ; il ne change jamais rien tout seul,
+  // parce qu'un coup de douchette par erreur ne doit pas deplacer un bon.
+  useScanner(useCallback(async (code) => {
+    try {
+      const hit = await api(`/scan?code=${encodeURIComponent(code)}`);
+      setScanHit(hit);
+      openOrFocus(hit.path);
+      toast.success(`${hit.label} ${hit.reference}`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }, [openOrFocus, toast]));
   // Whether the sidebar shows its section headings — a per-desk preference,
   // kept with the theme. See ThemeContext.
   const { navGroups } = useTheme();

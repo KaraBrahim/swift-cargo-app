@@ -5,6 +5,7 @@
 import EmbeddedPostgres from 'embedded-postgres';
 import pg from 'pg';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { logger } from '../lib/logger.js';
 
@@ -74,8 +75,38 @@ function clearStaleLock(dataDir) {
   );
 }
 
+// L'autre débris que Windows laisse derrière lui.
+//
+// Quand un cluster s'arrête mal, un processus de travail (« io_worker ») peut
+// survivre à son postmaster. Il garde le bloc de mémoire partagée, et le
+// démarrage SUIVANT meurt sur « pre-existing shared memory block is still in
+// use » — la suite de tests, ou le smoke, a l'air cassé alors que rien ne l'est.
+//
+// On ne tue que ce qui est certainement une épave : un postgres.exe SANS -D
+// (donc jamais un postmaster) dont le processus parent n'existe plus. Un
+// cluster vivant — celui du serveur de développement — a toujours un postmaster
+// portant son -D, et des enfants dont le parent est bien là : cette règle ne
+// peut pas l'atteindre.
+function clearOrphanWorkers() {
+  if (process.platform !== 'win32') return;
+  const script = [
+    '$live = Get-CimInstance Win32_Process | Select-Object -ExpandProperty ProcessId;',
+    "Get-CimInstance Win32_Process -Filter \"Name='postgres.exe'\"",
+    "| Where-Object { $live -notcontains $_.ParentProcessId -and $_.CommandLine -notmatch '-D\\s' }",
+    '| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
+  ].join(' ');
+  try {
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { stdio: 'ignore', timeout: 20_000 });
+  } catch {
+    // Pas de PowerShell, ou rien à balayer. On tente le démarrage : s'il reste
+    // vraiment une épave, le message de Postgres dira quoi faire.
+  }
+}
+
 export async function startEmbeddedPg({ dataDir, port, persistent = true }) {
   clearStaleLock(dataDir);
+  clearOrphanWorkers();
 
   const pgInst = new EmbeddedPostgres({
     databaseDir: dataDir,

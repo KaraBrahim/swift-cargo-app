@@ -1,22 +1,33 @@
-import { useState } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
 import { useTabTitle } from '../components/TabsContext.jsx';
-import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
+import { Spinner, formatMoney, formatQty, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
+import { EntityPicker, OptionChips } from '../components/EntityPicker.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor } from '../lib/offices.js';
 import AmountInput from '../components/AmountInput.jsx';
 import { RolePicker, RoleBadges, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
+import { useIdempotent } from '../lib/useIdempotent.js';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const ENTRY_LABEL = {
   transport_fee: 'Frais de transport (dû)',
   fee_payment: 'Paiement du fournisseur',
   passager_due: 'Dû au passager',
   passager_payment: 'Paiement au passager',
+  // Ce que le passager doit quand ce qu'il n'a pas livré valait plus que son
+  // portage : une dette a son nom, pas un simple non-paiement.
+  passager_manquant: 'Manquants à rembourser',
   adjustment: 'Ajustement',
+  avance: 'Avance',
+  remboursement: 'Remboursement',
+  salaire: 'Salaire',
+  prime: 'Prime',
+  autre: 'Autre',
 };
 const TYPE_LABEL = { regular: 'Régulier', auto: 'Auto-entrepreneur' };
 
@@ -29,10 +40,29 @@ function balanceState(value) {
   return n > 0 ? { text: 'Vous lui devez', cls: 'pos' } : { text: 'Il vous doit', cls: 'neg' };
 }
 
+// Le solde dans cette devise, signe compris : > 0 = on lui doit.
+const balanceIn = (balances, code) =>
+  Number((balances ?? []).find((b) => b.currency_code === code)?.balance ?? 0);
+
+// Ce qui reste dû dans cette devise, en valeur absolue : le sens — encaisser ou
+// payer — est déjà porté par le formulaire, le champ ne veut que le nombre.
+const owedIn = (balances, code) => Math.abs(balanceIn(balances, code)).toFixed(2);
+
+// La devise dans laquelle il reste réellement quelque chose à régler : celle qui
+// pèse le plus. Le formulaire partait toujours du dinar, si bien qu'une personne
+// qui doit 8 000 CNY ouvrait sur un solde DZD à zéro — « Encaisser » proposait
+// 0.00 sur une fiche qui doit pourtant de l'argent.
+const owedCurrency = (balances) => {
+  const owing = (balances ?? []).filter((b) => Number(b.balance) !== 0);
+  if (!owing.length) return 'DZD';
+  return owing.reduce((a, b) => (Math.abs(Number(b.balance)) > Math.abs(Number(a.balance)) ? b : a)).currency_code;
+};
+
 export default function ProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const isSuper = useIsSuper();
   const accent = 'var(--c-people)';
 
   const account = useApi(`/people/${id}/account`);
@@ -44,6 +74,13 @@ export default function ProfilePage() {
   const orders = useApi(`/orders?fournisseurId=${id}&limit=200`);
 
   const [tab, setTab] = useState('apercu');
+  // Ce qui attend cette personne au bureau d'Alger, tous ordres confondus. Un
+  // bon passager remplit sa valise chez plusieurs fournisseurs, donc la fiche
+  // d'UN ordre ne peut pas répondre à la question posée au comptoir : « qu'est-ce
+  // qui est à moi ? ». Celle-ci le peut.
+  const waiting = useApi(`/people/${id}/deliverable`);
+  // lineId → { full, qty }. Absent = « tout », qui est le cas ordinaire.
+  const [handover, setHandover] = useState({});
   const [edit, setEdit] = useState(null);
   const [busy, setBusy] = useState(false);
   const caisses = useApi('/caisses');
@@ -54,7 +91,26 @@ export default function ProfilePage() {
   const [confirmPay, setConfirmPay] = useState(null);
   const [txForm, setTxForm] = useState(null);
 
+  // Le montant proposé, c'est ce qui reste dû.
+  //
+  // Il était passé en `placeholder` — donc jamais montré : un champ d'argent
+  // vide affiche « 0.00 » et non son placeholder (voir AmountInput). Le chiffre
+  // était écrit deux lignes plus haut et il fallait quand même le retaper.
+  //
+  // Un hook, donc AVANT tout retour anticipé. Il se redéclenche quand le compte
+  // est rechargé : après un règlement partiel, le champ propose le NOUVEAU
+  // reste dû plutôt que l'ancien.
+  useEffect(() => {
+    const bals = account.data?.account?.balances;
+    if (!bals) return;
+    // La devise aussi est proposée : on arrive souvent ici depuis « Dettes en
+    // cours », où la dette a une devise bien précise.
+    const currency = owedCurrency(bals);
+    setPay((p) => ({ ...p, currency, amount: owedIn(bals, currency) }));
+  }, [account.data]);
+
   // Correcting a payment touches both the caisse and this account.
+  const idem = useIdempotent();
   const runPay = async (fn, okMsg) => {
     setBusy(true);
     try {
@@ -91,9 +147,41 @@ export default function ProfilePage() {
   // Which way the money goes is no longer decided by what they are, but by what
   // the account says — a person can owe as a fournisseur and be owed as a
   // passager, and only the net has a direction.
-  const incoming = Number(dzd) <= 0;
+  // Le sens suit la DEVISE CHOISIE, pas le dinar. Une personne peut vous devoir
+  // en yuans pendant que vous lui devez en dinars : décider « encaisser ou
+  // payer » sur le seul solde DZD se trompait alors de sens, et de montant.
+  const selBalance = balanceIn(balances, pay.currency);
+  const incoming = selBalance <= 0;
   const totalFees = bonList.reduce((s, b) => s + Number(b.transport_fee || 0), 0);
   const activeBons = bonList.filter((b) => b.status !== 'regle').length;
+
+  // ── Le comptoir ──────────────────────────────────────────────────
+  const waitingOrders = waiting.data?.orders ?? [];
+  const unitOf = (l) => (l.measure === 'poids' ? 'kg' : l.measure === 'cbm' ? 'm³' : l.unit || 'u');
+  // Absent du formulaire = « tout », parce qu'emporter tout est le cas ordinaire
+  // et qu'il ne doit coûter aucun clic.
+  const takeOf = (l) => {
+    const h = handover[l.id];
+    if (!h || h.full !== false) return Number(l.deliverable);
+    const v = Number(h.qty);
+    return Number.isFinite(v) ? Math.max(v, 0) : 0;
+  };
+  const handoverLines = waitingOrders.flatMap((o) => o.lines);
+  const doHandover = async () => {
+    const lines = handoverLines
+      .filter((l) => takeOf(l) > 0)
+      .map((l) => ({ lineId: Number(l.id), quantity: String(takeOf(l)) }));
+    if (!lines.length) { toast.info('Aucune quantité à remettre.'); return; }
+    setBusy(true);
+    try {
+      await idem((key) => api(`/people/${id}/deliver`, { method: 'POST', idem: key, body: { lines } }));
+      toast.success(`Marchandise remise à ${person.name}.`);
+      setHandover({});
+      waiting.reload();
+      orders.reload();
+    } catch (err) { toast.error(errorMessage(err)); }
+    finally { setBusy(false); }
+  };
 
   const openEdit = () => setEdit(personToForm(person));
 
@@ -103,15 +191,18 @@ export default function ProfilePage() {
     e.preventDefault();
     setBusy(true);
     try {
-      await api(`/people/${id}/payment`, {
-        method: 'POST',
+      await idem((key) => api(`/people/${id}/payment`, {
+        method: 'POST', idem: key,
         body: {
           caisseId: Number(pay.caisseId), amount: pay.amount, currency: pay.currency,
           direction: incoming ? 'in' : 'out', note: pay.note || undefined,
         },
-      });
+      }));
       toast.success(incoming ? 'Encaissement enregistré.' : 'Paiement enregistré.');
-      setPay({ caisseId: '', amount: '', note: '', currency: 'DZD' });
+      // La devise n'est pas remise au dinar : le rechargement du compte, juste
+      // après, reproposera la devise et le montant qui restent à régler. La
+      // forcer ici ne ferait que faire clignoter « 0.00 DZD » entre les deux.
+      setPay((p) => ({ ...p, caisseId: '', amount: '', note: '' }));
       account.reload();
     } catch (err) { toast.error(errorMessage(err)); }
     finally { setBusy(false); }
@@ -158,23 +249,23 @@ export default function ProfilePage() {
           </button>
         </div>
 
+        {/* Un chiffre porte son icône : on repère le solde à sa forme avant
+            d'en lire le mot. */}
         <div className="profile-kpis">
-          <div className="pk">
-            <div className={`pk-val ${state.cls}`}>{formatMoney(Math.abs(Number(dzd)))} DZD</div>
-            <div className="pk-label">Solde · {state.text}</div>
-          </div>
-          <div className="pk">
-            <div className="pk-val">{bonList.length}</div>
-            <div className="pk-label">Bons passagers au total</div>
-          </div>
-          <div className="pk">
-            <div className="pk-val">{activeBons}</div>
-            <div className="pk-label">Bons passagers en cours</div>
-          </div>
-          <div className="pk">
-            <div className="pk-val">{formatMoney(totalFees)}</div>
-            <div className="pk-label">Volume frais (DZD)</div>
-          </div>
+          {[
+            { icon: 'coins', val: `${formatMoney(Math.abs(Number(dzd)))} DZD`, label: `Solde · ${state.text}`, cls: state.cls },
+            { icon: 'bon', val: bonList.length, label: 'Bons au total' },
+            { icon: 'plane', val: activeBons, label: 'Bons en cours' },
+            { icon: 'chart', val: formatMoney(totalFees), label: 'Volume frais (DZD)' },
+          ].map((k) => (
+            <div className="pk" key={k.label}>
+              <span className="pk-ico"><IconEl name={k.icon} /></span>
+              <span className="pk-body">
+                <span className={`pk-val ${k.cls || ''}`}>{k.val}</span>
+                <span className="pk-label">{k.label}</span>
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -218,36 +309,112 @@ export default function ProfilePage() {
               );
             })}
           </div>
+          {/* Ne s'affiche que s'il y a quelque chose à remettre : un panneau
+              vide sur chaque fiche apprendrait à ne plus le regarder. */}
+          {waitingOrders.length > 0 && (
+            <div className="panel panel-accent">
+              <h2 className="panel-title">Remise à {person.name}</h2>
+              <p className="dt-hint">
+                <IconEl name="box" />
+                {waiting.data.total} lot(s) l’attendent au bureau d’Alger, sur {waitingOrders.length} bon(s)
+                fournisseur(s). Tout est coché — décochez une ligne s’il n’en emporte qu’une partie.
+              </p>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr><th>Désignation</th><th className="right">Au bureau</th><th className="right">Il emporte</th></tr>
+                  </thead>
+                  <tbody>
+                    {waitingOrders.map((o) => (
+                      <Fragment key={o.orderId}>
+                        <tr className="group-row">
+                          <td colSpan="3">
+                            <Link to={`/bons-fournisseur/${o.orderId}`} className="gold">{o.reference}</Link>
+                          </td>
+                        </tr>
+                        {o.lines.map((l) => {
+                          const h = handover[l.id];
+                          const full = !h || h.full !== false;
+                          const over = takeOf(l) > Number(l.deliverable);
+                          return (
+                            <tr key={l.id}>
+                              <td>{l.designation}</td>
+                              <td className="right">{formatQty(l.deliverable)} <span className="muted">{unitOf(l)}</span></td>
+                              <td className="right rec-arrived">
+                                <label className="rec-all" title="Il emporte tout">
+                                  <input
+                                    type="checkbox"
+                                    checked={full}
+                                    onChange={(e) => setHandover({
+                                      ...handover,
+                                      [l.id]: { full: e.target.checked, qty: e.target.checked ? l.deliverable : (h?.qty ?? l.deliverable) },
+                                    })}
+                                  />
+                                  <span>tout</span>
+                                </label>
+                                {!full && (
+                                  <AmountInput decimals={3} className={`mini-input ${over ? 'input-error' : ''}`}
+                                    step={l.measure === 'cbm' ? 0.1 : 1} max={l.deliverable}
+                                    value={h?.qty ?? ''}
+                                    onChange={(v) => setHandover({ ...handover, [l.id]: { full: false, qty: v } })} />
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="dt-actions">
+                <button className="btn btn-gold" disabled={busy} onClick={doHandover}>
+                  <IconEl name="check" />{busy ? '…' : 'Confirmer la remise'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="panel">
             <h2 className="panel-title">{incoming ? 'Encaisser une dette' : 'Payer cette personne'}</h2>
             <div className="money-head">
               <span className={`money-dir ${incoming ? 'in' : 'out'}`}>{incoming ? 'Entrée de caisse' : 'Sortie de caisse'}</span>
               <span>
-                {Number(dzd) === 0
-                  ? 'Ce compte est soldé.'
+                {selBalance === 0
+                  ? `Rien à régler en ${pay.currency}.`
                   : incoming
-                    ? <>Cette personne doit <strong className="neg">{formatMoney(Math.abs(Number(dzd)))} DZD</strong>.</>
-                    : <>Vous lui devez <strong className="pos">{formatMoney(Math.abs(Number(dzd)))} DZD</strong>.</>}
+                    ? <>Cette personne doit <strong className="neg">{formatMoney(Math.abs(selBalance))} {pay.currency}</strong>.</>
+                    : <>Vous lui devez <strong className="pos">{formatMoney(Math.abs(selBalance))} {pay.currency}</strong>.</>}
               </span>
             </div>
             <form className="op-form" onSubmit={submitPayment}>
-              <label className="field"><span>{incoming ? 'Caisse qui reçoit' : 'Caisse qui paie'}</span>
-                <select
+              <div className="field field-grow"><span>{incoming ? 'Caisse qui reçoit' : 'Caisse qui paie'}</span>
+                <EntityPicker
+                  icon="caisse"
                   value={pay.caisseId}
-                  onChange={(e) => {
-                    const src = officeCaisses.find((c) => String(c.id) === e.target.value);
-                    setPay({ ...pay, caisseId: e.target.value, currency: defaultCurrencyFor(src?.office) });
+                  onChange={(v) => {
+                    // Choisir une caisse peut changer la devise ; le montant
+                    // proposé suit, sinon il resterait celui d'une autre monnaie.
+                    const src = officeCaisses.find((c) => String(c.id) === v);
+                    const currency = defaultCurrencyFor(src?.office);
+                    setPay({ ...pay, caisseId: v, currency, amount: owedIn(balances, currency) });
                   }}
-                >
-                  <option value="">— choisir —</option>
-                  {officeCaisses.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select></label>
-              <label className="field"><span>Devise</span>
-                <select value={pay.currency} onChange={(e) => setPay({ ...pay, currency: e.target.value })}>
-                  {(currencies.data?.currencies ?? []).map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
-                </select></label>
+                  options={officeCaisses}
+                  labelOf={(c) => c.label}
+                  subOf={(c) => `${formatMoney(c.balances?.[pay.currency] ?? 0, pay.currency)} disponible`}
+                  searchOf={(c) => c.label}
+                  placeholder="Choisir la caisse"
+                  emptyText="Aucune caisse de bureau."
+                /></div>
+              <div className="field"><span>Devise</span>
+                <OptionChips
+                  ariaLabel="Devise"
+                  value={pay.currency}
+                  onChange={(v) => setPay({ ...pay, currency: v, amount: owedIn(balances, v) })}
+                  options={(currencies.data?.currencies ?? []).map((c) => ({ value: c.code, label: c.code }))}
+                /></div>
               <label className="field"><span>Montant</span>
-                <AmountInput value={pay.amount} placeholder={formatMoney(Math.abs(Number(dzd)))}
+                <AmountInput value={pay.amount}
                   onChange={(v) => setPay({ ...pay, amount: v })} /></label>
               <label className="field field-grow"><span>Note</span>
                 <input value={pay.note} onChange={(e) => setPay({ ...pay, note: e.target.value })} placeholder="acompte, règlement partiel…" /></label>
@@ -270,36 +437,50 @@ export default function ProfilePage() {
             {txForm && (
               <form className="op-form" onSubmit={(e) => {
                 e.preventDefault();
-                runPay(() => api('/person-transactions', { method: 'POST', body: {
+                runPay(() => idem((key) => api('/person-transactions', { method: 'POST', idem: key, body: {
                   personType: 'personne', personId: Number(id), direction: txForm.direction,
                   amount: txForm.amount, type: txForm.type,
                   caisseId: txForm.caisseId || undefined, note: txForm.note || undefined,
-                } }), 'Opération enregistrée.');
+                } })), 'Opération enregistrée.');
                 setTxForm(null);
               }}>
-                <label className="field"><span>Sens</span>
-                  <select value={txForm.direction} onChange={(e) => setTxForm({ ...txForm, direction: e.target.value })}>
-                    <option value="out">Nous versons à cette personne</option>
-                    <option value="in">Cette personne nous verse</option>
-                  </select></label>
-                <label className="field"><span>Nature</span>
-                  <select value={txForm.type} onChange={(e) => setTxForm({ ...txForm, type: e.target.value })}>
-                    <option value="avance">Avance</option>
-                    <option value="remboursement">Remboursement</option>
-                    <option value="salaire">Salaire</option>
-                    <option value="prime">Prime</option>
-                    <option value="adjustment">Correction</option>
-                    <option value="autre">Autre</option>
-                  </select></label>
+                <div className="field"><span>Sens</span>
+                  <OptionChips
+                    ariaLabel="Sens de l&rsquo;argent"
+                    value={txForm.direction}
+                    onChange={(v) => setTxForm({ ...txForm, direction: v })}
+                    options={[
+                      { value: 'out', label: 'Nous versons', icon: 'arrowOut' },
+                      { value: 'in', label: 'Elle verse', icon: 'arrowIn' },
+                    ]}
+                  /></div>
+                <div className="field field-full"><span>Nature</span>
+                  <OptionChips
+                    ariaLabel="Nature de l&rsquo;opération"
+                    value={txForm.type}
+                    onChange={(v) => setTxForm({ ...txForm, type: v })}
+                    options={[
+                      { value: 'avance', label: 'Avance' },
+                      { value: 'remboursement', label: 'Remboursement' },
+                      { value: 'salaire', label: 'Salaire' },
+                      { value: 'prime', label: 'Prime' },
+                      { value: 'adjustment', label: 'Correction' },
+                      { value: 'autre', label: 'Autre' },
+                    ]}
+                  /></div>
                 <label className="field"><span>Montant</span>
                   <AmountInput value={txForm.amount} onChange={(v) => setTxForm({ ...txForm, amount: v })} /></label>
-                <label className="field"><span>Caisse (optionnel)</span>
-                  <select value={txForm.caisseId} onChange={(e) => setTxForm({ ...txForm, caisseId: e.target.value })}>
-                    <option value="">— écriture seule, sans mouvement d’argent —</option>
-                    {(caisses.data?.caisses ?? []).filter((c) => c.kind === 'office').map((c) => (
-                      <option key={c.id} value={c.id}>{c.label}</option>
-                    ))}
-                  </select></label>
+                <div className="field field-grow"><span>Caisse (optionnel)</span>
+                  <EntityPicker
+                    icon="caisse"
+                    value={txForm.caisseId}
+                    onChange={(v) => setTxForm({ ...txForm, caisseId: v })}
+                    options={officeCaisses}
+                    labelOf={(c) => c.label}
+                    searchOf={(c) => c.label}
+                    placeholder="Écriture seule, sans argent"
+                    emptyText="Aucune caisse de bureau."
+                  /></div>
                 <label className="field field-grow"><span>Note</span>
                   <input value={txForm.note} onChange={(e) => setTxForm({ ...txForm, note: e.target.value })} /></label>
                 <button className="btn btn-gold" disabled={busy || !(Number(txForm.amount) > 0)}>Enregistrer</button>
@@ -320,7 +501,7 @@ export default function ProfilePage() {
                           <td>{new Date(p.created_at).toLocaleString('fr-FR')}</td>
                           <td><span className={`money-dir ${p.type === 'fee_payment' ? 'in' : 'out'}`}>{p.type === 'fee_payment' ? 'Encaissé' : 'Payé'}</span></td>
                           <td className="muted">{p.caisse_label || '—'}</td>
-                          <td>{p.bon_reference ? <Link to={`/bons-passager/${p.bon_id}`} className="gold">{p.bon_reference}</Link> : <span className="muted">—</span>}</td>
+                          <td>{p.bon_reference ? <Link to={p.order_id ? `/bons-fournisseur/${p.order_id}` : `/bons-passager/${p.bon_id}`} className="gold">{p.bon_order_reference ?? p.bon_reference}</Link> : <span className="muted">—</span>}</td>
                           <td className="muted">{p.admin_name}</td>
                           <td className={`right ${p.type === 'fee_payment' ? 'pos' : 'neg'}`}>
                             {formatMoney(Math.abs(Number(p.amount)))} {p.currency_code}
@@ -330,10 +511,13 @@ export default function ProfilePage() {
                               onClick={() => setEditPay({ id: p.id, amount: String(Math.abs(Number(p.amount))), note: p.note || '', currency: p.currency_code })}>
                               <IconEl name="edit" />
                             </button>
-                            <button className="icon-btn danger" title="Annuler ce paiement" aria-label="Annuler" disabled={busy}
-                              onClick={() => setConfirmPay(p)}>
-                              <IconEl name="trash" />
-                            </button>
+                            {/* Annuler un paiement fait ressortir l'argent de la caisse et rouvre la dette : reserve au super-administrateur. */}
+                            {isSuper && (
+                              <button className="icon-btn danger" title="Annuler ce paiement" aria-label="Annuler" disabled={busy}
+                                onClick={() => setConfirmPay(p)}>
+                                <IconEl name="trash" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

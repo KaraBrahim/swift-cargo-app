@@ -5,6 +5,8 @@
 import { getPool, withTx } from '../../db/pool.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
+import { deliverableLines } from '../orders/orderStatus.js';
+import { applyDelivery } from '../orders/orders.service.js';
 
 // `role` filtre la liste sans découper les données : la page Fournisseurs et la
 // page Passagers sont deux vues de la même table, et une personne qui tient les
@@ -87,3 +89,53 @@ export async function setPersonActive({ admin, id, active, ip }) {
 }
 
 const rolesOf = (p) => [p.is_fournisseur && 'fournisseur', p.is_passager && 'passager'].filter(Boolean);
+
+// ── Le comptoir : « qu'est-ce qui m'attend ? » ───────────────────────
+//
+// Un bon passager transporte délibérément les lots de PLUSIEURS fournisseurs —
+// une valise se remplit là où la marchandise est prête. La remise, elle, ne
+// vivait que sur la fiche d'UN ordre. Quand l'homme se présente au comptoir,
+// personne ne pouvait donc répondre à la seule question qu'il pose : ce qui est
+// à moi, où qu'il soit arrivé.
+// `client` n'est pas un détail : appelée depuis la transaction de la remise,
+// elle doit lire ce que CETTE transaction vient d'écrire. Sur le pool, elle
+// lirait l'état d'avant le commit et répondrait au comptoir que la marchandise
+// attend encore.
+export async function deliverableFor(personId, client = getPool()) {
+  const person = await getPerson(personId, client);
+  const lines = (await deliverableLines(client, { personId }))
+    .filter((l) => Number(l.deliverable) > 0);
+
+  // Groupées par ordre, dans l'ordre où elles sont arrivées : c'est aussi
+  // l'ordre dans lequel on vide les étagères.
+  const byOrder = new Map();
+  for (const l of lines) {
+    if (!byOrder.has(l.order_id)) {
+      byOrder.set(l.order_id, { orderId: l.order_id, reference: l.order_reference, lines: [] });
+    }
+    byOrder.get(l.order_id).lines.push(l);
+  }
+  return { person, orders: [...byOrder.values()], total: lines.length };
+}
+
+// Une remise, une transaction — même si elle vide quatre ordres. Quatre appels
+// séparés laisseraient le troisième échouer avec les deux premiers déjà sortis
+// du stock, et personne au comptoir pour s'en apercevoir.
+export async function deliverToPerson({ admin, personId, lines, ip }) {
+  return withTx(async (c) => {
+    const { rows } = await c.query('SELECT id, name FROM people WHERE id=$1 AND active=TRUE', [personId]);
+    const person = rows[0];
+    if (!person) throw errors.notFound('Personne introuvable ou inactive.');
+
+    const { moved, orders } = await applyDelivery(c, {
+      admin, lines,
+      allow: { personId: Number(personId) },
+      note: `Remise au comptoir — ${person.name}`,
+    });
+    await writeAudit(c, {
+      adminId: admin.id, action: 'person.deliver', entity: 'person', entityId: Number(personId),
+      details: { name: person.name, lignes: moved, ordres: orders.length }, ip,
+    });
+    return deliverableFor(personId, c);
+  });
+}

@@ -77,6 +77,11 @@
   --st-transit-border: var(--brand-deep);
   --st-arrive: var(--blue);
   --st-arrive-border: var(--blue-border);
+  /* Livrée : la marchandise a quitté le bureau, mais l'affaire n'est pas
+     close — d'où une couleur entre l'arrivée et le règlement, pas l'une des
+     deux. --amber est redéfini par le thème clair, donc celle-ci suit. */
+  --st-livree: var(--amber);
+  --st-livree-border: #8a6a1e;
   --st-regle: var(--green);
   --st-regle-border: #2f6b4a;
 
@@ -166,6 +171,7 @@
   --amber: #a2740a;
 
   --st-cree: #6a614b;
+  --st-livree-border: #e0c690;
   --st-regle-border: rgba(20, 135, 90, 0.45);
 
   --shadow-sm: 0 2px 8px rgba(15, 17, 26, 0.07);

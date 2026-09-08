@@ -54,6 +54,9 @@ export const ticketCss = (mm = 80) => `
   .sign { margin-top: 7mm; }
   .sign .line { border-top: 1px solid #000; margin-top: 8mm; padding-top: 1mm; font-weight: 400; font-size: 10px; }
   .foot { margin-top: 4mm; font-weight: 400; font-size: 10px; }
+  .qr { margin-top: 4mm; text-align: center; }
+  .qr img { width: 26mm; height: 26mm; image-rendering: pixelated; }
+  .qr .ref { font-size: 10px; letter-spacing: 1px; margin-top: 1mm; }
   @media print { .no-print { display: none !important; } }
 `;
 
@@ -92,7 +95,11 @@ const line = (k, v) =>
   `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(String(v))}</span></div>`;
 
 // ── Bon passager — the everyday counter ticket ───────────────────────
-export function bonTicket(bon, societe) {
+// Le code scannable du rouleau. Même bloc que sur l'A4, à la taille du papier.
+const qrTicket = (qr, reference) =>
+  (qr ? `<div class="qr"><img src="${qr}" alt=""><div class="ref">${esc(reference || '')}</div></div>` : '');
+
+export function bonTicket(bon, societe, qr) {
   const cur = bon.transport_currency;
   const items = (bon.lines || []).map((l) => {
     const missing = missingOf(l);
@@ -103,6 +110,9 @@ export function bonTicket(bon, societe) {
         <span class="k">${esc(declaredOf(l))}${Number(l.unit_price) ? ` × ${money(l.unit_price)}` : ''}</span>
         <span class="v">${esc(money(lineAmount(l), cur))}</span>
       </div>
+      ${Number(l.missing_unit_price) && bon.order_id == null
+        ? `<div class="row"><span class="k">Valeur manquant</span><span class="v">${esc(money(l.missing_unit_price, cur))} / ${esc(measureUnit(l))}</span></div>`
+        : ''}
       ${missing > 0 ? `<div class="row"><span class="k">Manquant</span><span class="v">${esc(qtyFr(missing))} ${esc(measureUnit(l))}</span></div>` : ''}
     </div>`;
   }).join('');
@@ -124,6 +134,7 @@ export function bonTicket(bon, societe) {
     ${bon.passager_payment != null
       ? `<div class="row tot"><span>PAYÉ AU PASSAGER</span><span>${esc(money(bon.passager_payment, cur))}</span></div>`
       : ''}
+    ${qrTicket(qr, bon.reference)}
     <div class="sign">
       <div class="line">Signature fournisseur</div>
       <div class="line">Signature passager</div>
@@ -132,7 +143,7 @@ export function bonTicket(bon, societe) {
 }
 
 // ── Bon fournisseur / manifest — one entry per child bon ─────────────
-export function orderTicket(order, societe) {
+export function orderTicket(order, societe, qr) {
   const items = (order.bons || []).map((b) => `
     <div class="item">
       <div class="name">${esc(b.reference)}</div>
@@ -150,14 +161,18 @@ export function orderTicket(order, societe) {
     <div class="c sub">BONS PASSAGERS (${(order.bons || []).length})</div>
     ${items || '<div class="c sub">Aucun bon</div>'}
     <hr>
-    <div class="row tot"><span>TOTAL FRAIS</span><span>${esc(money(order.totals?.transport_fee))}</span></div>
+    ${line('Marchandises', money(order.totals?.goods ?? order.totals?.transport_fee))}
+    ${Number(order.totals?.commission) ? line('Commission', money(order.totals.commission)) : ''}
+    ${Number(order.totals?.discount) ? line('Remise', `− ${money(order.totals.discount)}`) : ''}
+    <div class="row tot"><span>À FACTURER</span><span>${esc(money(order.totals?.billed ?? order.totals?.transport_fee))}</span></div>
     ${Number(order.totals?.loss_total) ? line('Total pertes', money(order.totals.loss_total)) : ''}
+    ${qrTicket(qr, order.reference)}
     <div class="sign"><div class="line">Responsable</div></div>
     ${footer(societe)}`;
 }
 
 // ── Caisse receipt — proof for a single cash movement ────────────────
-export function movementTicket({ movement, caisse, societe }) {
+export function movementTicket({ movement, caisse, societe, qr }) {
   const m = movement;
   const isIn = m.direction === 'in';
   return `
@@ -173,6 +188,7 @@ export function movementTicket({ movement, caisse, societe }) {
       <span>${esc(money(m.amount, m.currency_code))}</span>
     </div>
     ${line('Solde après', money(m.balance_after, m.currency_code))}
+    ${qrTicket(qr, movement.id ? `N° ${movement.id}` : '')}
     <div class="sign"><div class="line">Signature</div></div>
     ${footer(societe)}`;
 }

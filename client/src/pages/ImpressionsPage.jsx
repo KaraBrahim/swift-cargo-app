@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
+import { EntityPicker, OptionChips } from '../components/EntityPicker.jsx';
 import { Spinner, errorMessage, useToast, PageHeader, formatMoney } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import {
@@ -8,15 +9,11 @@ import {
   orderManifestBody, tableDocBody,
 } from '../components/printDocument.js';
 import { openTicketWindow, bonTicket, orderTicket, listTicket } from '../components/printTicket.js';
+import { qrDataUrl } from '../lib/useQr.js';
+import DateRangePicker, { defaultRange } from '../components/DateRangePicker.jsx';
 
 const ACCENT = 'var(--c-bon)';
 
-const PERIODS = [
-  { key: 'semaine', label: 'Cette semaine' },
-  { key: 'mois', label: 'Ce mois' },
-  { key: 'trimestre', label: 'Ce trimestre' },
-  { key: 'annee', label: 'Cette année' },
-];
 
 const FORMATS = [
   { key: 'a4', label: 'A4 / PDF' },
@@ -41,6 +38,7 @@ const DOCS = {
     load: (id) => api(`/bons/${id}`).then((r) => r.bon),
     title: (b) => b.reference,
     docTitle: 'Bon passager',
+    scan: (b) => ['bon', b.uuid],
     a4: bonDocBody,
     ticket: bonTicket,
   },
@@ -52,6 +50,7 @@ const DOCS = {
     load: (id) => api(`/orders/${id}`).then((r) => r.order),
     title: (o) => o.reference,
     docTitle: 'Bon fournisseur — manifeste',
+    scan: (o) => ['order', o.uuid],
     a4: orderManifestBody,
     ticket: orderTicket,
   },
@@ -61,7 +60,7 @@ const DOCS = {
     list: '/caisses',
     options: (d) => (d.caisses ?? []).map((c) => ({ id: c.id, label: c.label })),
     period: true,
-    load: (id, { period }) => api(`/reports/caisse/${id}?period=${period}&currency=DZD`),
+    load: (id, { range }) => api(`/reports/caisse/${id}?from=${range.from}&to=${range.to}&currency=DZD`),
     title: (d) => `Relevé ${d.caisse.label}`,
     docTitle: 'Relevé de caisse',
     a4: caisseStatementBody,
@@ -89,6 +88,7 @@ const DOCS = {
     load: (id) => api(`/reports/person/personne/${id}?currency=DZD`),
     title: (d) => `Relevé ${d.person.name}`,
     docTitle: 'Relevé de compte',
+    scan: (d) => ['person', d.person.uuid],
     a4: personStatementBody,
     ticket: (d, societe) => listTicket({
       societe, docLabel: 'Relevé de compte', subtitle: d.person.name,
@@ -193,7 +193,7 @@ export default function ImpressionsPage() {
   const [doc, setDoc] = useState('bon');
   const [target, setTarget] = useState('');
   const [personType, setPersonType] = useState('');
-  const [period, setPeriod] = useState('mois');
+  const [range, setRange] = useState(defaultRange);
   const [format, setFormat] = useState('a4');
   const [busy, setBusy] = useState(false);
 
@@ -214,13 +214,16 @@ export default function ImpressionsPage() {
     try {
       let ok;
       if (spec) {
-        const data = await spec.load(target, { period, personType });
+        const data = await spec.load(target, { range, personType });
+        // Le code scannable, produit avant le document : les constructeurs sont
+        // synchrones et reçoivent l'image toute faite.
+        const qr = spec.scan ? await qrDataUrl(...spec.scan(data)) : null;
         ok = format === 'a4'
           ? openPrintWindow({
               title: spec.title(data), societe, docTitle: spec.docTitle,
-              subtitle: spec.title(data), body: spec.a4(data),
+              subtitle: spec.title(data), body: spec.a4(data, qr),
             })
-          : openTicketWindow({ title: spec.title(data), mm: Number(format), body: spec.ticket(data, societe) });
+          : openTicketWindow({ title: spec.title(data), mm: Number(format), body: spec.ticket(data, societe, qr) });
       } else {
         const payload = await api(listSpec.endpoint);
         const rows = listSpec.pick(payload);
@@ -291,29 +294,40 @@ export default function ImpressionsPage() {
         <h2 className="panel-title">2. {needsTarget ? 'Choisir la cible et le format' : 'Choisir le format'}</h2>
         <div className="op-form">
           {spec?.person && (
-            <label className="field"><span>Filtrer par rôle</span>
-              <select value={personType} onChange={(e) => { setPersonType(e.target.value); setTarget(''); }}>
-                <option value="">Toutes les personnes</option>
-                <option value="fournisseur">Fournisseurs</option>
-                <option value="passager">Passagers</option>
-              </select></label>
+            <div className="field"><span>Filtrer par rôle</span>
+              <OptionChips
+                ariaLabel="Filtrer par rôle"
+                value={personType}
+                onChange={(v) => { setPersonType(v); setTarget(''); }}
+                options={[
+                  { value: '', label: 'Toutes' },
+                  { value: 'fournisseur', label: 'Fournisseurs', icon: 'fournisseur' },
+                  { value: 'passager', label: 'Passagers', icon: 'passager' },
+                ]}
+              /></div>
           )}
 
           {needsTarget && (
-            <label className="field field-grow">
+            <div className="field field-grow">
               <span>{spec.label}</span>
-              <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={chooser.loading}>
-                <option value="">{chooser.loading ? 'Chargement…' : '— Sélectionner —'}</option>
-                {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
-            </label>
+              <EntityPicker
+                icon={spec.person ? 'users' : 'bon'}
+                value={target}
+                onChange={setTarget}
+                options={options}
+                loading={chooser.loading}
+                labelOf={(o) => o.label}
+                searchOf={(o) => o.label}
+                placeholder={`Chercher — ${spec.label.toLowerCase()}`}
+                emptyText="Rien ne correspond."
+              />
+            </div>
           )}
 
           {spec?.period && (
-            <label className="field"><span>Période</span>
-              <select value={period} onChange={(e) => setPeriod(e.target.value)}>
-                {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-              </select></label>
+            <div className="field field-grow"><span>Période</span>
+              <DateRangePicker value={range} onChange={setRange} />
+            </div>
           )}
 
           <label className="field"><span>Format</span>

@@ -14,3 +14,8 @@ Thumbs.db
 .sync-*/
 _*.mjs
 *-pgdata/
+
+# Poste de travail : la charge utile est reconstruite, les installeurs aussi.
+desktop/payload/
+desktop/release/
+desktop/node_modules/

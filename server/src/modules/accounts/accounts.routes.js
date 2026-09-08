@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { idempotent } from '../../middleware/idempotent.js';
 import {
   getSummary, listDebts, listPayments, updatePayment, deletePayment,
   createPersonTransaction, listCharges, createCharge, updateCharge, deleteCharge,
@@ -10,6 +11,9 @@ import {
 
 export const accountsRouter = Router();
 accountsRouter.use(requireAuth);
+// Un réessai après un timeout ne doit pas rejouer l'opération : voir
+// middleware/idempotent.js. Sans l'en-tête, comportement inchangé.
+accountsRouter.use(idempotent);
 
 accountsRouter.get('/accounts/summary', asyncHandler(async (_req, res) => res.json(await getSummary())));
 

@@ -16,6 +16,8 @@
 @import './theme/fonts.css';
 @import './theme/intro.css';
 @import './theme/shell.css';
+@import './theme/flow.css';
+@import './theme/notify.css';
 
 @theme inline {
   --color-bg: var(--bg);
@@ -239,15 +241,52 @@
 
   .chips { @apply flex flex-wrap gap-2; }
   .chip {
-    @apply cursor-pointer rounded-full px-2.5 py-1 text-[0.73rem] font-medium transition-all duration-150;
+    @apply inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.73rem] font-medium transition-all duration-150;
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
   }
+  /* Une puce peut porter une icône : sans taille imposée, le SVG prend 40 px et
+     se met au-dessus du texte au lieu d'à côté. */
+  .chip svg { @apply h-3.5 w-3.5 shrink-0; }
   .chip:hover { border-color: var(--border-strong); color: var(--text); }
   .chip.active {
     background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2));
     color: var(--brand-ink); border-color: transparent; font-weight: 600;
   }
   .filter-bar { @apply mb-2 flex flex-wrap items-center gap-1.5; }
+
+  /* ── La barre de période des rapports ── */
+  /* Elle commande TOUS les rapports, donc elle est en haut, toujours visible,
+     et elle dit en toutes lettres ce qu'elle applique. Un total sans période
+     affichée est un nombre qu'on ne peut ni contester ni reproduire. */
+  .range-bar {
+    @apply relative mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl px-3.5 py-3;
+    background: var(--surface-1); border: 1px solid var(--border);
+  }
+  .range-fields { @apply flex items-center gap-2; }
+  .range-field { @apply flex items-center gap-1.5 text-[0.76rem]; color: var(--muted); }
+  .range-field input {
+    @apply w-[7.4rem] rounded-lg px-2.5 py-1.5 text-[0.82rem];
+    background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .range-field input:focus { border-color: var(--brand-deep); outline: none; }
+  .range-presets { @apply flex flex-wrap items-center gap-1.5; }
+  /* La phrase prend toute la largeur : c'est la ligne qu'on relit avant
+     d'imprimer, pas une annotation en marge. */
+  .range-said {
+    @apply w-full text-[0.78rem]; margin: 2px 0 0; color: var(--muted);
+  }
+  .range-said strong { color: var(--brand-text); font-weight: 600; }
+  .range-cal {
+    @apply absolute z-[70] mt-2 rounded-2xl p-2;
+    top: 100%; left: 0;
+    background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+  }
+  /* Le calendrier flotte au-dessus du panneau suivant : sans ceci, l'animation
+     `rise` des panneaux crée un contexte d'empilement qui le passe derrière. */
+  .dateby-bar { @apply items-center gap-2; }
+  .dateby-bar .muted { @apply text-[0.76rem]; }
+
 
   .status-badge {
     @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[0.71rem] font-semibold;
@@ -257,6 +296,7 @@
   .status-badge.st-cree { color: var(--st-cree); }
   .status-badge.st-transit { color: var(--st-transit); border-color: var(--st-transit-border); }
   .status-badge.st-arrive { color: var(--st-arrive); border-color: var(--st-arrive-border); }
+  .status-badge.st-livree { color: var(--st-livree); border-color: var(--st-livree-border); }
   .status-badge.st-regle { color: var(--st-regle); border-color: var(--st-regle-border); background: var(--green-bg); }
 
   /* ── Avatars ── */
@@ -308,7 +348,7 @@
   /* Single-row variant: just the name on one line, no stacked title. */
   .page-head-bar { @apply items-center; }
 
-  /* ── Empty / spinner / toast ── */
+  /* ── Empty / spinner ── */
   .empty { @apply flex flex-col items-center gap-1.5 px-4 py-6 text-center; }
   .empty-ico { @apply mb-0.5 grid h-10 w-10 place-items-center rounded-xl; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
   .empty-ico svg { @apply h-5 w-5; }
@@ -319,16 +359,6 @@
   .spinner { @apply flex items-center justify-center gap-3 p-14; color: var(--muted); }
   .spinner-dot { @apply h-4 w-4 rounded-full; border: 2px solid var(--border); border-top-color: var(--brand); animation: spin 0.75s linear infinite; }
   .error-panel { @apply text-center; }
-
-  .toast-wrap { @apply fixed bottom-6 right-6 z-[100] flex flex-col gap-2.5; }
-  .toast {
-    @apply max-w-sm cursor-pointer rounded-[var(--radius-soft)] px-4 py-3 text-[0.86rem];
-    background: var(--surface-2); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
-    animation: toastIn 0.25s ease;
-  }
-  .toast-success { border-color: var(--green-border); color: var(--green-text); }
-  .toast-error { border-color: var(--red-border); color: var(--red-text); }
-  .toast-info { border-color: var(--brand-deep); }
 
   /* ── Confirm modal ── */
   .modal-backdrop {
@@ -351,6 +381,12 @@
   .modal-bullets li::before { content: '↺'; @apply absolute left-0; color: var(--red); }
   .modal-actions { @apply mt-6 flex justify-center gap-3; }
   .modal-actions .btn { @apply min-w-[120px] justify-center; }
+  /* Une fenêtre qui contient un tableau à remplir, pas un message : plus large,
+     alignée à gauche, et le tableau défile plutôt que de pousser les boutons
+     hors de l'écran quand l'ordre porte quinze lots. */
+  .modal-card.modal-wide { @apply max-w-2xl text-left; }
+  .modal-card.modal-wide .modal-msg { @apply mx-0 max-w-none; }
+  .deliver-rows { @apply mt-4 max-h-[46vh] overflow-y-auto; }
 
   /* ── Animated background (app-wide) ── */
   /* tsparticles sizes its own canvas (fixed, 100%); this just puts the animated
@@ -410,6 +446,21 @@
   .mini-input { @apply w-[86px] rounded-lg px-2 py-1.5 text-right; background: var(--input-bg); border: 1px solid var(--border); color: var(--text); font-family: var(--font-sans); }
   .mini-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-glow); outline: none; }
 
+  /* Les flèches d'une quantité. Le champ garde sa propre largeur en tableau
+     (mini-input) et prend toute la place dans un formulaire (.field), d'où les
+     deux règles plutôt qu'une largeur imposée au conteneur. */
+  .qty-field { @apply inline-flex items-stretch gap-1 align-middle; }
+  .qty-btn {
+    @apply grid w-7 shrink-0 place-items-center rounded-lg text-[0.95rem] leading-none;
+    background: var(--surface-3); border: 1px solid var(--border); color: var(--text-2);
+    font-family: var(--font-sans); user-select: none;
+  }
+  .qty-btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand-text); }
+  .qty-btn:active:not(:disabled) { background: var(--surface-2); }
+  .qty-btn:disabled { opacity: 0.35; cursor: default; }
+  .field .qty-field { @apply w-full; }
+  .field .qty-field input { @apply w-full min-w-0; }
+
   .stepper { @apply mb-3 flex gap-1; }
   .step { @apply relative flex flex-1 flex-col items-center gap-1.5 text-[0.72rem]; color: var(--muted); }
   .step::before { content: ''; @apply absolute top-2 z-0 h-0.5 w-full; left: -50%; background: var(--border); }
@@ -418,6 +469,36 @@
   .step-dot { @apply z-[1] h-5 w-5 rounded-full transition-all duration-200; background: var(--surface-3); border: 2px solid var(--border-strong); }
   .step.done .step-dot { background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2)); border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-glow); }
   .step.current .step-label { color: var(--brand-text); font-weight: 700; }
+  /* Une étape à moitié faite ne doit pas ressembler à une étape finie. Placées
+     APRÈS les règles `.done` : à spécificité égale, c'est la dernière qui
+     gagne, et une étape partielle est toujours aussi une étape atteinte.
+     `--fill` (0…1) vient du composant. */
+  .step.partial .step-dot {
+    background: linear-gradient(90deg, var(--brand) 0 calc(var(--fill) * 100%), var(--surface-3) 0);
+    border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-glow);
+  }
+  .step.partial::before {
+    background: linear-gradient(90deg, var(--brand-deep) 0 calc(var(--fill) * 100%), var(--border) 0);
+  }
+  .step-tag {
+    @apply mt-0.5 rounded-full px-1.5 py-px text-[0.6rem] font-semibold uppercase;
+    letter-spacing: 0.04em;
+  }
+  /* Doré = il reste un geste. Muet = c'est un fait, déjà compensé. */
+  .step-tag.open { color: var(--st-livree); background: color-mix(in srgb, var(--st-livree) 18%, transparent); }
+  .step-tag.settled { color: var(--muted); background: var(--surface-3); }
+
+  /* Réconciliation : la case « tout » et, si on la décoche, la quantité comptée. */
+  .rec-arrived { @apply whitespace-nowrap; }
+  .rec-all { @apply inline-flex cursor-pointer items-center gap-1 text-[0.75rem] align-middle; color: var(--muted); }
+  .rec-all input { @apply h-3.5 w-3.5 cursor-pointer; accent-color: var(--brand); }
+  .rec-all + .mini-input { @apply ml-2 align-middle; }
+  /* Le nom du bon fournisseur au-dessus de ses lots : au comptoir on remet la
+     marchandise d'un homme, mais elle vient de plusieurs expéditions. */
+  .table .group-row td {
+    @apply pt-3 text-[0.78rem] font-semibold uppercase;
+    letter-spacing: 0.04em; background: var(--surface-2);
+  }
   /* Clickable stepper (jump to a stage). */
   .stepper-click .step { @apply cursor-pointer border-0 bg-transparent; font-family: var(--font-sans); }
   .stepper-click .step:not(:disabled):hover .step-dot { border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-glow); }
@@ -523,7 +604,6 @@
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
-@keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes contentIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
@@ -1048,7 +1128,7 @@
    A floating card just under the top bar rather than a full-width bar: it has
    to be dismissible, and a strip glued to the edge of the window reads as part
    of the furniture rather than as something you can close. Kept below the
-   modal layer (z 300) and clear of the toasts (bottom right, z 100). */
+   modal layer (z 300) and below the notification modals (z 1060). */
 .net-banner {
   position: fixed; z-index: 95;
   top: calc(var(--topbar-h) + 12px); left: 50%;

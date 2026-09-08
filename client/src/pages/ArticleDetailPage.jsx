@@ -11,12 +11,14 @@ import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { formatQty } from '../lib/format.js';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const ACCENT = 'var(--c-stock)';
 const OFFICE = { china: 'Chine', algeria: 'Algérie' };
 const REASON = {
   reception: 'Réception fournisseur', depart: 'Départ vers l’Algérie',
-  arrivee: 'Arrivée en Algérie', inventaire: 'Inventaire', ajustement: 'Ajustement',
+  arrivee: 'Arrivée en Algérie', livraison: 'Remise au fournisseur',
+  inventaire: 'Inventaire', ajustement: 'Ajustement',
 };
 // Only hand-made corrections may be undone here; the rest belong to a bon.
 const MANUAL = ['inventaire', 'ajustement'];
@@ -27,6 +29,7 @@ export default function ArticleDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const isSuper = useIsSuper();
   const { data, loading, error, reload } = useApi(`/stock/items/${id}/detail`);
   const cats = useApi('/stock/categories');
   const [edit, setEdit] = useState(null);
@@ -95,14 +98,20 @@ export default function ArticleDetailPage() {
           <button className="btn" onClick={() => setEdit(edit ? null : { name: it.name, category_id: it.category_id || '', notes: it.notes || '' })}>
             <IconEl name={edit ? 'close' : 'edit'} />{edit ? 'Annuler' : 'Modifier'}
           </button>
-          <button className="btn" disabled={busy}
-            onClick={() => run(() => api(`/stock/items/${id}/active`, { method: 'POST', body: { active: !it.active } }),
-              it.active ? 'Article désactivé.' : 'Article réactivé.')}>
-            <IconEl name={it.active ? 'close' : 'check'} />{it.active ? 'Désactiver' : 'Réactiver'}
-          </button>
-          <button className="btn btn-danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
-            <IconEl name="trash" />Supprimer
-          </button>
+          {/* Desactiver retire la fiche de toutes les listes : reserve au super-administrateur. Reactiver reste ouvert a tous. */}
+          {(isSuper || !it.active) && (
+            <button className="btn" disabled={busy}
+              onClick={() => run(() => api(`/stock/items/${id}/active`, { method: 'POST', body: { active: !it.active } }),
+                it.active ? 'Article désactivé.' : 'Article réactivé.')}>
+              <IconEl name={it.active ? 'close' : 'check'} />{it.active ? 'Désactiver' : 'Réactiver'}
+            </button>
+          )}
+          {/* Supprimer definitivement : reserve au super-administrateur. */}
+          {isSuper && (
+            <button className="btn btn-danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
+              <IconEl name="trash" />Supprimer
+            </button>
+          )}
         </div>
       </div>
 
@@ -201,12 +210,15 @@ export default function ArticleDetailPage() {
                     <td className="gold">{m.bon_reference || m.order_reference || '—'}</td>
                     <td className="muted">{m.admin_name || '—'}</td>
                     <td className="right">
-                      <button className="icon-btn danger" disabled={busy || !MANUAL.includes(m.reason)}
-                        title={MANUAL.includes(m.reason) ? 'Annuler ce mouvement' : 'Mouvement issu d’un bon — à annuler depuis le bon'}
-                        aria-label="Annuler le mouvement"
-                        onClick={() => setConfirmMove(m)}>
-                        <IconEl name="trash" />
-                      </button>
+                      {/* Annuler un mouvement de stock applique son inverse : reserve au super-administrateur. */}
+                      {isSuper && (
+                        <button className="icon-btn danger" disabled={busy || !MANUAL.includes(m.reason)}
+                          title={MANUAL.includes(m.reason) ? 'Annuler ce mouvement' : 'Mouvement issu d’un bon — à annuler depuis le bon'}
+                          aria-label="Annuler le mouvement"
+                          onClick={() => setConfirmMove(m)}>
+                          <IconEl name="trash" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

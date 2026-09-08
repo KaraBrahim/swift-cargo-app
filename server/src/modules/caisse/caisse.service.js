@@ -36,7 +36,18 @@ async function lockBalance(client, caisseId, code) {
     'SELECT balance FROM caisse_balances WHERE caisse_id = $1 AND currency_code = $2 FOR UPDATE',
     [caisseId, code]
   );
+  // The INSERT above guarantees the row, so an empty result means the caisse or
+  // the currency vanished under us. Say so, rather than dying on rows[0].
+  if (!rows[0]) throw errors.conflict(`Solde introuvable pour la caisse ${caisseId} en ${code}.`);
   return new Decimal(rows[0].balance);
+}
+
+// The number of decimals this currency is kept at. Every write of a balance has
+// to use it, or two code paths round the same money differently.
+async function currencyScale(client, code) {
+  const { rows } = await client.query('SELECT minor_units FROM currencies WHERE code = $1', [code]);
+  if (!rows[0]) throw errors.notFound(`Devise inconnue : ${code}.`);
+  return rows[0].minor_units;
 }
 
 async function setBalance(client, caisseId, code, valueStr) {
@@ -184,6 +195,12 @@ async function hasForcedTransfer(c, caisseId, currency) {
 }
 
 export async function replayChain(c, caisseId, currency) {
+  // Take the caisse's lock BEFORE reading a single sum. Without it, a deposit
+  // committing between the SUM below and the UPDATE at the end is simply
+  // erased: this function would write a total computed when that movement did
+  // not yet exist. postMovement() holds the same lock, so the two serialise.
+  await lockBalance(c, caisseId, currency);
+  const scale = await currencyScale(c, currency);
   const { rows } = await c.query(
     `WITH ordered AS (
        SELECT id, SUM(CASE WHEN direction='in' THEN amount ELSE -amount END)
@@ -210,7 +227,7 @@ export async function replayChain(c, caisseId, currency) {
        FROM transactions WHERE caisse_id=$1 AND currency_code=$2`,
     [caisseId, currency]
   );
-  await setBalance(c, caisseId, currency, new Decimal(total.rows[0].bal).toFixed(2));
+  await setBalance(c, caisseId, currency, new Decimal(total.rows[0].bal).toFixed(scale));
   return total.rows[0].bal;
 }
 

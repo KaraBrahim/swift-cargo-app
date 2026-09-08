@@ -6,18 +6,23 @@ import { Spinner, Money, formatMoney, errorMessage, useToast } from '../componen
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { RoleBadges } from '../components/RolePicker.jsx';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
 import AmountInput from '../components/AmountInput.jsx';
+import { useIdempotent } from '../lib/useIdempotent.js';
 
 const OFFICE_LABEL = { china: 'Bureau Chine', algeria: 'Bureau Algérie' };
 
 export default function CaissesPage() {
   const toast = useToast();
   const navigate = useNavigate();
-  const { admin } = useAuth();
-  // Reshaping the tills themselves is a super-admin act.
-  const isSuper = admin?.role === 'superadmin';
+  // Reshaping the tills themselves is a super-admin act — and so is every
+  // destructive action on this page. One hook says it for all of them.
+  const isSuper = useIsSuper();
+  // Un hook, donc AVANT tout retour anticipe : le placer plus bas le faisait
+  // sauter au premier rendu (chargement) et exister au second — c'est
+  // l'erreur React #310, et elle plantait la page.
+  const idemReceive = useIdempotent();
   const caisses = useApi('/caisses');
   const currencies = useApi('/currencies');
   const transfers = useApi('/office-transfers');
@@ -103,6 +108,7 @@ export default function CaissesPage() {
     }
   };
 
+
   // Confirming is what moves the money — both caisses at once. If the sending
   // caisse has been emptied in the meantime the server refuses and tells us by
   // how much; that is a decision for a person, so it becomes a dialog rather
@@ -110,7 +116,9 @@ export default function CaissesPage() {
   const receive = async (t, force = false) => {
     setBusy(true);
     try {
-      await api(`/office-transfers/${t.id}/receive`, { method: 'POST', body: force ? { force: true } : {} });
+      // C'est ici que l'argent bouge des deux côtés. Un réessai après une
+      // coupure doit être le même geste, pas une seconde réception.
+      await idemReceive((key) => api(`/office-transfers/${t.id}/receive`, { method: 'POST', idem: key, body: force ? { force: true } : {} }));
       toast.success(force ? 'Réception confirmée — caisse d’origine en négatif.' : 'Réception confirmée.');
       setShortfall(null);
       reload();
@@ -287,7 +295,7 @@ export default function CaissesPage() {
                     <span className="gold">{p.person_name}</span>
                   </td>
                   <td className="muted">{p.caisse_label || '—'}</td>
-                  <td>{p.bon_reference ? <Link to={`/bons-passager/${p.bon_id}`} className="gold">{p.bon_reference}</Link> : <span className="muted">—</span>}</td>
+                  <td>{p.bon_reference ? <Link to={p.order_id ? `/bons-fournisseur/${p.order_id}` : `/bons-passager/${p.bon_id}`} className="gold">{p.bon_order_reference ?? p.bon_reference}</Link> : <span className="muted">—</span>}</td>
                   <td className="muted">{p.admin_name}</td>
                   <td className={`right ${p.type === 'fee_payment' ? 'pos' : 'neg'}`}>
                     {p.type === 'fee_payment' ? '+' : '−'}{formatMoney(Math.abs(Number(p.amount)), p.currency_code)}
@@ -297,10 +305,13 @@ export default function CaissesPage() {
                       disabled={busy} onClick={() => setEditPayment({ id: p.id, amount: String(Math.abs(Number(p.amount))), note: p.note || '', currency: p.currency_code, person: p.person_name })}>
                       <IconEl name="edit" />
                     </button>
-                    <button className="icon-btn danger" title="Annuler ce paiement" aria-label="Annuler"
-                      disabled={busy} onClick={() => setConfirmPayment(p)}>
-                      <IconEl name="trash" />
-                    </button>
+                    {/* Annuler un paiement fait ressortir l'argent de la caisse et rouvre la dette : reserve au super-administrateur. */}
+                    {isSuper && (
+                      <button className="icon-btn danger" title="Annuler ce paiement" aria-label="Annuler"
+                        disabled={busy} onClick={() => setConfirmPayment(p)}>
+                        <IconEl name="trash" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -412,7 +423,7 @@ export default function CaissesPage() {
               {curList.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
             </select></label>
           <label className="field"><span>Montant</span>
-            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} placeholder="0.00" /></label>
+            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} /></label>
           <label className="field field-grow"><span>Note</span>
             <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
           <button className="btn btn-gold" disabled={busy || !form.fromCaisseId || !form.toCaisseId || !(Number(form.amount) > 0)}>Envoyer</button>
@@ -461,16 +472,23 @@ export default function CaissesPage() {
                           disabled={busy} onClick={() => setEditTransfer({ id: t.id, reference: t.reference, amount: t.amount, note: t.note || '' })}>
                           <IconEl name="edit" />
                         </button>
-                        <button className="icon-btn danger" title="Supprimer le transfert" aria-label="Supprimer"
-                          disabled={busy} onClick={() => setConfirmTransfer({ mode: 'delete', t })}>
-                          <IconEl name="trash" />
-                        </button>
+                        {/* Supprimer definitivement : reserve au super-administrateur. */}
+                        {isSuper && (
+                          <button className="icon-btn danger" title="Supprimer le transfert" aria-label="Supprimer"
+                            disabled={busy} onClick={() => setConfirmTransfer({ mode: 'delete', t })}>
+                            <IconEl name="trash" />
+                          </button>
+                        )}
                       </>
-                    ) : (
+                    ) : isSuper ? (
+                      // Annuler une réception retire l'argent des DEUX caisses
+                      // à la fois : réservé au super-administrateur.
                       <button className="icon-btn" title="Annuler la réception (remet le transfert en route)" aria-label="Annuler la réception"
                         disabled={busy} onClick={() => setConfirmTransfer({ mode: 'unreceive', t })}>
                         <IconEl name="refresh" />
                       </button>
+                    ) : (
+                      <span className="muted">—</span>
                     )}
                   </td>
                 </tr>
@@ -493,10 +511,13 @@ export default function CaissesPage() {
           : ''}
         bullets={[
           'Confirmer quand même : l’argent est enregistré des deux côtés et la caisse d’origine passe en négatif — le signe qu’une entrée y manque.',
-          'Annuler le transfert : la ligne disparaît. Rien n’avait bougé, il n’y a rien à défaire.',
+          // La seconde issue supprime le transfert : elle n'est proposée qu'au
+          // super-administrateur. L'annoncer à quelqu'un qui ne peut pas la
+          // prendre serait pire que de ne rien dire.
+          ...(isSuper ? ['Annuler le transfert : la ligne disparaît. Rien n’avait bougé, il n’y a rien à défaire.'] : []),
         ]}
         confirmLabel="Confirmer quand même"
-        extraLabel="Annuler le transfert"
+        extraLabel={isSuper ? 'Annuler le transfert' : undefined}
         cancelLabel="Fermer"
         busy={busy}
         onCancel={() => setShortfall(null)}

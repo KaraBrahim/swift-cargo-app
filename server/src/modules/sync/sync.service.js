@@ -12,10 +12,17 @@ const serialize = (r) => ({
 });
 
 // ── Desk: outbox ─────────────────────────────────────────────────────
-export async function collectOutbox(db = getPool(), site = config.site) {
+// A batch, not the whole backlog. The hub caps a request body at 256 KB; a desk
+// that has been offline for a week builds an outbox far past that, and an
+// unbounded push then fails on every single cycle — the events never leave, and
+// the failure looks like a network problem rather than a size one. Pushing in
+// slices makes a long backlog drain instead of jam.
+export const OUTBOX_BATCH = 200;
+
+export async function collectOutbox(db = getPool(), site = config.site, limit = OUTBOX_BATCH) {
   const { rows } = await db.query(
-    'SELECT * FROM sync_outbox WHERE server_seq IS NULL AND origin_site = $1 ORDER BY id',
-    [site]
+    'SELECT * FROM sync_outbox WHERE server_seq IS NULL AND origin_site = $1 ORDER BY id LIMIT $2',
+    [site, limit]
   );
   return rows.map(serialize);
 }
@@ -35,7 +42,7 @@ export async function hubReceive(client, events) {
     if (seen.rows.length) { ack[e.uuid] = Number(seen.rows[0].server_seq); continue; }
 
     await client.query("SELECT set_config('app.sync_applying', 'on', true)");
-    await client.query('SELECT sync_apply_row($1, $2)', [e.entity, e.snapshot]);
+    await client.query('SELECT sync_apply_row($1, $2, $3)', [e.entity, e.snapshot, e.op]);
     await client.query("SELECT set_config('app.sync_applying', 'off', true)");
 
     const { rows } = await client.query("SELECT nextval('sync_server_seq') AS s");
@@ -83,7 +90,7 @@ export async function applyEvents(client, events) {
   for (const e of events) {
     const seen = await client.query('SELECT 1 FROM sync_outbox WHERE uuid = $1', [e.uuid]);
     if (!seen.rows.length) {
-      await client.query('SELECT sync_apply_row($1, $2)', [e.entity, e.snapshot]);
+      await client.query('SELECT sync_apply_row($1, $2, $3)', [e.entity, e.snapshot, e.op]);
       await client.query(
         `INSERT INTO sync_outbox (uuid, entity, entity_uuid, op, snapshot, origin_site, server_seq)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -102,6 +109,13 @@ export async function applyEvents(client, events) {
 
 // Rebuild the two projection tables from their append-only event logs.
 export async function recomputeProjections(db) {
+  // Lock every projection row this is about to rewrite, BEFORE reading the
+  // event logs. Without it a deposit committing between the SUM and the UPDATE
+  // is overwritten out of existence — the movement stays in `transactions`, the
+  // balance no longer counts it, and nothing says so. Ordered, so this can
+  // never deadlock against another copy of itself.
+  await db.query('SELECT 1 FROM caisse_balances ORDER BY caisse_id, currency_code FOR UPDATE');
+  await db.query('SELECT 1 FROM person_balances ORDER BY person_type, person_id, currency_code FOR UPDATE');
   await db.query(
     `INSERT INTO caisse_balances (caisse_id, currency_code, balance)
        SELECT t.caisse_id, t.currency_code,
@@ -202,11 +216,66 @@ export async function runSync() {
   }
 }
 
+// ── L'ordonnancement : rapide en ligne, patient hors ligne ───────────
+//
+// Un `setInterval` fixe ne pouvait pas faire les deux. À 15 secondes, un bon
+// saisi en Chine mettait un quart de minute à apparaître à Alger ; à 3 secondes,
+// un poste débranché une journée aurait tenté 28 000 fois et rempli son journal.
+//
+// Donc : un délai qui s'adapte. Court quand ça passe, doublé à chaque échec
+// jusqu'à un plafond, et remis au court dès le premier succès. Et surtout, une
+// écriture locale ne l'attend pas — elle réveille le cycle tout de suite.
 let timer = null;
+let running = false;
+let delay = 0;
+let pending = false;
+
+function schedule(ms) {
+  clearTimeout(timer);
+  timer = setTimeout(cycle, ms);
+}
+
+async function cycle() {
+  if (running) { pending = true; return; }
+  running = true;
+  try {
+    await runSync();
+    delay = config.syncIntervalMs;
+  } catch (e) {
+    // Hors ligne est un état NORMAL ici, pas une panne : au niveau debug, sinon
+    // le journal d'un poste en déplacement n'est plus lisible.
+    logger.debug?.('Sync cycle skipped', e.message);
+    delay = Math.min(Math.max(delay * 2, config.syncIntervalMs), config.syncMaxBackoffMs);
+  } finally {
+    running = false;
+    // Une écriture arrivée pendant le cycle n'attend pas le tour suivant.
+    if (pending) { pending = false; schedule(0); } else schedule(delay);
+  }
+}
+
 export function startSyncWorker() {
   if (config.site === 'cloud' || !config.cloudUrl || timer) return;
-  logger.info(`Sync worker: site '${config.site}' -> ${config.cloudUrl} every ${config.syncIntervalMs}ms`);
-  timer = setInterval(() => {
-    runSync().catch((e) => logger.warn('Sync cycle skipped', e.message));
-  }, config.syncIntervalMs);
+  logger.info(
+    `Sync worker: site '${config.site}' -> ${config.cloudUrl} `
+    + `(${config.syncIntervalMs}ms, jusqu'à ${config.syncMaxBackoffMs}ms hors ligne)`
+  );
+  delay = config.syncIntervalMs;
+  schedule(0);
+}
+
+export function stopSyncWorker() {
+  clearTimeout(timer);
+  timer = null;
+}
+
+// À appeler quand CE poste vient d'écrire quelque chose. Le temps que la réponse
+// arrive à l'écran, l'évènement est déjà parti vers le hub — c'est ce qui donne
+// l'impression de temps réel sans rien changer au reste.
+//
+// Sans effet sur le hub et sur un poste sans hub configuré : `timer` n'existe
+// que là où le worker tourne.
+export function nudgeSync() {
+  if (!timer) return;
+  if (running) { pending = true; return; }
+  schedule(0);
 }

@@ -10,6 +10,7 @@
 // each printer family (Epson, Star…) and does the character-set encoding. We
 // build the buffer here and hand it to a transport in transport.js.
 import { ThermalPrinter, PrinterTypes, CharacterSet, BreakLine } from 'node-thermal-printer';
+import { encodeScan } from '../../lib/scanCode.js';
 
 // Characters per line at font A. This is the one number the whole layout
 // depends on: leftRight() pads against it, so a wrong width makes every
@@ -115,6 +116,23 @@ function pair(p, left, right) {
 
 const kv = (p, k, v) => pair(p, k, String(v ?? '-'));
 
+// Le code qui ramene ce papier dans le systeme. Imprime avant les signatures,
+// la reference en clair juste dessous : un QR abime doit rester retapable.
+// La taille de cellule suit la largeur du rouleau — 33 modules a 6 points font
+// deja 25 mm, ce qui ne tient pas confortablement sur du 58.
+function scanBlock(p, cfg, kind, uuid, reference) {
+  if (!uuid) return;
+  p.newLine();
+  p.alignCenter();
+  p.printQR(encodeScan(kind, uuid), {
+    cellSize: Number(cfg?.largeur) >= 80 ? 6 : 4,
+    correction: 'M',
+    model: 2,
+  });
+  if (reference) p.println(reference);
+  p.alignLeft();
+}
+
 function signatures(p, labels) {
   p.newLine();
   for (const label of labels) {
@@ -149,6 +167,11 @@ export function bonReceipt({ bon, societe, cfg }) {
     p.bold(false);
     const left = `${qty(deliveredOf(l))} ${measureUnit(l)}${Number(l.unit_price) ? ` x ${money(l.unit_price)}` : ''}`;
     pair(p, left, money(lineAmount(l)));
+    // Le papier est le contrat : ce que le passager devra par unite non livree
+    // doit y figurer, sinon la retenue se decouvre au comptoir.
+    if (bon.order_id == null && Number(l.missing_unit_price)) {
+      pair(p, '  Valeur manquant', `${money(l.missing_unit_price)} / ${measureUnit(l)}`);
+    }
     const missing = missingOf(l);
     if (missing > 0) pair(p, '  Manquant', `${qty(missing)} ${measureUnit(l)}`);
   }
@@ -163,6 +186,7 @@ export function bonReceipt({ bon, societe, cfg }) {
     p.setTextNormal();
     p.bold(false);
   }
+  scanBlock(p, cfg, 'bon', bon.uuid, bon.reference);
   signatures(p, ['Signature fournisseur', 'Signature passager']);
   footer(p, societe, cfg);
   return p.getBuffer();
@@ -189,11 +213,17 @@ export function orderReceipt({ order, societe, cfg }) {
     pair(p, `  ${b.passager_name || '-'}`, money(b.transport_fee));
   }
   p.drawLine();
+  // Trois lignes, pas une : ce que valent les marchandises, la marge convenue,
+  // et seulement ensuite ce que le fournisseur doit.
+  kv(p, 'Marchandises', money(order.totals?.goods));
+  if (Number(order.totals?.commission)) kv(p, 'Commission', money(order.totals.commission));
+  if (Number(order.totals?.discount)) kv(p, 'Remise', `- ${money(order.totals.discount)}`);
   p.bold(true);
-  pair(p, 'TOTAL FRAIS', money(order.totals?.transport_fee));
+  pair(p, 'A FACTURER', money(order.totals?.billed ?? order.totals?.transport_fee));
   p.bold(false);
   if (Number(order.totals?.loss_total)) kv(p, 'Total pertes', money(order.totals.loss_total));
 
+  scanBlock(p, cfg, 'order', order.uuid, order.reference);
   signatures(p, ['Responsable']);
   footer(p, societe, cfg);
   return p.getBuffer();
@@ -219,6 +249,7 @@ export function movementReceipt({ movement: m, caisse, societe, cfg }) {
   p.bold(false);
   kv(p, 'Solde apres', money(m.balance_after, m.currency_code));
 
+  scanBlock(p, cfg, 'transaction', m.uuid, m.id ? `N ${m.id}` : '');
   signatures(p, ['Signature']);
   footer(p, societe, cfg);
   return p.getBuffer();

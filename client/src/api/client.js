@@ -67,16 +67,40 @@ const TIMEOUT_MS = 12000;
 // to take it down. See ConnectionBanner.jsx.
 const announce = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
-export async function api(path, { method = 'GET', body, timeout = TIMEOUT_MS } = {}) {
+// Une opération d'argent qui n'aboutit pas visiblement — un timeout, une
+// coupure — laisse la personne au guichet devant un choix impossible : est-ce
+// passé ou non ? Elle reclique, et le passager est payé deux fois.
+//
+// `idem` est une clé attachée à l'INTENTION, pas à la requête : le même geste
+// réessayé porte la même clé, et le serveur rend alors la réponse d'origine au
+// lieu de bouger l'argent une seconde fois (server/src/middleware/idempotent.js).
+// Créée ici pour que chaque appel qui la demande en ait une sans y penser.
+export const newIdemKey = () =>
+  (crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+// Où vit l'API.
+//
+// Vide par défaut, c'est-à-dire « la même origine que cette page » — ce qui est
+// le cas partout où l'interface est servie par son propre serveur : le poste de
+// travail (Electron, sur http://localhost) et le hub qui sert aussi le site.
+//
+// VITE_API_URL ne sert qu'au cas où l'interface est hébergée SÉPARÉMENT de
+// l'API (un CDN d'un côté, le serveur de l'autre). Il faut alors que le serveur
+// autorise cette origine dans CORS_ORIGINS, sinon le navigateur refusera les
+// requêtes — les deux réglages vont toujours ensemble.
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
+export async function api(path, { method = 'GET', body, timeout = TIMEOUT_MS, idem } = {}) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeout);
   let res;
   try {
-    res = await fetch('/api' + path, {
+    res = await fetch(API_BASE + '/api' + path, {
       method,
       headers: {
         'content-type': 'application/json',
         ...(getToken() ? { authorization: `Bearer ${getToken()}` } : {}),
+        ...(idem ? { 'idempotency-key': idem } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
       signal: abort.signal,

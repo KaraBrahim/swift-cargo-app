@@ -16,6 +16,13 @@ const PGPORT = 55535;
 const APIPORT = 4103;
 const base = `http://localhost:${APIPORT}`;
 
+// Le code de sortie DIT ce qui s'est passé. Avant, ce script se terminait
+// par process.exit(0) dans le finally : il annonçait « réussi » au shell même
+// quand une assertion avait échoué, même quand Postgres n'avait pas démarré.
+// Un test qui ne peut pas échouer ne teste rien. Il vaut 1 par défaut, et ne
+// descend à 0 que si la ligne de verdict ci-dessous dit PASSED.
+let exitCode = 1;
+
 let embedded, server, token;
 const out = [];
 const call = async (method, path, body, expect = 200) => {
@@ -61,7 +68,9 @@ try {
   }, 201)).order;
   const crate = order.bons[0];
   out.push(`Ordre créé: ${order.reference}, statut ${order.status}, ${order.bons.length} bon`);
-  chk('total frais ordre', order.totals.transport_fee, 8000);
+  // Chaine a echelle fixe depuis l'audit : les totaux d'un ordre ne sont plus
+  // additionnes en doubles cote serveur.
+  chk('total frais ordre', order.totals.transport_fee, '8000.00');
 
   // Fournisseur now owes 8000 (receivable => balance -8000)
   let facc = (await call('GET', `/api/people/${f.id}/account`)).account;
@@ -117,7 +126,9 @@ try {
   chk('solde caisse Algérie DZD', alg.balances.find((b) => b.currency_code === 'DZD')?.balance, '0.00');
 
   console.log(out.join('\n'));
-  console.log(out.every((l) => !l.startsWith('XX')) ? '\nSMOKE-ORDERS PASSED' : '\nSMOKE-ORDERS FAILED');
+  const passed = out.every((l) => !l.startsWith('XX'));
+  console.log(passed ? '\nSMOKE-ORDERS PASSED' : '\nSMOKE-ORDERS FAILED');
+  exitCode = passed ? 0 : 1;
 } catch (e) {
   console.error('SMOKE-ORDERS ERROR:', e);
 } finally {
@@ -125,5 +136,5 @@ try {
   try { await closePool(); } catch {}
   try { await embedded?.stop(); } catch {}
   try { rmSync(dataDir, { recursive: true, force: true }); } catch {}
-  process.exit(0);
+  process.exit(exitCode);
 }

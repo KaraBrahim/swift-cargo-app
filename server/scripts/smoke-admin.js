@@ -16,6 +16,13 @@ const PGPORT = 55547;
 const APIPORT = 4110;
 const base = `http://localhost:${APIPORT}`;
 
+// Le code de sortie DIT ce qui s'est passé. Avant, ce script se terminait
+// par process.exit(0) dans le finally : il annonçait « réussi » au shell même
+// quand une assertion avait échoué, même quand Postgres n'avait pas démarré.
+// Un test qui ne peut pas échouer ne teste rien. Il vaut 1 par défaut, et ne
+// descend à 0 que si la ligne de verdict ci-dessous dit PASSED.
+let exitCode = 1;
+
 let embedded, server, token;
 const out = [];
 let failed = false;
@@ -165,7 +172,9 @@ try {
   check('recherche répond', Array.isArray(search.groups), 'true');
 
   console.log(out.join('\n'));
-  console.log(failed ? '\nSMOKE-ADMIN FAILED' : '\nSMOKE-ADMIN PASSED');
+  const passed = !(failed);
+  console.log(passed ? '\nSMOKE-ADMIN PASSED' : '\nSMOKE-ADMIN FAILED');
+  exitCode = passed ? 0 : 1;
 } catch (e) {
   console.error('SMOKE-ADMIN ERROR:', e);
 } finally {
@@ -173,5 +182,5 @@ try {
   try { await closePool(); } catch {}
   try { await embedded?.stop(); } catch {}
   try { rmSync(dataDir, { recursive: true, force: true }); } catch {}
-  process.exit(0);
+  process.exit(exitCode);
 }

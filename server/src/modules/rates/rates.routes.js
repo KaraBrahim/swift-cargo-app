@@ -14,7 +14,11 @@ const decimalString = (max = 8) =>
     .union([z.string(), z.number()])
     .transform((v) => String(v).trim())
     .refine((v) => /^\d+(\.\d+)?$/.test(v), 'Nombre positif attendu.')
-    .refine((v) => (v.split('.')[1]?.length ?? 0) <= max, `Maximum ${max} décimales.`);
+    .refine((v) => (v.split('.')[1]?.length ?? 0) <= max, `Maximum ${max} décimales.`)
+    // Les taux sont stockés en NUMERIC(24,8) : seize chiffres avant la virgule.
+    // Sans ce plafond, un nombre absurde traversait Zod et ressortait en erreur
+    // Postgres brute — un 500 là où l'utilisateur mérite « valeur trop élevée ».
+    .refine((v) => v.split('.')[0].replace(/^0+/, '').length <= 16, 'Valeur trop élevée.');
 
 // GET /api/currencies  -> currencies with their current black-market rate
 ratesRouter.get('/currencies', asyncHandler(async (_req, res) => {

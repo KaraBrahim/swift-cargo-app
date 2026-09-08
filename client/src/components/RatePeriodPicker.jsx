@@ -18,7 +18,12 @@ export const toISO = (d) =>
   !d ? null
     : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-export default function RateCalendar({ mode, value, onChange }) {
+// `disabled` est un réglage, plus une règle gravée. Pour un taux, le futur n'a
+// pas de sens et l'offrir invite une réponse vide qui ressemble à une panne —
+// c'est pourquoi il reste interdit par défaut. Un rapport, lui, demande
+// légitimement « du 1er au 30 septembre » le 8 : la fin du mois est dans
+// l'avenir et doit rester cliquable.
+export default function RateCalendar({ mode, value, onChange, disabled = { after: new Date() } }) {
   return (
     <div className="hist-cal">
       <DayPicker
@@ -26,9 +31,7 @@ export default function RateCalendar({ mode, value, onChange }) {
         mode={mode}
         selected={value}
         defaultMonth={(mode === 'range' ? value?.from : value) ?? new Date()}
-        // A rate cannot be looked up in the future, and offering it invites an
-        // empty answer that looks like a bug.
-        disabled={{ after: new Date() }}
+        disabled={disabled}
         onSelect={onChange}
       />
     </div>

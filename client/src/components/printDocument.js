@@ -32,10 +32,20 @@ export const PRINT_CSS = `
   .foot { margin-top:26px; border-top:1px solid #ddd; padding-top:8px; font-size:11px; color:#666; }
   .sign { margin-top:44px; display:flex; justify-content:space-between; font-size:13px; }
   .sign div { border-top:1px solid #999; padding-top:6px; width:40%; text-align:center; }
+  /* Le code qui ramène ce papier dans le système, avec sa référence en clair
+     dessous : un QR abîmé doit rester retapable. */
+  .qr { margin-top:22px; text-align:center; }
+  .qr img { width:104px; height:104px; image-rendering:pixelated; }
+  .qr div { margin-top:4px; font-size:11px; letter-spacing:1px; color:#666; }
   /* The app's own layout must never clip a multi-page document. */
   @media print { body { margin:12mm; } .no-print { display:none !important; }
     html, body { overflow:visible !important; height:auto !important; } }
 `;
+
+// Le bloc scannable. Rien si la page n'a pas (encore) produit l'image : un
+// document sans QR reste un document valide, il se retrouve à la référence.
+export const qrBlock = (qr, reference) =>
+  (qr ? `<div class="qr"><img src="${qr}" alt=""><div>${esc(reference || '')}</div></div>` : '');
 
 // Open a standalone window with a finished document and trigger the print dialog.
 export function openPrintWindow({ title, societe, docTitle, subtitle, body }) {
@@ -108,7 +118,7 @@ const rolesLabel = (p) => {
   return r.length ? r.join(' · ') : 'Personne';
 };
 
-export function personStatementBody(d) {
+export function personStatementBody(d, qr) {
   const owed = Number(d.solde);
   return `
     <div class="meta">
@@ -129,10 +139,11 @@ export function personStatementBody(d) {
         <td class="r">${formatMoney(e.balance_after)}</td>`)}
       </tbody>
     </table>
+    ${qrBlock(qr, d.person.name)}
     <div class="sign"><div>Signature</div><div>Cachet société</div></div>`;
 }
 
-export function orderManifestBody(d) {
+export function orderManifestBody(d, qr) {
   return `
     <div class="meta">
       <div><span class="k">Bon fournisseur :</span>${esc(d.reference)}</div>
@@ -152,9 +163,13 @@ export function orderManifestBody(d) {
       </tbody>
     </table>
     <div class="totals">
-      Total frais : <strong>${formatMoney(d.totals.transport_fee)}</strong><br>
+      Marchandises : ${formatMoney(d.totals.goods ?? d.totals.transport_fee)}<br>
+      ${Number(d.totals.commission) ? `Commission : ${formatMoney(d.totals.commission)}<br>` : ''}
+      ${Number(d.totals.discount) ? `Remise : − ${formatMoney(d.totals.discount)}<br>` : ''}
+      À facturer : <strong>${formatMoney(d.totals.billed ?? d.totals.transport_fee)}</strong><br>
       Total pertes : ${formatMoney(d.totals.loss_total)}
     </div>
+    ${qrBlock(qr, d.reference)}
     <div class="sign"><div>Responsable Chine</div><div>Responsable Algérie</div></div>`;
 }
 
@@ -206,13 +221,14 @@ export const missingOf = (l) => Math.max(measureQty(l) - deliveredOf(l), 0);
 export const lineAmount = (l) => Number(l.unit_price || 0) * deliveredOf(l);
 
 // ── Bon passager (A4 body) ───────────────────────────────────────────
-export function bonDocBody(bon) {
+export function bonDocBody(bon, qr) {
   const cur = bon.transport_currency;
   const body = (bon.lines || []).map((l) => {
     const missing = missingOf(l);
     return `<tr>
       <td>${esc(l.designation)}</td>
       <td class="r">${formatMoney(l.unit_price, cur)} / ${esc(measureUnit(l))}</td>
+      <td class="r">${formatMoney(l.missing_unit_price, cur)} / ${esc(measureUnit(l))}</td>
       <td class="r">${esc(declaredOf(l))}</td>
       <td class="r">${missing > 0 ? esc(`${qtyFr(missing)} ${measureUnit(l)}`) : '—'}</td>
       <td class="r">${formatMoney(lineAmount(l), cur)}</td>
@@ -228,13 +244,14 @@ export function bonDocBody(bon) {
       <div><span class="k">Arrivée :</span>${bon.arrived_at ? new Date(bon.arrived_at).toLocaleString('fr-FR') : '—'}</div>
     </div>
     <table>
-      <thead><tr><th>Désignation</th><th class="r">Prix de revient</th><th class="r">Quantité</th><th class="r">Manquant</th><th class="r">Montant</th></tr></thead>
-      <tbody>${body || '<tr><td colspan="5">Aucune ligne</td></tr>'}</tbody>
+      <thead><tr><th>Désignation</th><th class="r">Prix de transport</th><th class="r">Valeur du manquant</th><th class="r">Quantité</th><th class="r">Manquant</th><th class="r">Montant</th></tr></thead>
+      <tbody>${body || '<tr><td colspan="6">Aucune ligne</td></tr>'}</tbody>
     </table>
     <div class="totals">
       Frais de transport (commandé) : <strong>${formatMoney(bon.transport_fee, cur)}</strong><br>
       Manquants : ${formatMoney(bon.loss_total, cur)}<br>
       ${bon.passager_payment != null ? `Payé au passager (livré) : <strong>${formatMoney(bon.passager_payment, cur)}</strong>` : ''}
     </div>
+    ${qrBlock(qr, bon.reference)}
     <div class="sign"><div>Signature Fournisseur</div><div>Signature Passager</div></div>`;
 }

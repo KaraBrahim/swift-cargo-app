@@ -7,6 +7,7 @@ import AmountInput from '../components/AmountInput.jsx';
 import RateCalendar, { toISO } from '../components/RatePeriodPicker.jsx';
 import RateChart from '../components/RateChart.jsx';
 import Flag from '../components/Flag.jsx';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const rate6 = (v) => (v == null ? '—' : formatNumber(v, { decimals: 6, trim: true }));
 
@@ -93,6 +94,7 @@ function RateCard({ c, onSaved }) {
 
 // ── A pair: computed until someone quotes it ─────────────────────────
 function PairCard({ p, onChanged }) {
+  const isSuper = useIsSuper();
   const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
@@ -178,16 +180,19 @@ function PairCard({ p, onChanged }) {
                 Recalculer depuis le DZD
               </button>
             )}
-            <button
-              className="btn btn-ghost btn-sm"
-              disabled={busy}
-              onClick={() => run(
-                () => api(`/pairs/${p.from_code}/${p.to_code}`, { method: 'DELETE' }),
-                'Paire supprimée.'
-              )}
-            >
-              Supprimer
-            </button>
+            {/* Supprimer une paire, sans confirmation aucune : reserve au super-administrateur. */}
+            {isSuper && (
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={busy}
+                onClick={() => run(
+                  () => api(`/pairs/${p.from_code}/${p.to_code}`, { method: 'DELETE' }),
+                  'Paire supprimée.'
+                )}
+              >
+                Supprimer
+              </button>
+            )}
           </div>
         </>
       )}

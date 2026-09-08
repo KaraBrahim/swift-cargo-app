@@ -64,6 +64,12 @@ function parseLines(data) {
       categoryId: l.categoryId ? Number(l.categoryId) : null,
       measure, quantity, weight_kg, cbm, unit,
       unit_price: parseMoney(l.unitPrice ?? l.unit_price, 'Prix de revient'),
+      // Ce que le passager doit par unité non livrée. Laissé vide, il prendra la
+      // valeur convenue avec le fournisseur (voir insertResolvedLines) : c'est
+      // celle-là qu'il faudra rembourser, pas le tarif de portage.
+      missing_unit_price: l.missingUnitPrice != null && l.missingUnitPrice !== ''
+        ? parseMoney(l.missingUnitPrice, 'Valeur du manquant')
+        : null,
       sourceLineId: l.sourceLineId ? Number(l.sourceLineId) : null,
       note: l.note ?? null,
     };
@@ -138,12 +144,13 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
     let itemId = null;
     let designation = l.designation;
     let sourceLineId = null;
+    let sourceUnitPrice = null;
 
     if (l.sourceLineId) {
       // Lock the source line so two bons cannot over-draw it concurrently.
       const src = (await c.query('SELECT * FROM bon_lines WHERE id=$1 FOR UPDATE', [l.sourceLineId])).rows[0];
       if (!src) throw errors.notFound('Ligne de bon fournisseur introuvable.');
-      const srcBon = (await c.query('SELECT order_id, fournisseur_id FROM bons WHERE id=$1', [src.bon_id])).rows[0];
+      const srcBon = (await c.query('SELECT order_id, fournisseur_id, transport_currency FROM bons WHERE id=$1', [src.bon_id])).rows[0];
       if (!srcBon || srcBon.order_id == null) {
         throw errors.validation([{ field: 'lines', message: 'La source doit être une ligne de bon fournisseur.' }]);
       }
@@ -159,9 +166,21 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
       if (want.gt(remaining)) {
         throw errors.conflict(`Quantité indisponible pour « ${src.designation} » : il reste ${remaining.toFixed(3)}, demandé ${want.toFixed(3)}.`);
       }
+      // Le prix convenu avec le fournisseur est libellé dans SA devise. Si ce
+      // bon-ci compte dans une autre, ce nombre ne peut pas servir de valeur du
+      // manquant par défaut : il serait soustrait d'un total qui n'est pas dans
+      // la même monnaie. On refuse plutôt que de mélanger en silence.
+      if (srcBon.transport_currency !== bon.transport_currency && l.missing_unit_price == null) {
+        throw errors.validation([{
+          field: 'missingUnitPrice',
+          message: `« ${src.designation} » a été convenu en ${srcBon.transport_currency} et ce bon compte en `
+            + `${bon.transport_currency} : saisissez la valeur du manquant en ${bon.transport_currency}.`,
+        }]);
+      }
       itemId = src.item_id;
       designation = src.designation;
       sourceLineId = src.id;
+      sourceUnitPrice = src.unit_price;
     } else if (l.itemId) {
       const it = await c.query('SELECT id, name FROM stock_items WHERE id=$1 AND active=TRUE', [l.itemId]);
       if (!it.rows.length) throw errors.notFound('Article introuvable ou inactif.');
@@ -171,10 +190,14 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
       itemId = await ensureStockItem(c, { name: designation, categoryId: l.categoryId, adminId });
     }
 
+    // Valeur du manquant : celle saisie, sinon celle convenue avec le
+    // fournisseur pour ce lot, sinon le prix de la ligne elle-même.
+    const missingUnitPrice = l.missing_unit_price ?? sourceUnitPrice ?? l.unit_price;
+
     await c.query(
-      `INSERT INTO bon_lines (bon_id, item_id, source_line_id, designation, measure, quantity, unit, weight_kg, cbm, unit_price, note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [bon.id, itemId, sourceLineId, designation, l.measure, l.quantity, l.unit, l.weight_kg, l.cbm, l.unit_price, l.note]
+      `INSERT INTO bon_lines (bon_id, item_id, source_line_id, designation, measure, quantity, unit, weight_kg, cbm, unit_price, missing_unit_price, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [bon.id, itemId, sourceLineId, designation, l.measure, l.quantity, l.unit, l.weight_kg, l.cbm, l.unit_price, missingUnitPrice, l.note]
     );
     if (orderId && itemId) {
       await applyMovement(c, {
@@ -233,7 +256,12 @@ export async function insertChildBon(c, { admin, orderId = null, fournisseurId, 
   // Derived from the lines: Σ(prix unitaire × quantité). On a bon FOURNISSEUR
   // that is the SALE total (what the fournisseur owes); on a bon PASSAGER it is
   // the COST total (what the passager will be paid).
-  const transportFee = linesTotal(lines).toFixed(2);
+  // La commission n'existe que sur un bon FOURNISSEUR : c'est la marge, saisie
+  // à la main une fois tous les détails connus. transport_fee reste CE QUE DOIT
+  // LE FOURNISSEUR, commission comprise — ce qui évite d'apprendre quoi que ce
+  // soit au grand livre, aux totaux d'ordre, au tableau de bord et aux rapports.
+  const commission = orderId ? parseMoney(data.commission, 'Commission') : '0';
+  const transportFee = linesTotal(lines).plus(commission).toFixed(2);
   const discount = parseMoney(data.discount, 'Remise');
 
   // Only a bon FOURNISSEUR names a fournisseur: it is that person's shipment.
@@ -250,9 +278,9 @@ export async function insertChildBon(c, { admin, orderId = null, fournisseurId, 
   if (!cur.rows.length) throw errors.notFound('Devise de transport inconnue.');
 
   const bonRes = await c.query(
-    `INSERT INTO bons (order_id, fournisseur_id, passager_id, transport_currency, transport_fee, discount, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [orderId, orderId ? fournisseurId : null, data.passagerId ?? null, transportCurrency, transportFee, discount, data.notes ?? null, admin.id]
+    `INSERT INTO bons (order_id, fournisseur_id, passager_id, transport_currency, transport_fee, commission, discount, notes, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [orderId, orderId ? fournisseurId : null, data.passagerId ?? null, transportCurrency, transportFee, commission, discount, data.notes ?? null, admin.id]
   );
   const bon = bonRes.rows[0];
 
@@ -300,7 +328,10 @@ export async function updateBon({ admin, id, data, ip }) {
     }
     const lines = parseLines(data);
     // Fee is derived from the (possibly changed) lines.
-    const newFee = linesTotal(lines).toFixed(2);
+    const newCommission = bon.order_id != null
+      ? ('commission' in data ? parseMoney(data.commission, 'Commission') : bon.commission)
+      : '0';
+    const newFee = linesTotal(lines).plus(newCommission).toFixed(2);
     const newDiscount = 'discount' in data ? parseMoney(data.discount, 'Remise') : bon.discount;
 
     // Reverse the OLD fournisseur reception (bon fournisseur only).
@@ -341,8 +372,8 @@ export async function updateBon({ admin, id, data, ip }) {
     const touched = await sourceOrderIds(c, id);
     await c.query('DELETE FROM bon_lines WHERE bon_id=$1', [id]);
     await c.query(
-      'UPDATE bons SET transport_currency=$2, transport_fee=$3, discount=$4, passager_id=$5, notes=$6 WHERE id=$1',
-      [id, newCur, newFee, newDiscount, newPassagerId, data.notes ?? bon.notes]
+      'UPDATE bons SET transport_currency=$2, transport_fee=$3, discount=$4, passager_id=$5, notes=$6, commission=$7 WHERE id=$1',
+      [id, newCur, newFee, newDiscount, newPassagerId, data.notes ?? bon.notes, newCommission]
     );
     const bon2 = (await c.query('SELECT * FROM bons WHERE id=$1', [id])).rows[0];
     await insertResolvedLines(c, { bon: bon2, lines, orderId: bon.order_id, adminId: admin.id });
@@ -392,6 +423,8 @@ export async function cancelBonPayment({ admin, id, entryId, ip }) {
       await replayChain(c, tx.caisse_id, tx.currency_code);
     }
 
+    // Reprendre un encaissement rouvre la dette — donc rouvre l'ordre.
+    await recomputeOrderStatus(c, entry.ref_order_id ?? bon.order_id);
     await writeAudit(c, {
       adminId: admin.id, action: 'bon.payment.cancel', entity: 'bon', entityId: id,
       details: { entryId, type: entry.type, amount: entry.amount, currency: entry.currency_code }, ip,
@@ -405,13 +438,18 @@ export async function cancelBonPayment({ admin, id, entryId, ip }) {
 // and the fournisseur's credits through the same paths the stepper uses — and
 // only then are its rows removed. Cash that actually moved through a caisse
 // blocks the rewind, so a paid bon can never silently vanish.
-export async function deleteBon({ admin, id, ip }) {
-  const bon = (await getPool().query('SELECT * FROM bons WHERE id=$1', [id])).rows[0];
+// Suppression dans la transaction du caller. Le rembobinage vers « Créé » — qui
+// annule les mouvements de stock, le dû du passager et les avoirs fournisseur —
+// et le retrait des lignes forment UN SEUL geste : les séparer laissait, si la
+// seconde moitié échouait, un bon rembobiné et vidé de son argent mais toujours
+// présent, sans que rien ne dise pourquoi.
+export async function deleteBonTx(c, { admin, id, ip }) {
+  const bon = (await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id])).rows[0];
   if (!bon) throw errors.notFound('Bon introuvable.');
 
-  if (bon.status !== 'cree') await setBonStatus({ admin, id, target: 'cree', note: 'Avant suppression', ip });
+  if (bon.status !== 'cree') await setBonStatusTx(c, { admin, id, target: 'cree', note: 'Avant suppression', ip });
 
-  return withTx(async (c) => {
+  {
     const fresh = (await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id])).rows[0];
     if (!fresh) throw errors.notFound('Bon introuvable.');
 
@@ -465,7 +503,11 @@ export async function deleteBon({ admin, id, ip }) {
     }
     await writeAudit(c, { adminId: admin.id, action: 'bon.delete', entity: 'bon', entityId: id, details: { reference: fresh.reference }, ip });
     return { deleted: true, reference: fresh.reference };
-  });
+  }
+}
+
+export async function deleteBon(args) {
+  return withTx((c) => deleteBonTx(c, args));
 }
 
 // ── Queries ───────────────────────────────────────────────────────────
@@ -672,17 +714,103 @@ export async function reconcile({ admin, id, lines, ip }) {
       else missing = new Decimal(0);
       if (missing.gt(qty)) throw errors.invalidAmount(`Le manquant ne peut pas dépasser la quantité (${qty.toFixed(3)}).`);
       const delivered = qty.minus(missing);
-      const lossValue = new Decimal(dl.unit_price).times(missing);
+      // À SA valeur — celle convenue avec le fournisseur pour cette marchandise —
+      // et non au tarif de portage : perdre un carton coûte le carton, pas les
+      // frais de route.
+      const lossValue = new Decimal(dl.missing_unit_price).times(missing);
       lossTotal = lossTotal.plus(lossValue);
       await c.query(
         'UPDATE bon_lines SET received_quantity=$2, loss_value=$3, responsible=$4 WHERE id=$1 AND bon_id=$5',
         [dl.id, delivered.toFixed(3), lossValue.toFixed(2), l.responsible ?? null, id]
       );
+
+      // Un manquant n'est pas seulement une somme d'argent : cette marchandise
+      // n'est PAS au bureau. L'arrivée a pourtant crédité Alger de la quantité
+      // entière — la réconciliation vient après — donc sans cette correction le
+      // stock algérien garde pour toujours des cartons que personne n'a jamais
+      // vus, et la ligne ne peut plus jamais être livrée jusqu'à zéro.
+      //
+      // Un delta, pas une valeur absolue : on peut réconcilier deux fois, et la
+      // seconde saisie doit corriger la première au lieu de s'y ajouter.
+      const before = dl.received_quantity == null
+        ? new Decimal(0)
+        : Decimal.max(qty.minus(dl.received_quantity), 0);
+      const delta = missing.minus(before);
+      if (bon.order_id == null && dl.item_id && !delta.isZero()) {
+        const back = delta.negated();
+        await applyMovement(c, {
+          itemId: dl.item_id, office: 'algeria',
+          dQ: dl.measure === 'quantite' ? back.toFixed(3) : '0',
+          dW: dl.measure === 'poids' ? back.toFixed(3) : '0',
+          dC: dl.measure === 'cbm' ? back.toFixed(4) : '0',
+          reason: 'ajustement', refBonId: id, adminId: admin.id,
+          note: `Manquant ${bon.reference} — ${dl.designation}`,
+        });
+      }
     }
-    await c.query('UPDATE bons SET loss_total=$2 WHERE id=$1', [id, lossTotal.toFixed(2)]);
-    await writeAudit(c, { adminId: admin.id, action: 'bon.reconcile', entity: 'bon', entityId: id, details: { loss_total: lossTotal.toFixed(2) }, ip });
+    // Le total se relit sur les lignes plutôt que de s'additionner au fil de la
+    // boucle : une seconde réconciliation ne nommant qu'une ligne laissait les
+    // autres à leur ancienne valeur tout en écrasant l'en-tête, et le bon
+    // finissait par ne plus être d'accord avec ses propres lignes.
+    const { rows: sum } = await c.query(
+      'SELECT COALESCE(SUM(loss_value), 0) AS total FROM bon_lines WHERE bon_id=$1', [id]
+    );
+    const lossStored = new Decimal(sum[0].total).toFixed(2);
+    await c.query('UPDATE bons SET loss_total=$2 WHERE id=$1', [id, lossStored]);
+    await writeAudit(c, { adminId: admin.id, action: 'bon.reconcile', entity: 'bon', entityId: id, details: { loss_total: lossStored, lignes_soumises: lossTotal.toFixed(2) }, ip });
     return getBonDetail(id, c);
   });
+}
+
+// ── Ce qui a été convenu la dernière fois ─────────────────────────────
+// Aucune table de prix : chaque prix jamais convenu est déjà dans bon_lines et
+// chaque commission dans bons. Une seconde copie ne pourrait que diverger de
+// celle-là. On dérive donc, à la demande, le dernier prix par article — avec
+// CETTE personne d'abord (`own`), et à défaut le dernier vu ailleurs (`any`),
+// pour que l'écran puisse dire laquelle des deux il propose.
+const LAST_PRICES = `
+  SELECT DISTINCT ON (COALESCE(bl.item_id::text, bl.designation))
+         COALESCE(bl.item_id::text, bl.designation) AS key,
+         bl.item_id, bl.designation, bl.unit_price, bl.missing_unit_price,
+         b.transport_currency AS currency,
+         COALESCE(o.reference, b.reference) AS reference, b.created_at
+    FROM bon_lines bl
+    JOIN bons b ON b.id = bl.bon_id
+    LEFT JOIN orders o ON o.id = b.order_id
+   WHERE %WHERE%
+   ORDER BY COALESCE(bl.item_id::text, bl.designation), b.created_at DESC, bl.id DESC`;
+
+export async function priceHistory({ fournisseurId, passagerId, scope } = {}) {
+  const pool = getPool();
+  // Un bon fournisseur porte les prix de revient ; un bon passager les prix de
+  // transport. Ce ne sont pas les mêmes nombres, donc pas la même population —
+  // et l'écran doit pouvoir dire laquelle il veut avant même qu'une personne
+  // soit choisie, sinon un formulaire vide propose les prix de l'autre côté.
+  const isFournisseur = scope ? scope === 'fournisseur' : Boolean(fournisseurId);
+  const personId = fournisseurId || passagerId;
+  const side = isFournisseur ? 'b.order_id IS NOT NULL' : 'b.order_id IS NULL';
+  const ownCol = isFournisseur ? 'b.fournisseur_id' : 'b.passager_id';
+
+  const [own, any, lastCommission] = await Promise.all([
+    personId
+      ? pool.query(LAST_PRICES.replace('%WHERE%', `${side} AND ${ownCol} = $1`), [personId])
+      : Promise.resolve({ rows: [] }),
+    pool.query(LAST_PRICES.replace('%WHERE%', side)),
+    isFournisseur && personId
+      ? pool.query(
+          `SELECT b.commission, b.transport_currency AS currency,
+                  COALESCE(o.reference, b.reference) AS reference, b.created_at
+             FROM bons b LEFT JOIN orders o ON o.id = b.order_id
+            WHERE b.fournisseur_id = $1 AND b.order_id IS NOT NULL AND b.commission > 0
+            ORDER BY b.created_at DESC, b.id DESC LIMIT 1`, [personId])
+      : Promise.resolve({ rows: [] }),
+  ]);
+
+  return {
+    own: own.rows,
+    any: any.rows,
+    commission: lastCommission.rows[0] ?? null,
+  };
 }
 
 // ── Settlement helpers (shared by settle() and the status stepper) ─────
@@ -708,7 +836,7 @@ async function missingSaleCredits(c, bonId) {
 // Book a bon as réglé: pay the passager the delivered total (cost price), and
 // credit the fournisseur for the undelivered part at the sale price they were
 // billed at reception — they only pay for what actually arrived.
-async function bookSettlement(c, bon, admin, payment, note) {
+async function bookSettlement(c, bon, admin, payment, note, owed = '0') {
   await c.query('UPDATE bons SET status=$2, settled_at=now(), passager_payment=$3 WHERE id=$1', [bon.id, 'regle', payment]);
   await c.query('INSERT INTO bon_status_history (bon_id, status, admin_id, note) VALUES ($1,$2,$3,$4)', [bon.id, 'regle', admin.id, note ?? 'Réglé']);
   if (bon.passager_id && new Decimal(payment).gt(0)) {
@@ -716,6 +844,17 @@ async function bookSettlement(c, bon, admin, payment, note) {
       personType: 'personne', personId: bon.passager_id, currency: bon.transport_currency,
       amount: payment, type: 'passager_due', refOrderId: bon.order_id, refBonId: bon.id,
       adminId: admin.id, note: `Dû transport ${bon.reference}`,
+    });
+  }
+  // Ce qu'il n'a pas livré valait plus que son portage : la différence reste à
+  // sa charge. Négatif = il vous doit. Son type à elle, pour que le relevé la
+  // nomme et que le retour arrière la retrouve sans la recalculer.
+  if (bon.passager_id && new Decimal(owed).gt(0)) {
+    await appendEntry(c, {
+      personType: 'personne', personId: bon.passager_id, currency: bon.transport_currency,
+      amount: new Decimal(owed).negated().toFixed(2), type: 'passager_manquant',
+      refOrderId: bon.order_id, refBonId: bon.id,
+      adminId: admin.id, note: `Manquants à rembourser ${bon.reference}`,
     });
   }
   for (const cr of await missingSaleCredits(c, bon.id)) {
@@ -743,6 +882,23 @@ async function reverseSettlement(c, bon, admin, note) {
       adminId: admin.id, note: `Annulation dû ${bon.reference}`,
     });
   }
+  // La dette de manquant se relit au grand livre plutôt que de se recalculer :
+  // un montant payé à la main a pu la remplacer, et un bon réglé puis annulé
+  // plusieurs fois ne doit pas la compter deux fois. L'annulation porte le même
+  // type, donc la somme des lignes est toujours ce qui reste ouvert.
+  const owedRows = await c.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM person_ledger
+      WHERE ref_bon_id = $1 AND type = 'passager_manquant'`, [bon.id]
+  );
+  const owed = new Decimal(owedRows.rows[0].total);
+  if (bon.passager_id && !owed.isZero()) {
+    await appendEntry(c, {
+      personType: 'personne', personId: bon.passager_id, currency: bon.transport_currency,
+      amount: owed.negated().toFixed(2), type: 'passager_manquant',
+      refOrderId: bon.order_id, refBonId: bon.id,
+      adminId: admin.id, note: `Annulation manquants ${bon.reference}`,
+    });
+  }
   for (const cr of await missingSaleCredits(c, bon.id)) {
     await appendEntry(c, {
       personType: 'personne', personId: cr.fournisseur_id, currency: cr.currency,
@@ -751,6 +907,31 @@ async function reverseSettlement(c, bon, admin, note) {
     });
   }
   await c.query('UPDATE bons SET passager_payment=NULL, settled_at=NULL WHERE id=$1', [bon.id]);
+}
+
+// Défaire la correction de stock des manquants (voir reconcile). Rend à Alger
+// ce que la réconciliation en avait retiré, pour que le retrait de la quantité
+// entière qui suit retombe exactement sur le niveau d'avant l'arrivée.
+async function restoreMissingStock(c, bon, adminId) {
+  const { rows } = await c.query(
+    `SELECT item_id, designation, measure, received_quantity,
+            ${'CASE WHEN measure=\'poids\' THEN weight_kg WHEN measure=\'cbm\' THEN cbm ELSE quantity END'} AS qty
+       FROM bon_lines
+      WHERE bon_id=$1 AND item_id IS NOT NULL AND received_quantity IS NOT NULL`,
+    [bon.id]
+  );
+  for (const l of rows) {
+    const missing = Decimal.max(new Decimal(l.qty).minus(l.received_quantity), 0);
+    if (missing.isZero()) continue;
+    await applyMovement(c, {
+      itemId: l.item_id, office: 'algeria',
+      dQ: l.measure === 'quantite' ? missing.toFixed(3) : '0',
+      dW: l.measure === 'poids' ? missing.toFixed(3) : '0',
+      dC: l.measure === 'cbm' ? missing.toFixed(4) : '0',
+      reason: 'ajustement', refBonId: bon.id, adminId,
+      note: `Annulation manquant ${bon.reference} — ${l.designation}`,
+    });
+  }
 }
 
 // Reverse a stock leg when stepping a passager bon backward. Undoing a departure
@@ -779,10 +960,15 @@ export async function settle({ admin, id, passagerPayment, note, ip }) {
     if (!bon) throw errors.notFound('Bon introuvable.');
     if (bon.status !== 'arrive') throw errors.conflict('Le règlement n\'est possible qu\'au statut « arrivé ».');
 
-    const delivered = Decimal.max(new Decimal(bon.transport_fee).minus(bon.loss_total), 0).toFixed(2);
-    const payment = passagerPayment != null && passagerPayment !== '' ? parseMoney(passagerPayment, 'Paiement passager') : delivered;
+    // Ce que vaut le portage, moins ce qui n'est pas arrivé.
+    const net = new Decimal(bon.transport_fee).minus(bon.loss_total);
+    const manual = passagerPayment != null && passagerPayment !== '';
+    const payment = manual ? parseMoney(passagerPayment, 'Paiement passager') : Decimal.max(net, 0).toFixed(2);
+    // Un montant saisi à la main vaut décision et remplace ce calcul ; sinon,
+    // ne rien payer n'efface pas la différence, elle reste due par le passager.
+    const owed = !manual && net.lt(0) ? net.negated().toFixed(2) : '0';
 
-    await bookSettlement(c, bon, admin, payment, note);
+    await bookSettlement(c, bon, admin, payment, note, owed);
     await recomputeAffectedOrders(c, bon);
     await writeAudit(c, { adminId: admin.id, action: 'bon.settle', entity: 'bon', entityId: id, details: { passager_payment: payment, loss_total: bon.loss_total }, ip });
     return getBonDetail(id, c);
@@ -795,9 +981,12 @@ export async function settle({ admin, id, passagerPayment, note, ip }) {
 // stock and money and reset reconciliation when leaving « arrivé ».
 const STAGES = ['cree', 'en_transit', 'arrive', 'regle'];
 
-export async function setBonStatus({ admin, id, target, note, ip }) {
+// The stepper's work, running in the CALLER's transaction. An order moving all
+// of its bons at once has to be one transaction: half a shipment advanced and
+// half not is a state nothing in this codebase knows how to read.
+export async function setBonStatusTx(c, { admin, id, target, note, ip }) {
   if (!STAGES.includes(target)) throw errors.validation([{ field: 'target', message: 'Statut invalide.' }]);
-  return withTx(async (c) => {
+  {
     let bon = (await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id])).rows[0];
     if (!bon) throw errors.notFound('Bon introuvable.');
     const to = STAGES.indexOf(target);
@@ -810,8 +999,10 @@ export async function setBonStatus({ admin, id, target, note, ip }) {
         if (isPassagerBon && next === 'en_transit') await shipLinesStock(c, { bon, direction: 'depart', adminId: admin.id });
         else if (isPassagerBon && next === 'arrive') await shipLinesStock(c, { bon, direction: 'arrivee', adminId: admin.id });
         if (next === 'regle') {
-          const payment = Decimal.max(new Decimal(bon.transport_fee).minus(bon.loss_total), 0).toFixed(2);
-          await bookSettlement(c, bon, admin, payment, note ?? 'Changement de statut');
+          const net = new Decimal(bon.transport_fee).minus(bon.loss_total);
+          const payment = Decimal.max(net, 0).toFixed(2);
+          const owed = net.lt(0) ? net.negated().toFixed(2) : '0';
+          await bookSettlement(c, bon, admin, payment, note ?? 'Changement de statut', owed);
         } else {
           const extra = next === 'arrive' ? ', arrived_at=now()' : '';
           await c.query(`UPDATE bons SET status=$2 ${extra} WHERE id=$1`, [id, next]);
@@ -824,6 +1015,11 @@ export async function setBonStatus({ admin, id, target, note, ip }) {
         if (leaving === 'regle') {
           await reverseSettlement(c, bon, admin, note);
         } else if (leaving === 'arrive') {
+          // L'ordre compte : la réconciliation avait RETIRÉ les manquants
+          // d'Alger, et reverseShip va retirer la quantité ENTIÈRE. Sans
+          // remettre d'abord les manquants, ils seraient déduits deux fois et le
+          // stock algérien finirait négatif.
+          if (isPassagerBon) await restoreMissingStock(c, bon, admin.id);
           if (isPassagerBon) await reverseShip(c, bon, 'arrivee', admin.id);
           await c.query('UPDATE bons SET arrived_at=NULL, loss_total=0 WHERE id=$1', [id]);
           await c.query('UPDATE bon_lines SET received_quantity=NULL, loss_value=0, responsible=NULL WHERE bon_id=$1', [id]);
@@ -840,14 +1036,33 @@ export async function setBonStatus({ admin, id, target, note, ip }) {
     await recomputeAffectedOrders(c, bon);
     await writeAudit(c, { adminId: admin.id, action: 'bon.status.set', entity: 'bon', entityId: id, details: { to: target }, ip });
     return getBonDetail(id, c);
-  });
+  }
+}
+
+export async function setBonStatus(args) {
+  return withTx((c) => setBonStatusTx(c, args));
 }
 
 // ── Auto-post money events ─────────────────────────────────────────────
 // Fournisseur pays transport fee → cash INTO an office caisse + reduce their debt.
+// Ce qui est DÉJÀ passé en caisse sur ce bon, par type d'écriture. Le plafond
+// des deux fonctions ci-dessous s'en déduit — sans lui, appeler l'endpoint deux
+// fois encaisse ou paie deux fois : un double-clic, ou simplement un réessai
+// après un timeout réseau alors que le premier appel avait abouti.
+async function alreadyMoved(c, bonId, type) {
+  const { rows } = await c.query(
+    `SELECT COALESCE(SUM(ABS(amount)), 0) AS total FROM person_ledger
+      WHERE ref_bon_id = $1 AND type = $2`,
+    [bonId, type]
+  );
+  return new Decimal(rows[0].total);
+}
+
 export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
   return withTx(async (c) => {
-    const { rows } = await c.query('SELECT * FROM bons WHERE id=$1', [id]);
+    // FOR UPDATE : deux encaissements simultanés sur le même bon lisaient tous
+    // les deux « rien encaissé » et postaient tous les deux le total.
+    const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
     const bon = rows[0];
     if (!bon) throw errors.notFound('Bon introuvable.');
     // Only a bon fournisseur ever billed anyone: the sale was charged once, at
@@ -856,8 +1071,16 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
     if (bon.order_id == null) {
       throw errors.conflict('Un bon passager n’encaisse pas de frais : la vente a été facturée au fournisseur à la réception.');
     }
-    const amt = amount != null && amount !== '' ? parseMoney(amount, 'Montant', { allowZero: false }) : bon.transport_fee;
+    const paid = await alreadyMoved(c, id, 'fee_payment');
+    const due = new Decimal(bon.transport_fee).minus(paid);
+    if (due.lte(0)) {
+      throw errors.conflict(`Frais déjà encaissés en totalité pour ${bon.reference} (${paid.toFixed(2)} ${bon.transport_currency}).`);
+    }
+    const amt = amount != null && amount !== '' ? parseMoney(amount, 'Montant', { allowZero: false }) : due.toFixed(2);
     if (!(new Decimal(amt).gt(0))) throw errors.invalidAmount('Aucun montant à encaisser.');
+    if (new Decimal(amt).gt(due)) {
+      throw errors.conflict(`Montant supérieur au reste dû : il reste ${due.toFixed(2)} ${bon.transport_currency} sur ${bon.reference}.`);
+    }
 
     const { txId } = await postMovement(c, {
       caisseId, currency: bon.transport_currency, direction: 'in', amount: amt,
@@ -868,6 +1091,11 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
       amount: amt, type: 'fee_payment', refOrderId: bon.order_id, refBonId: bon.id,
       caisseTxId: txId, adminId: admin.id, note,
     });
+    // Le paiement est devenu une porte du statut : un ordre entièrement livré
+    // ne se clôture qu'une fois les frais encaissés. Sans ce recalcul, le
+    // dernier dinar reçu ne referme rien, et l'ordre reste « livrée » jusqu'à
+    // ce qu'autre chose vienne le toucher par hasard.
+    await recomputeOrderStatus(c, bon.order_id);
     await writeAudit(c, { adminId: admin.id, action: 'bon.collect_fee', entity: 'bon', entityId: id, details: { amount: amt, caisseId }, ip });
     return getBonDetail(id, c);
   });
@@ -876,13 +1104,21 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
 // Pay the passager → cash OUT of an office caisse + reduce what we owe them.
 export async function payPassager({ admin, id, caisseId, amount, note, ip }) {
   return withTx(async (c) => {
-    const { rows } = await c.query('SELECT * FROM bons WHERE id=$1', [id]);
+    const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
     const bon = rows[0];
     if (!bon) throw errors.notFound('Bon introuvable.');
     if (bon.status !== 'regle') throw errors.conflict('Le bon doit être réglé avant de payer le passager.');
     if (!bon.passager_id) throw errors.conflict('Aucun passager sur ce bon.');
-    const amt = amount != null && amount !== '' ? parseMoney(amount, 'Montant', { allowZero: false }) : bon.passager_payment;
+    const paid = await alreadyMoved(c, id, 'passager_payment');
+    const due = new Decimal(bon.passager_payment ?? 0).minus(paid);
+    if (due.lte(0)) {
+      throw errors.conflict(`Passager déjà payé en totalité pour ${bon.reference} (${paid.toFixed(2)} ${bon.transport_currency}).`);
+    }
+    const amt = amount != null && amount !== '' ? parseMoney(amount, 'Montant', { allowZero: false }) : due.toFixed(2);
     if (amt == null || !(new Decimal(amt).gt(0))) throw errors.invalidAmount('Aucun paiement à effectuer.');
+    if (new Decimal(amt).gt(due)) {
+      throw errors.conflict(`Montant supérieur au reste à payer : il reste ${due.toFixed(2)} ${bon.transport_currency} sur ${bon.reference}.`);
+    }
 
     const { txId } = await postMovement(c, {
       caisseId, currency: bon.transport_currency, direction: 'out', amount: amt,

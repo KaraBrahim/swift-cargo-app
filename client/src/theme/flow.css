@@ -1,0 +1,448 @@
+/* ═══ Les parcours : choisir, créer, consulter ═══════════════════════
+   Trois familles de blocs, écrites hors @layer pour qu'elles l'emportent sur
+   le vocabulaire générique (.panel, .field) qu'elles remplacent localement :
+
+     .ep / .opt-chip / .qp   choisir quelqu'un — la recherche remplace le <select>
+     .wz                     créer en trois questions au lieu d'un mur de champs
+     .dt                     consulter : des tuiles chiffrées, pas un pavé de texte
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Choisir en cherchant ──────────────────────────────────────────── */
+.ep { position: relative; }
+/* Ouvert, le champ prend sa propre pile : sinon la section suivante — un
+   panneau frère déclaré plus bas — se peindrait par-dessus la liste.
+   Le panneau qui le contient doit monter avec lui : l'animation « rise » des
+   panneaux leur donne à chacun sa propre pile, dont un enfant ne peut pas
+   sortir seul, si haut soit son z-index. */
+.ep.up { z-index: 70; }
+.panel:has(.ep.up), .money-block:has(.ep.up) { z-index: 70; }
+.wz-body:has(.ep.up) { position: relative; z-index: 70; }
+.ep-trigger {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; border-radius: var(--radius-soft);
+  background: var(--input-bg); border: 1px solid var(--border);
+  color: var(--text); font-family: var(--font-sans); text-align: left; cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.ep-trigger:hover:not(:disabled) { border-color: var(--border-strong); }
+.ep-trigger.open { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-glow); }
+.ep-trigger.invalid { border-color: var(--red); }
+.ep-trigger:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ep-badge {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: 9px;
+  background: var(--surface-3); border: 1px solid var(--border);
+  color: var(--brand-text); font-family: var(--font-display);
+  font-size: 0.64rem; font-weight: 700; line-height: 1;
+}
+.ep-badge svg { width: 14px; height: 14px; color: var(--muted); }
+.ep-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.ep-label { font-size: 0.8rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-trigger:not(.has) .ep-label { color: var(--placeholder); font-weight: 500; }
+.ep-sub { font-size: 0.66rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-tag {
+  flex-shrink: 0; padding: 1px 6px; border-radius: 999px;
+  font-size: 0.6rem; font-weight: 700; background: var(--brand-tint); color: var(--brand-text);
+}
+.ep-clear {
+  display: inline-grid; place-items: center; flex-shrink: 0;
+  width: 18px; height: 18px; border-radius: 6px; color: var(--muted); cursor: pointer;
+}
+.ep-clear:hover { background: var(--surface-3); color: var(--text); }
+.ep-clear svg { width: 11px; height: 11px; }
+.ep-chev { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
+
+/* Grand format : l'étape d'un formulaire guidé n'a qu'une question, elle a la
+   place d'être lisible de loin. */
+.ep-lg .ep-trigger { padding: 10px 12px; }
+.ep-lg .ep-badge { width: 36px; height: 36px; border-radius: 12px; font-size: 0.82rem; }
+.ep-lg .ep-badge svg { width: 18px; height: 18px; }
+.ep-lg .ep-label { font-size: 0.95rem; }
+.ep-lg .ep-sub { font-size: 0.72rem; }
+
+.ep-pop {
+  position: absolute; z-index: 60; top: calc(100% + 5px); left: 0; right: 0; min-width: 250px;
+  border-radius: var(--radius-soft); background: var(--surface-1);
+  border: 1px solid var(--border-strong); box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.ep-pop.flip { top: auto; bottom: calc(100% + 5px); }
+.ep-search { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.ep-search > svg { width: 14px; height: 14px; color: var(--muted); flex-shrink: 0; }
+.ep-search input {
+  flex: 1; min-width: 0; border: none; background: none; outline: none;
+  font-family: var(--font-sans); font-size: 0.82rem; color: var(--text);
+}
+.ep-x {
+  display: inline-grid; place-items: center; width: 17px; height: 17px;
+  border: none; background: none; border-radius: 5px; color: var(--muted); cursor: pointer;
+}
+.ep-x:hover { background: var(--surface-3); color: var(--text); }
+.ep-x svg { width: 11px; height: 11px; }
+
+.ep-list { max-height: 290px; overflow-y: auto; padding: 4px; }
+.ep-empty { margin: 12px 10px; font-size: 0.78rem; color: var(--muted); }
+.ep-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 7px; border: none; border-radius: 9px; background: none; cursor: pointer;
+  text-align: left; color: var(--text); font-family: var(--font-sans);
+}
+.ep-opt.cursor { background: var(--surface-hover); }
+.ep-opt.picked .ep-label { color: var(--brand-text); }
+.ep-tick { width: 14px; height: 14px; flex-shrink: 0; color: var(--brand-text); }
+.ep-new .ep-badge { color: var(--brand-text); border-style: dashed; }
+.ep-new .ep-label { color: var(--brand-text); }
+
+/* Un choix court se montre en entier plutôt que de se cacher dans un menu. */
+.opt-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.opt-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
+  font-family: var(--font-sans); font-size: 0.76rem; font-weight: 600; cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.opt-chip:hover { border-color: var(--border-hover); color: var(--text); }
+.opt-chip svg { width: 13px; height: 13px; }
+.opt-chip.on {
+  background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2));
+  color: var(--brand-ink); border-color: transparent;
+}
+
+/* Les habitués, en un clic — la recherche reste là pour les autres. */
+.qp { display: grid; gap: 7px; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); margin-bottom: 11px; }
+.qp-card {
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 9px;
+  border-radius: var(--radius-soft); border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text); font-family: var(--font-sans); text-align: left; cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.qp-card:hover { border-color: var(--border-hover); background: var(--surface-hover); }
+.qp-card.on { border-color: var(--brand); background: var(--brand-tint); }
+.qp-badge {
+  display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 9px;
+  background: var(--surface-3); border: 1px solid var(--border);
+  color: var(--brand-text); font-family: var(--font-display); font-size: 0.64rem; font-weight: 700;
+}
+.qp-name { flex: 1; min-width: 0; font-size: 0.79rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qp-ico { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
+.qp-card.on .qp-ico { color: var(--brand-text); }
+
+/* ── Chercher dans une liste ───────────────────────────────────────── */
+.sbar {
+  display: flex; align-items: center; gap: 7px; flex: 1 1 200px; max-width: 340px;
+  padding: 5px 9px; border-radius: var(--radius-soft);
+  background: var(--input-bg); border: 1px solid var(--border);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.sbar:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-glow); }
+.sbar > svg { width: 14px; height: 14px; color: var(--muted); flex-shrink: 0; }
+.sbar input {
+  flex: 1; min-width: 0; border: none; background: none; outline: none;
+  font-family: var(--font-sans); font-size: 0.8rem; color: var(--text);
+}
+.sbar-x {
+  display: inline-grid; place-items: center; width: 17px; height: 17px;
+  border: none; background: none; border-radius: 5px; color: var(--muted); cursor: pointer;
+}
+.sbar-x:hover { background: var(--surface-3); color: var(--text); }
+.sbar-x svg { width: 11px; height: 11px; }
+.list-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+/* Cellules : une pastille et un nom se lisent plus vite qu'une phrase. */
+.cell-stack { display: flex; flex-direction: column; line-height: 1.25; }
+.cell-stack .muted { font-size: 0.66rem; }
+.cell-who { display: inline-flex; align-items: center; gap: 6px; }
+.cell-who-ico { width: 12px; height: 12px; color: var(--muted); opacity: 0.65; }
+.avatar-xs { width: 22px; height: 22px; border-radius: 7px; font-size: 0.58rem; }
+.cell-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.mini-tag {
+  padding: 1px 7px; border-radius: 999px; font-size: 0.65rem; font-weight: 600;
+  background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border);
+}
+.mini-tag.more { color: var(--brand-text); }
+.row-go {
+  width: 14px; height: 14px; margin-left: 2px; vertical-align: middle;
+  color: var(--muted); opacity: 0; transition: opacity 0.15s ease;
+}
+.list-table tbody tr:hover .row-go { opacity: 0.8; }
+
+/* ── Créer en trois questions ──────────────────────────────────────── */
+.wz { display: flex; flex-direction: column; }
+.wz-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.wz-title { display: flex; align-items: center; gap: 9px; }
+.wz-ico {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 11px; flex-shrink: 0;
+  background: var(--surface-3); color: var(--accent, var(--brand-text));
+}
+.wz-ico svg { width: 15px; height: 15px; }
+.wz-top h1 { margin: 0; font-family: var(--font-display); font-size: 1.08rem; font-weight: 700; letter-spacing: -0.4px; }
+
+.wz-rail { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 12px; }
+.wz-step {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 11px 4px 4px; border-radius: 999px;
+  border: 1px solid transparent; background: none; cursor: pointer;
+  color: var(--muted); font-family: var(--font-sans); font-size: 0.76rem; font-weight: 600;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.wz-step:hover:not(:disabled) { color: var(--text-2); }
+.wz-step:disabled { opacity: 0.45; cursor: not-allowed; }
+.wz-dot {
+  display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; flex-shrink: 0;
+  background: var(--surface-3); border: 1px solid var(--border); color: inherit;
+}
+.wz-dot svg { width: 12px; height: 12px; }
+.wz-step.ok { color: var(--text-2); }
+.wz-step.ok .wz-dot { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+.wz-step.now { color: var(--brand-text); background: var(--brand-tint); border-color: var(--brand-deep); }
+.wz-step.now .wz-dot {
+  background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2));
+  color: var(--brand-ink); border-color: transparent;
+}
+
+.wz-body {
+  padding: 14px; border-radius: var(--radius-card);
+  background: var(--surface-1); border: 1px solid var(--border);
+}
+.wz-q { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 13px; }
+.wz-q-ico {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 12px; flex-shrink: 0;
+  background: var(--surface-3); color: var(--brand-text);
+}
+.wz-q-ico svg { width: 17px; height: 17px; }
+.wz-q h2 { margin: 0; font-family: var(--font-display); font-size: 1rem; font-weight: 700; letter-spacing: -0.2px; }
+.wz-q p { margin: 3px 0 0; font-size: 0.74rem; color: var(--muted); }
+
+.wz-lines { display: flex; flex-direction: column; gap: 8px; }
+.wz-add {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 8px;
+  padding: 8px; border-radius: var(--radius-soft); border: 1px dashed var(--border-strong);
+  background: none; color: var(--muted); cursor: pointer;
+  font-family: var(--font-sans); font-size: 0.78rem; font-weight: 600;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.wz-add:hover { border-color: var(--brand); color: var(--brand-text); background: var(--surface-2); }
+.wz-add svg { width: 14px; height: 14px; }
+
+.wz-money { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.wz-money .field { min-width: 0; }
+/* Un champ de montant court : commission, retenue, versement. */
+.wz-amount { flex: 0 0 auto; width: 155px; }
+
+.wz-recap {
+  margin-top: 14px; border-radius: var(--radius-soft);
+  border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+}
+.wz-recap-row { display: flex; align-items: center; gap: 9px; padding: 8px 11px; }
+.wz-recap-row + .wz-recap-row { border-top: 1px solid var(--border); }
+.wz-recap-ico {
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; flex-shrink: 0;
+  background: var(--surface-3); color: var(--muted);
+}
+.wz-recap-ico svg { width: 13px; height: 13px; }
+.wz-recap-k { flex: 1; min-width: 0; font-size: 0.74rem; color: var(--muted); }
+.wz-recap-row strong { font-size: 0.84rem; font-variant-numeric: tabular-nums; text-align: right; }
+.wz-recap-row.total { background: var(--surface-3); }
+.wz-recap-row.total strong { font-size: 1.05rem; font-family: var(--font-display); }
+
+/* La barre du bas ne bouge pas : ce que le bon coûte reste sous les yeux. */
+.wz-foot {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 10px; padding: 9px 12px; border-radius: var(--radius-card);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.wz-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.wz-sum-k { font-size: 0.63rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.wz-sum-v { font-size: 1.15rem; font-family: var(--font-display); font-variant-numeric: tabular-nums; color: var(--brand-text); }
+.wz-sum-who { display: inline-flex; align-items: center; gap: 6px; font-size: 0.73rem; color: var(--text-2); }
+.wz-sum-who .avatar { width: 20px; height: 20px; border-radius: 7px; font-size: 0.56rem; }
+.wz-acts { display: flex; gap: 8px; margin-left: auto; }
+.btn-next { padding: 7px 14px; font-size: 0.82rem; }
+
+/* ── Consulter une fiche ───────────────────────────────────────────── */
+.dt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.dt-ico {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 11px; flex-shrink: 0;
+  background: var(--surface-3); color: var(--accent, var(--brand-text));
+}
+.dt-ico svg { width: 16px; height: 16px; }
+.dt-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dt-id h1 { margin: 0; font-family: var(--font-display); font-size: 1.15rem; font-weight: 700; letter-spacing: -0.4px; }
+.dt-link { display: inline-flex; align-items: center; gap: 5px; font-size: 0.7rem; color: var(--muted); text-decoration: none; }
+.dt-link:hover { color: var(--brand-text); }
+.dt-link svg { width: 12px; height: 12px; }
+.dt-acts { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+
+.dt-kpis { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(182px, 1fr)); margin-bottom: 8px; }
+.dt-kpi {
+  display: flex; align-items: center; gap: 9px; min-width: 0;
+  padding: 9px 11px; border-radius: var(--radius-card);
+  background: var(--surface-1); border: 1px solid var(--border);
+  color: inherit; text-decoration: none;
+}
+.dt-kpi.link { transition: background 0.15s ease, border-color 0.15s ease; }
+.dt-kpi.link:hover { background: var(--surface-2); border-color: var(--border-hover); }
+.dt-kpi-ico {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; flex-shrink: 0;
+  background: var(--surface-3); color: var(--muted);
+}
+.dt-kpi-ico svg { width: 15px; height: 15px; }
+.dt-kpi-av { font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; color: var(--brand-text); }
+.dt-kpi-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dt-kpi-label { font-size: 0.61rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.dt-kpi-v {
+  font-size: 0.92rem; font-weight: 700; font-family: var(--font-display);
+  font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dt-kpi-sub { font-size: 0.65rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-kpi-go { width: 14px; height: 14px; margin-left: auto; flex-shrink: 0; color: var(--muted); }
+
+.dt-bar { display: block; width: 68px; height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.dt-bar-fill { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand-fill-2), var(--brand-fill-1)); }
+.bar-cell { width: 78px; }
+
+.dt-sec-head { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+.dt-sec-ico {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; flex-shrink: 0;
+  background: var(--surface-3); color: var(--muted);
+}
+.dt-sec-ico svg { width: 12px; height: 12px; }
+.dt-sec-head h2 { margin: 0; font-family: var(--font-display); font-size: 0.86rem; font-weight: 600; }
+.dt-sec-n { padding: 1px 7px; border-radius: 999px; font-size: 0.64rem; font-weight: 700; background: var(--surface-3); color: var(--muted); }
+.dt-sec-right { margin-left: auto; display: flex; gap: 6px; }
+
+.dt-hint { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 8px; font-size: 0.73rem; color: var(--muted); }
+.dt-hint svg { width: 13px; height: 13px; flex-shrink: 0; margin-top: 1px; }
+.dt-next { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.dt-next .btn { padding: 7px 14px; font-size: 0.82rem; }
+.dt-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.dt-sub { margin-top: 12px; padding: 11px; border-radius: var(--radius-soft); background: var(--surface-2); border: 1px solid var(--border); }
+.dt-sub-title { display: block; margin-bottom: 7px; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); }
+.dt-sub .opt-chips { margin-bottom: 8px; }
+.dt-foot { display: flex; align-items: center; gap: 6px; margin: 6px 2px 0; font-size: 0.68rem; color: var(--muted); }
+.dt-foot svg { width: 12px; height: 12px; }
+
+/* Les sens d'argent portent maintenant une flèche : la couleur seule ne se lit
+   pas quand on ne connaît pas encore le code de la maison. */
+.money-dir { display: inline-flex; align-items: center; gap: 4px; }
+.money-dir svg { width: 12px; height: 12px; }
+
+/* ── Téléphone ─────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .wz-rail { gap: 4px; }
+  .wz-step-label { display: none; }
+  .wz-step.now .wz-step-label { display: inline; }
+  .wz-body { padding: 11px; }
+  .wz-foot { flex-direction: column; align-items: stretch; }
+  .wz-acts { margin-left: 0; }
+  .wz-acts .btn { flex: 1; }
+  .dt-acts { margin-left: 0; width: 100%; }
+  .qp { grid-template-columns: 1fr 1fr; }
+  .sbar { max-width: none; }
+}
+
+/* Les chiffres d'un profil, alignés sur les tuiles des fiches. */
+.pk { display: flex; align-items: center; gap: 8px; }
+.pk-ico {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 9px; flex-shrink: 0;
+  background: var(--surface-3); color: var(--muted);
+}
+.pk-ico svg { width: 13px; height: 13px; }
+.pk-body { display: flex; flex-direction: column; min-width: 0; }
+.pk-val { display: block; }
+.pk-label { display: block; }
+
+/* Une rangée de pastilles prend sa propre ligne : mise a cote d'un champ court,
+   sa hauteur double desaligne toute la rangee. */
+.field-full { flex: 1 0 100%; }
+
+/* ── Le papier revient : bandeau de scan ──────────────────────────────
+   La douchette a ouvert cette fiche. Le bandeau le dit et propose la seule
+   action attendue au comptoir ; il ne fait rien tout seul. */
+.dt-scan {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 8px; padding: 8px 11px;
+  border-radius: var(--radius-card);
+  background: var(--brand-tint); border: 1px solid var(--brand-deep);
+  animation: fade 0.2s ease;
+}
+.dt-scan-ico {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; flex-shrink: 0;
+  background: var(--surface-1); color: var(--brand-text);
+}
+.dt-scan-ico svg { width: 15px; height: 15px; }
+.dt-scan-txt {
+  display: flex; flex-direction: column; min-width: 0; flex: 1;
+  font-size: 0.8rem; font-weight: 600; color: var(--brand-text);
+}
+.dt-scan-txt em { font-style: normal; font-size: 0.68rem; font-weight: 500; color: var(--text-2); }
+
+/* ── Ce qui a été convenu la dernière fois ────────────────────────────
+   Un prix proposé doit dire d'où il vient, sinon c'est un chiffre tombé du
+   ciel. Cliquable : un clic le reprend. */
+.line-sugg, .gp-sugg, .wz-sugg {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 6px; padding: 3px 8px; border-radius: 999px;
+  background: var(--surface-2); border: 1px dashed var(--border-strong);
+  color: var(--text-2); font-family: var(--font-sans); font-size: 0.7rem; cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.line-sugg:hover, .gp-sugg:hover, .wz-sugg:hover {
+  border-color: var(--brand); color: var(--brand-text); background: var(--brand-tint);
+}
+.line-sugg svg, .gp-sugg svg, .wz-sugg svg { width: 12px; height: 12px; flex-shrink: 0; }
+.line-sugg span { font-weight: 700; font-variant-numeric: tabular-nums; }
+.line-sugg em, .wz-sugg em { font-style: normal; color: var(--muted); }
+.wz-sugg { margin-top: 12px; font-size: 0.75rem; }
+.wz-sugg strong { font-variant-numeric: tabular-nums; }
+
+/* ── Le brouillon retrouvé ────────────────────────────────────────────
+   Signalé, jamais subi : le bouton d'à côté repart de zéro. */
+.wz-draft {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 7px 10px; border-radius: var(--radius-soft);
+  background: var(--surface-2); border: 1px dashed var(--border-strong);
+  font-size: 0.75rem; color: var(--text-2);
+}
+.wz-draft svg { width: 13px; height: 13px; color: var(--muted); flex-shrink: 0; }
+.wz-draft button {
+  margin-left: auto; border: none; background: none; cursor: pointer;
+  color: var(--brand-text); font-family: var(--font-sans); font-size: 0.73rem; font-weight: 600;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+
+/* ── Le panier ────────────────────────────────────────────────────────
+   Trois champs par ligne : la quantité, ce qu'on paie au passager, et ce qu'il
+   devra si la marchandise n'arrive pas. */
+.gp-row-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gp-group-sum {
+  margin-left: auto; font-size: 0.72rem; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--text-2);
+}
+.gp-empty-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: none; background: none; cursor: pointer; padding: 2px 4px; border-radius: 6px;
+  color: var(--muted); font-family: var(--font-sans); font-size: 0.7rem; font-weight: 600;
+}
+.gp-empty-btn:hover { color: var(--red); background: var(--red-bg); }
+.gp-empty-btn svg { width: 12px; height: 12px; }
+/* Vider un panier se confirme sur place — une boite de dialogue pour ça serait
+   plus lourde que le geste qu'elle protège. */
+.gp-confirm { display: inline-flex; align-items: center; gap: 6px; }
+.gp-confirm button {
+  border: none; background: none; cursor: pointer;
+  font-family: var(--font-sans); font-size: 0.7rem; font-weight: 700;
+}
+.gp-confirm-yes { color: var(--red); }
+.gp-confirm-no { color: var(--muted); }
+.gp-load { margin-left: auto; text-align: right; }
+.gp-load strong { font-size: 0.86rem; font-family: var(--font-sans); }
+
+@media (max-width: 720px) {
+  .gp-row-fields { grid-template-columns: 1fr 1fr; }
+  .gp-row-fields .field:last-child { grid-column: 1 / -1; }
+  .gp-load { margin-left: 0; text-align: left; }
+}

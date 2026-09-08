@@ -13,6 +13,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { rmSync } from 'node:fs';
 
+// Le code de sortie DIT ce qui s'est passe. Avant, ce script se terminait
+// par process.exit(0) dans le finally : il annoncait « reussi » au shell meme
+// quand une assertion avait echoue, et meme quand Postgres n'avait pas
+// demarre. Un test qui ne peut pas echouer ne teste rien. Il vaut 1 par
+// defaut, et ne descend a 0 que si la ligne de verdict dit PASSED.
+let exitCode = 1;
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OPS = ['people','stock_categories','stock_items','stock_inventory','exchange_rates','orders','bons','bon_lines','bon_status_history','transactions','conversions','person_ledger','audit_log'];
 const OFFSET = { china: 700000000, algeria: 1400000000 };
@@ -105,7 +112,9 @@ try {
   chk('ré-application idempotente (pas de doublon)', dupF, 1);
 
   console.log(out.join('\n'));
-  console.log(out.every((l) => !l.startsWith('XX')) ? '\nSMOKE-SYNC PASSED' : '\nSMOKE-SYNC FAILED');
+  const passed = out.every((l) => !l.startsWith('XX'));
+  console.log(passed ? '\nSMOKE-SYNC PASSED' : '\nSMOKE-SYNC FAILED');
+  exitCode = passed ? 0 : 1;
 } catch (e) {
   console.error('SMOKE-SYNC ERROR:', e);
 } finally {
@@ -114,5 +123,5 @@ try {
     try { await nodes[n].em?.stop(); } catch {}
     try { rmSync(nodes[n].dir, { recursive: true, force: true }); } catch {}
   }
-  process.exit(0);
+  process.exit(exitCode);
 }

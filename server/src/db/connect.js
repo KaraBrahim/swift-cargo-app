@@ -21,8 +21,22 @@ export async function ensureConnection(opts = {}) {
   }
 
   // Imported here, not at the top: embedded-postgres carries a ~100 MB platform
-  // binary that a cloud deployment with DATABASE_URL never touches.
-  const { startEmbeddedPg } = await import('./embedded.js');
+  // binary that a cloud deployment with DATABASE_URL never touches. C'est une
+  // dépendance OPTIONNELLE, et l'image du hub l'exclut — d'où le message ci-
+  // dessous plutôt qu'un « module introuvable » pour qui oublie DATABASE_URL.
+  let startEmbeddedPg;
+  try {
+    ({ startEmbeddedPg } = await import('./embedded.js'));
+  } catch (cause) {
+    const err = new Error(
+      'DATABASE_URL est vide et PostgreSQL embarqué n’est pas installé sur cette machine. '
+      + 'Sur un serveur (hub), définissez DATABASE_URL vers votre base. '
+      + 'Sur un poste de travail, réinstallez les dépendances : npm --prefix server ci'
+    );
+    err.userFacing = true;
+    err.cause = cause;
+    throw err;
+  }
   const embedded = await startEmbeddedPg({
     dataDir: opts.dataDir || process.env.EMBEDDED_PG_DIR || DEFAULT_DATA_DIR,
     port: opts.port || config.embeddedPgPort,

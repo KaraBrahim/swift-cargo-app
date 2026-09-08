@@ -8,11 +8,13 @@ import { useApi } from '../api/useApi.js';
 import { Spinner, PageHeader, EmptyState, errorMessage, useToast } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const ACCENT = 'var(--c-stock)';
 
 export default function CategoriesPage() {
   const toast = useToast();
+  const isSuper = useIsSuper();
   const cats = useApi('/stock/categories?includeInactive=true');
   const [name, setName] = useState('');
   const [edit, setEdit] = useState(null);
@@ -103,14 +105,20 @@ export default function CategoriesPage() {
                         onClick={() => setEdit({ id: c.id, name: c.name, active: c.active })}>
                         <IconEl name="edit" />
                       </button>
-                      <button className="icon-btn" title={c.active ? 'Désactiver' : 'Réactiver'} aria-label="Activer/Désactiver"
-                        disabled={busy} onClick={() => toggle(c)}>
-                        <IconEl name={c.active ? 'close' : 'check'} />
-                      </button>
-                      <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer"
-                        disabled={busy || Number(c.item_count) > 0} onClick={() => setConfirm(c)}>
-                        <IconEl name="trash" />
-                      </button>
+                      {/* Desactiver retire la fiche de toutes les listes : reserve au super-administrateur. Reactiver reste ouvert a tous. */}
+                      {(isSuper || !c.active) && (
+                        <button className="icon-btn" title={c.active ? 'Désactiver' : 'Réactiver'} aria-label="Activer/Désactiver"
+                          disabled={busy} onClick={() => toggle(c)}>
+                          <IconEl name={c.active ? 'close' : 'check'} />
+                        </button>
+                      )}
+                      {/* Supprimer definitivement : reserve au super-administrateur. */}
+                      {isSuper && (
+                        <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer"
+                          disabled={busy || Number(c.item_count) > 0} onClick={() => setConfirm(c)}>
+                          <IconEl name="trash" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

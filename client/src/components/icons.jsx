@@ -69,6 +69,8 @@ export const Icon = {
   refresh: svg(<><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" /><path d="M20.5 4v5h-5" /></>),
   plane: svg(<><path d="M10.5 19.5 12 22l1.5-2.5V15l7 2.5v-2L13.5 10V4.2a1.5 1.5 0 0 0-3 0V10L3.5 15.5v2L10.5 15v4.5Z" /></>),
   report: svg(<><rect x="4" y="3" width="16" height="18" rx="2.5" /><path d="M8.5 12v4.5M12 8.5v8M15.5 14v2.5" /></>),
+  // Le viseur d'une douchette : quatre coins et le trait de lecture.
+  scan: svg(<><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16" /><path d="M3.5 12h17" /></>),
   settings: svg(<><path d="M4 7h11M19 7h1M4 17h5M13 17h7" /><circle cx="17" cy="7" r="2.2" /><circle cx="11" cy="17" r="2.2" /></>),
 };
 

@@ -5,10 +5,22 @@ import { runSeed } from '../../src/db/seed.js';
 
 // Connects via DATABASE_URL (set by scripts/run-tests.js) or, as a fallback,
 // an embedded instance. Migrates + seeds a clean database.
+// `node --test` lance chaque fichier dans SON processus, en parallèle, contre la
+// même base : sans verrou, deux d'entre eux migrent et sèment en même temps.
+// runMigrations() prend déjà le sien ; le seed prend celui-ci.
+const SEED_LOCK = 776_401_002;
+
 export async function setupTestDb() {
   const conn = await ensureConnection();
   await runMigrations();
-  await runSeed();
+  const seedLock = await getPool().connect();
+  try {
+    await seedLock.query('SELECT pg_advisory_lock($1)', [SEED_LOCK]);
+    await runSeed();
+  } finally {
+    await seedLock.query('SELECT pg_advisory_unlock($1)', [SEED_LOCK]).catch(() => {});
+    seedLock.release();
+  }
   return {
     stop: async () => {
       await closePool();

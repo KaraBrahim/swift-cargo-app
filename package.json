@@ -10,6 +10,10 @@
     "build": "npm --prefix client ci --include=dev && npm --prefix client run build && npm --prefix server ci --omit=dev",
     "start": "npm --prefix server start",
     "dev": "npm --prefix server run dev",
-    "test": "npm --prefix server test"
+    "test": "npm --prefix server test",
+    "hub:build": "docker build -f deploy/Dockerfile -t swift-cargo-hub .",
+    "desk:start": "npm --prefix desktop start",
+    "desk:china": "npm --prefix desktop run dist:china",
+    "desk:algeria": "npm --prefix desktop run dist:algeria"
   }
 }

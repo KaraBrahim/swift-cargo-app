@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useApi, useDebounced } from '../api/useApi.js';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 import { Spinner, errorMessage, useToast, PageHeader, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
 import { RolePicker, RoleBadges, emptyPerson, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
@@ -11,6 +12,7 @@ const ACCENT = 'var(--c-stock)';
 
 export default function PassagersPage() {
   const toast = useToast();
+  const isSuper = useIsSuper();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -99,7 +101,12 @@ export default function PassagersPage() {
                     <td className="muted">{p.notes || '—'}</td>
                     <td className="right nowrap">
                       <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setForm(personToForm(p)); }}>Modifier</button>{' '}
-                      <button className="btn btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); remove(p.id); }}>Retirer</button>
+                      {/* Retirer une fiche est un geste de super-administrateur :
+                          un clic, aucune confirmation, et la personne disparaît de
+                          toutes les listes. Voir useIsSuper. */}
+                      {isSuper && (
+                        <button className="btn btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); remove(p.id); }}>Retirer</button>
+                      )}
                     </td>
                   </tr>
                 ))}

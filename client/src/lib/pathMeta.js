@@ -43,6 +43,10 @@ export function normalizePath(pathname) {
 export function pathMeta(pathname) {
   const p = normalizePath(pathname);
   if (p === '/') return { title: 'Tableau de bord', icon: 'dashboard' };
+  // Les écrans de création portent leur propre nom : « Bons passagers · fiche »
+  // ne dirait pas qu'un formulaire à moitié rempli attend dans cet onglet.
+  if (p === '/bons-fournisseur/nouveau') return { title: 'Nouveau bon fournisseur', icon: 'plus' };
+  if (p === '/bons-passager/nouveau') return { title: 'Nouveau bon passager', icon: 'plus' };
   const hit = PAGES.find(([base]) => p === base || p.startsWith(`${base}/`));
   if (!hit) return { title: 'Page inconnue', icon: 'help' };
   const [base, label, icon] = hit;

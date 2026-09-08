@@ -112,11 +112,11 @@ export default function StockPage() {
               </select></label>
           )}
           <label className="field"><span>Quantité</span>
-            <AmountInput decimals={3} autoFocus value={lvl.quantity} onChange={(v) => setLvl({ ...lvl, quantity: v })} /></label>
+            <AmountInput decimals={3} step={1} autoFocus value={lvl.quantity} onChange={(v) => setLvl({ ...lvl, quantity: v })} /></label>
           <label className="field"><span>Poids (kg)</span>
-            <AmountInput decimals={3} value={lvl.weight_kg} onChange={(v) => setLvl({ ...lvl, weight_kg: v })} /></label>
+            <AmountInput decimals={3} step={1} value={lvl.weight_kg} onChange={(v) => setLvl({ ...lvl, weight_kg: v })} /></label>
           <label className="field"><span>CBM</span>
-            <AmountInput decimals={3} value={lvl.cbm} onChange={(v) => setLvl({ ...lvl, cbm: v })} /></label>
+            <AmountInput decimals={3} step={0.1} value={lvl.cbm} onChange={(v) => setLvl({ ...lvl, cbm: v })} /></label>
           <button className="btn btn-gold" disabled={busy || !lvl.id}>Confirmer</button>
           <button type="button" className="btn btn-ghost" onClick={() => setLvl(null)}><IconEl name="close" />Annuler</button>
         </form>

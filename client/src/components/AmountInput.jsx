@@ -10,6 +10,20 @@ import { GROUP_SEPARATOR, DECIMAL_SEPARATOR } from '../lib/format.js';
 //
 // The separators come from lib/format.js, the same ones the totals and the
 // printed receipt use, so what you type looks like what is shown back.
+// Une quantité se corrige d'une unité à la fois — un carton de plus, un de
+// moins — et retaper le nombre entier pour passer de 12 à 13 est le geste qu'on
+// répète cinquante fois par jour. `step` ajoute donc « − » et « + » de part et
+// d'autre du champ, et les flèches Haut / Bas du clavier font la même chose
+// sans quitter la saisie.
+//
+// Réservé aux quantités, pas aux montants : monter un prix de 45 000 DA d'un
+// dinar à la fois n'a aucun sens, et deux boutons inutiles à côté de chaque
+// somme d'argent ne feraient qu'encombrer. C'est pourquoi ça s'active en
+// passant `step`, plutôt que tout seul.
+//
+// `max` sert autant que les boutons : quand on sait ce qui est disponible — le
+// reste d'un lot, ce qui est arrivé au bureau — le pas s'y arrête. L'erreur est
+// alors impossible à commettre au lieu d'être refusée après coup.
 export default function AmountInput({
   value,
   onChange,
@@ -19,12 +33,52 @@ export default function AmountInput({
   // Quantities, weights and rates are not money — they ask for 3 or 6 decimals
   // and keep a bare 12.5 — so the rule follows the scale rather than needing a
   // second prop that a call site could forget to pass.
+  //
+  // Conséquence à connaître : un champ d'ARGENT n'affiche jamais son
+  // `placeholder`, puisqu'il n'est jamais vide — il montre « 0.00 ». Pour
+  // proposer un montant, il faut donc passer une VALEUR, pas un placeholder.
+  // Trois écrans proposaient ainsi un montant que personne ne voyait, et qu'il
+  // fallait retaper à la main. (Un champ de QUANTITÉ, lui, reste vide et
+  // affiche bien le sien.)
   money = decimals === 2,
+  step,
+  min = 0,
+  max,
+  className,
+  onKeyDown,
   ...rest
 }) {
   const empty = value === '' || value == null;
-  return (
+  const size = Number(step);
+  const stepped = Number.isFinite(size) && size > 0;
+
+  const num = Number(value);
+  const current = Number.isFinite(num) ? num : 0;
+  const lo = min == null ? null : Number(min);
+  const hi = max == null || max === '' ? null : Number(max);
+
+  const bump = (dir) => {
+    let next = current + dir * size;
+    // Le flottant : 0.1 + 0.2 vaut 0.30000000000000004, et un champ de
+    // quantité n'a pas à montrer ça. On arrondit à l'échelle du champ, puis on
+    // laisse tomber les zéros de queue — « 41 », pas « 41.000 ».
+    next = Number(next.toFixed(decimals));
+    if (lo != null && next < lo) next = lo;
+    if (hi != null && next > hi) next = hi;
+    onChange(String(next));
+  };
+
+  const field = (
     <NumericFormat
+      className={className}
+      onKeyDown={(e) => {
+        if (stepped && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+          // Sinon le curseur saute au début ou à la fin du nombre.
+          e.preventDefault();
+          bump(e.key === 'ArrowUp' ? 1 : -1);
+        }
+        onKeyDown?.(e);
+      }}
       value={money && empty ? '0' : (value ?? '')}
       thousandSeparator={GROUP_SEPARATOR}
       decimalSeparator={DECIMAL_SEPARATOR}
@@ -48,5 +102,32 @@ export default function AmountInput({
       }}
       {...rest}
     />
+  );
+
+  if (!stepped) return field;
+
+  // tabIndex={-1} : la tabulation traverse le formulaire champ par champ. Trois
+  // arrêts par quantité au lieu d'un, alors que les flèches font déjà le travail
+  // sans lâcher le clavier.
+  const arrow = (dir, label, sign) => (
+    <button
+      type="button"
+      className="qty-btn"
+      tabIndex={-1}
+      disabled={dir < 0 ? (lo != null && current <= lo) : (hi != null && current >= hi)}
+      onClick={() => bump(dir)}
+      aria-label={label}
+      title={`${label} (flèche ${dir > 0 ? 'haut' : 'bas'})`}
+    >
+      {sign}
+    </button>
+  );
+
+  return (
+    <span className="qty-field">
+      {arrow(-1, 'Diminuer', '−')}
+      {field}
+      {arrow(1, 'Augmenter', '+')}
+    </span>
   );
 }

@@ -3,16 +3,23 @@
 // person (payable > 0, receivable < 0). appendEntry runs inside a caller's tx so
 // it posts atomically with the caisse movement that caused it.
 import { getPool, withTx } from '../../db/pool.js';
-import { Decimal } from '../../lib/money.js';
+import { Decimal, toDecimal, MAX_AMOUNT } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { postMovement, replayChain } from '../caisse/caisse.service.js';
+// orderStatus.js ne dépend que de la lib money : l'importer ici n'introduit
+// aucun cycle, là où importer orders.service.js en aurait créé un.
+import { recomputeOrderStatus } from '../orders/orderStatus.js';
 
 export async function appendEntry(client, {
   personType, personId, currency, amount, type,
   refOrderId, refBonId, caisseTxId, adminId, note,
 }) {
-  const amt = new Decimal(amount);
+  // Callers compute this amount themselves, which is exactly why it is checked
+  // here: a NaN reaching the ledger writes a balance nothing can ever repair.
+  const amt = toDecimal(amount, 'Montant');
+  if (amt.decimalPlaces() > 2) throw errors.invalidAmount('Montant : maximum 2 décimales.');
+  if (amt.abs().gt(MAX_AMOUNT)) throw errors.invalidAmount('Montant : valeur trop élevée.');
   await client.query(
     `INSERT INTO person_balances (person_type, person_id, currency_code) VALUES ($1,$2,$3)
      ON CONFLICT (person_type, person_id, currency_code) DO NOTHING`,
@@ -23,6 +30,7 @@ export async function appendEntry(client, {
       WHERE person_type=$1 AND person_id=$2 AND currency_code=$3 FOR UPDATE`,
     [personType, personId, currency]
   );
+  if (!rows[0]) throw errors.conflict('Compte introuvable pour cette personne.');
   const newBalance = new Decimal(rows[0].balance).plus(amt).toFixed(2);
   await client.query(
     `UPDATE person_balances SET balance=$4
@@ -44,6 +52,19 @@ export async function appendEntry(client, {
 // entry therefore invalidates every later balance_after, so replay the chain
 // from the entries themselves rather than patching one row.
 export async function replayPersonLedger(c, personType, personId, currency) {
+  // Lock the account BEFORE the sums are read — see replayChain() for why. An
+  // appendEntry() committing in between would otherwise disappear from the
+  // balance while staying in the ledger.
+  await c.query(
+    `INSERT INTO person_balances (person_type, person_id, currency_code) VALUES ($1,$2,$3)
+     ON CONFLICT (person_type, person_id, currency_code) DO NOTHING`,
+    [personType, personId, currency]
+  );
+  await c.query(
+    `SELECT 1 FROM person_balances
+      WHERE person_type=$1 AND person_id=$2 AND currency_code=$3 FOR UPDATE`,
+    [personType, personId, currency]
+  );
   await c.query(
     `WITH ordered AS (
        SELECT id, SUM(amount) OVER (ORDER BY created_at, id ROWS UNBOUNDED PRECEDING) AS running
@@ -65,6 +86,21 @@ export async function replayPersonLedger(c, personType, personId, currency) {
     [personType, personId, currency, bal]
   );
   return bal;
+}
+
+// Un règlement au comptoir ne porte le numéro d'aucun ordre : il solde le
+// compte, pas une expédition. Or la clôture d'un ordre regarde aussi le solde
+// global du fournisseur (voir orderStatus.js) — donc payer à la table peut
+// refermer plusieurs ordres d'un coup, et reprendre ce paiement peut les
+// rouvrir. Sans ce passage, ils resteraient à « livrée » jusqu'à ce qu'autre
+// chose vienne les toucher.
+async function recomputePersonOrders(c, personType, personId) {
+  if (personType !== 'personne') return;
+  const { rows } = await c.query(
+    "SELECT id FROM orders WHERE fournisseur_id = $1 AND status <> 'ouverte'",
+    [personId]
+  );
+  for (const r of rows) await recomputeOrderStatus(c, r.id);
 }
 
 export async function getAccount(personType, personId) {
@@ -143,6 +179,7 @@ export async function settleAccount({ admin, personId, caisseId, amount, currenc
       type: incoming ? 'fee_payment' : 'passager_payment',
       caisseTxId: txId, adminId: admin.id, note,
     });
+    await recomputePersonOrders(c, personType, personId);
     await writeAudit(c, {
       adminId: admin.id, action: 'person.settle', entity: 'person', entityId: personId,
       details: { amount: amt.toFixed(2), currency, caisseId }, ip,
@@ -197,12 +234,22 @@ export async function createPersonTransaction({
       personType, personId, currency, amount: signed, type,
       caisseTxId: txId, adminId: admin.id, note,
     });
+    await recomputePersonOrders(c, personType, personId);
     await writeAudit(c, {
       adminId: admin.id, action: 'person.transaction', entity: personType, entityId: personId,
       details: { direction, amount: amt.toFixed(2), currency, type, caisseId: caisseId ?? null }, ip,
     });
     return { entry, balance: entry.balance_after };
   });
+}
+
+// Grouped totals, added with decimal.js rather than JS numbers: these figures
+// are printed and read aloud, and 0.1 + 0.2 does not equal 0.3 in a double.
+function sumBy(rows, key) {
+  return rows.reduce((acc, r) => {
+    acc[r[key]] = new Decimal(acc[r[key]] ?? 0).plus(r.amount).toFixed(2);
+    return acc;
+  }, {});
 }
 
 // ── Company charges (internet, électricité, loyer, salaires…) ────────
@@ -220,15 +267,7 @@ export async function listCharges({ category, period, limit = 200 } = {}) {
        ${where} ORDER BY ch.created_at DESC, ch.id DESC LIMIT $1`,
     params
   );
-  const totals = rows.reduce((acc, r) => {
-    acc[r.currency_code] = (acc[r.currency_code] || 0) + Number(r.amount);
-    return acc;
-  }, {});
-  const byCategory = rows.reduce((acc, r) => {
-    acc[r.category] = (acc[r.category] || 0) + Number(r.amount);
-    return acc;
-  }, {});
-  return { charges: rows, totals, byCategory };
+  return { charges: rows, totals: sumBy(rows, 'currency_code'), byCategory: sumBy(rows, 'category') };
 }
 
 export async function createCharge({ admin, category, label, amount, currency = 'DZD', caisseId, period, recurring, note, ip }) {
@@ -321,6 +360,9 @@ export async function updatePayment({ admin, entryId, amount, note, ip }) {
         await replayChain(c, tx.caisse_id, tx.currency_code);
       }
     }
+    // Corriger un encaissement change ce qui reste dû sur l'ordre, et « payé »
+    // est désormais l'une des portes de la clôture.
+    await recomputeOrderStatus(c, entry.ref_order_id);
     await writeAudit(c, {
       adminId: admin.id, action: 'payment.update', entity: 'person_ledger', entityId: entryId,
       details: { from: entry.amount, to: signed }, ip,
@@ -344,6 +386,7 @@ export async function deletePayment({ admin, entryId, ip }) {
       await c.query('DELETE FROM transactions WHERE id=$1', [tx.id]);
       await replayChain(c, tx.caisse_id, tx.currency_code);
     }
+    await recomputeOrderStatus(c, entry.ref_order_id);
     await writeAudit(c, {
       adminId: admin.id, action: 'payment.delete', entity: 'person_ledger', entityId: entryId,
       details: { type: entry.type, amount: entry.amount, currency: entry.currency_code }, ip,
@@ -367,10 +410,10 @@ export async function listDebts() {
       ORDER BY ABS(pb.balance) DESC`
   );
   // Split by direction so the UI never has to reason about the sign convention.
-  const toPay = rows.filter((r) => Number(r.balance) > 0);      // we owe them
-  const toCollect = rows.filter((r) => Number(r.balance) < 0);  // they owe us
+  const toPay = rows.filter((r) => new Decimal(r.balance).gt(0));      // we owe them
+  const toCollect = rows.filter((r) => new Decimal(r.balance).lt(0));  // they owe us
   const sum = (list) => list.reduce((acc, r) => {
-    acc[r.currency_code] = (acc[r.currency_code] || 0) + Math.abs(Number(r.balance));
+    acc[r.currency_code] = new Decimal(acc[r.currency_code] ?? 0).plus(new Decimal(r.balance).abs()).toFixed(2);
     return acc;
   }, {});
   return { toPay, toCollect, totals: { toPay: sum(toPay), toCollect: sum(toCollect) } };
@@ -386,22 +429,27 @@ export async function listPayments({ personType, limit = 200 } = {}) {
             pl.created_at, pl.note, pl.caisse_tx_id,
             pe.name AS person_name,
             a.full_name AS admin_name, a.role AS admin_role, c.label AS caisse_label,
-            b.reference AS bon_reference, b.id AS bon_id
+            b.reference AS bon_reference, b.id AS bon_id,
+            -- Renseigné quand la pièce est un bon FOURNISSEUR : l'écran doit
+            -- alors ouvrir l'ordre (BF-…), pas la ligne de marchandises qui le
+            -- porte. Ce sont deux pièces distinctes pour qui les manipule.
+            b.order_id, bo.reference AS bon_order_reference
        FROM person_ledger pl
        JOIN admins a ON a.id = pl.admin_id
        LEFT JOIN people pe ON pl.person_type='personne' AND pe.id = pl.person_id
        LEFT JOIN transactions t ON t.id = pl.caisse_tx_id
        LEFT JOIN caisses c ON c.id = t.caisse_id
        LEFT JOIN bons b ON b.id = pl.ref_bon_id
+       LEFT JOIN orders bo ON bo.id = b.order_id
       WHERE pl.type IN ('fee_payment','passager_payment') ${extra}
       ORDER BY pl.created_at DESC, pl.id DESC LIMIT $1`,
     params
   );
-  const totals = rows.reduce((acc, r) => {
-    const key = r.type === 'fee_payment' ? 'collected' : 'paid';
-    acc[key][r.currency_code] = (acc[key][r.currency_code] || 0) + Math.abs(Number(r.amount));
-    return acc;
-  }, { collected: {}, paid: {} });
+  const totals = { collected: {}, paid: {} };
+  for (const r of rows) {
+    const box = totals[r.type === 'fee_payment' ? 'collected' : 'paid'];
+    box[r.currency_code] = new Decimal(box[r.currency_code] ?? 0).plus(new Decimal(r.amount).abs()).toFixed(2);
+  }
   return { payments: rows, totals };
 }
 

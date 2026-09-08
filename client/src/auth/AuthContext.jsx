@@ -5,6 +5,20 @@ import { forgetCredentialSession } from '../lib/credentials.js';
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
 
+// Détruire est réservé au super-administrateur : supprimer un bon, annuler un
+// paiement déjà encaissé, retirer une fiche. Tout le reste — créer, modifier,
+// consulter — reste ouvert à chacun.
+//
+// `role` est le SEUL champ d'autorisation que le client possède ; il ne vaut
+// que 'admin' ou 'superadmin'. Le test était déjà écrit trois fois à la main
+// (CaissesPage, Layout, routes.jsx) : il porte enfin un nom, pour qu'une
+// quatrième copie ne puisse pas en dire autre chose.
+//
+// Attention à ce que ceci EST : une porte cachée, pas une serrure. Le serveur
+// ne vérifie encore rien sur ses routes DELETE — voir le commentaire de
+// requireSuperadmin, server/src/middleware/auth.js.
+export const useIsSuper = () => useAuth()?.admin?.role === 'superadmin';
+
 export function AuthProvider({ children }) {
   const [admin, setAdmin] = useState(null);
   const [loading, setLoading] = useState(true);

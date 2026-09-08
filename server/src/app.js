@@ -23,8 +23,10 @@ import { searchRouter } from './modules/search/search.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { printingRouter } from './modules/printing/printing.routes.js';
+import { scanRouter } from './modules/scan/scan.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { scrubResponses } from './lib/visibility.js';
+import { nudgeSync } from './modules/sync/sync.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // server/src -> swift-cargo-app/client/dist
@@ -84,6 +86,19 @@ export function createApp() {
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'swift-cargo', time: new Date().toISOString() }));
 
+  // Ce que ce poste vient d'écrire part vers le hub SANS attendre le prochain
+  // tour de l'horloge : le temps que la réponse s'affiche, l'évènement est déjà
+  // en route. C'est ce qui rend la synchronisation instantanée à l'usage.
+  //
+  // Après la réponse, jamais avant : la synchronisation ne doit rien ajouter au
+  // temps d'attente de la personne au comptoir. Les routes /sync/ sont exclues —
+  // appliquer ce que le hub nous envoie n'est pas une écriture à lui renvoyer.
+  app.use('/api', (req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.path.startsWith('/sync')) return next();
+    res.on('finish', () => { if (res.statusCode < 400) nudgeSync(); });
+    next();
+  });
+
   app.use('/api/auth', authRouter);
   app.use('/api', ratesRouter);
   app.use('/api', caisseRouter);
@@ -102,6 +117,7 @@ export function createApp() {
   app.use('/api', reportsRouter);
   app.use('/api', settingsRouter);
   app.use('/api', printingRouter);
+  app.use('/api', scanRouter);
 
   // After every API route, before the 404 handler.
   serveClient(app);

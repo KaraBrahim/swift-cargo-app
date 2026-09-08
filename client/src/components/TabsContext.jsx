@@ -148,6 +148,21 @@ export function TabsProvider({ children, onRefused }) {
     return tab.id;
   }, [navigate, onRefused]);
 
+  // Retrouver une fiche, pas en empiler une copie. Un scan au comptoir doit
+  // ouvrir le bon — et s'il est deja ouvert, y aller : scanner deux fois le meme
+  // papier ne doit pas remplir la barre, ni buter sur la limite d'onglets.
+  const openOrFocus = useCallback((rawPath) => {
+    const path = normalizePath(rawPath);
+    const s = stateRef.current;
+    const existing = s.tabs.find((t) => t.path === path);
+    if (existing) {
+      if (existing.id !== s.activeId) activate(existing.id);
+      else navigate(path);
+      return existing.id;
+    }
+    return open(path);
+  }, [activate, open, navigate]);
+
   const close = useCallback((id) => {
     const s = stateRef.current;
     const i = s.tabs.findIndex((t) => t.id === id);
@@ -211,9 +226,9 @@ export function TabsProvider({ children, onRefused }) {
       backPath: active?.history[active.hIndex - 1] ?? null,
       forwardPath: active?.history[active.hIndex + 1] ?? null,
       full: state.tabs.length >= MAX_TABS,
-      open, close, activate, setTitle, go,
+      open, openOrFocus, close, activate, setTitle, go,
     };
-  }, [state, open, close, activate, setTitle, go]);
+  }, [state, open, openOrFocus, close, activate, setTitle, go]);
 
   return <TabsContext.Provider value={value}>{children}</TabsContext.Provider>;
 }

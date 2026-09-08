@@ -12,6 +12,8 @@ import { tableDocBody } from '../components/printDocument.js';
 import { listTicket } from '../components/printTicket.js';
 import AmountInput from '../components/AmountInput.jsx';
 import { formatNumber } from '../lib/format.js';
+import { useIdempotent } from '../lib/useIdempotent.js';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const OPS = [
   { key: 'deposit', label: 'Dépôt' },
@@ -262,6 +264,7 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [op, amount, fromCurrency, toCurrency, currencies]);
 
+  const idem = useIdempotent();
   const valid = () => {
     if (!(Number(amount) > 0)) return false;
     if (op === 'convert') return fromCurrency !== toCurrency;
@@ -274,26 +277,28 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
     if (!valid()) return;
     setBusy(true);
     try {
+      // Chaque opération porte une clé d'idempotence : un réessai après un
+      // timeout est le même geste, pas un second dépôt. Voir useIdempotent.
       if (op === 'deposit') {
-        await api(`/caisses/${caisseId}/deposit`, { method: 'POST', body: { currency, amount, note } });
+        await idem((key) => api(`/caisses/${caisseId}/deposit`, { method: 'POST', idem: key, body: { currency, amount, note } }));
         toast.success('Dépôt enregistré.');
       } else if (op === 'withdraw') {
-        await api(`/caisses/${caisseId}/withdraw`, { method: 'POST', body: { currency, amount, note } });
+        await idem((key) => api(`/caisses/${caisseId}/withdraw`, { method: 'POST', idem: key, body: { currency, amount, note } }));
         toast.success('Retrait enregistré.');
       } else if (op === 'convert') {
-        await api(`/caisses/${caisseId}/convert`, {
-          method: 'POST',
+        await idem((key) => api(`/caisses/${caisseId}/convert`, {
+          method: 'POST', idem: key,
           body: { fromCurrency, toCurrency, amount, note },
-        });
+        }));
         toast.success('Conversion effectuée.');
       } else if (op === 'transfer') {
         // Creates a transfer awaiting confirmation — the same one the Caisses
         // page lists. No money moves here; both caisses stay as they are until
         // the destination confirms.
-        await api('/office-transfers', {
-          method: 'POST',
+        await idem((key) => api('/office-transfers', {
+          method: 'POST', idem: key,
           body: { fromCaisseId: caisseId, toCaisseId: Number(toCaisseId), currency, amount, note },
-        });
+        }));
         toast.success('Transfert créé. Il attend la confirmation du bureau destinataire.');
       }
       setAmount('');
@@ -371,7 +376,6 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
           <AmountInput
             value={amount}
             onChange={(v) => setAmount(v)}
-            placeholder="0.00"
           />
         </label>
 
@@ -431,6 +435,7 @@ function ReceiptButton({ id, disabled }) {
 }
 
 function LedgerTable({ q, onEdit, onDelete, busy }) {
+  const isSuper = useIsSuper();
   if (q.loading) return <Spinner />;
   if (q.error) return <div className="alert alert-error">{q.error}</div>;
   const rows = q.data?.transactions ?? [];
@@ -460,10 +465,13 @@ function LedgerTable({ q, onEdit, onDelete, busy }) {
                     title={editable ? 'Corriger le montant' : notEditableWhy(t)} onClick={() => onEdit(t)}>
                     <IconEl name="edit" />
                   </button>
-                  <button className="icon-btn danger" aria-label="Supprimer" disabled={busy || !editable}
-                    title={editable ? 'Supprimer ce mouvement' : notEditableWhy(t)} onClick={() => onDelete(t)}>
-                    <IconEl name="trash" />
-                  </button>
+                  {/* Supprimer un mouvement rejoue toute la chaine des soldes : reserve au super-administrateur. */}
+                  {isSuper && (
+                    <button className="icon-btn danger" aria-label="Supprimer" disabled={busy || !editable}
+                      title={editable ? 'Supprimer ce mouvement' : notEditableWhy(t)} onClick={() => onDelete(t)}>
+                      <IconEl name="trash" />
+                    </button>
+                  )}
                 </td>
               </tr>
             );

@@ -12,6 +12,11 @@ function extractToken(req) {
 }
 
 export async function requireAuth(req, _res, next) {
+  // Déjà authentifié par un routeur précédent. Tous sont montés sur '/api', et
+  // `router.use(requireAuth)` s'exécute à chaque traversée : sans ce raccourci,
+  // une seule requête relit la session en base autant de fois qu'elle traverse
+  // de routeurs — six requêtes SQL identiques pour un appel à /api/bons/…
+  if (req.admin) return next();
   try {
     const token = extractToken(req);
     if (!token) throw errors.unauthorized();

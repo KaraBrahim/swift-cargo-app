@@ -10,6 +10,8 @@ import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor } from '../lib/offices.js';
 import AmountInput from '../components/AmountInput.jsx';
+import { useIdempotent } from '../lib/useIdempotent.js';
+import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const ACCENT = 'var(--c-caisse)';
 const CATEGORIES = [
@@ -23,6 +25,7 @@ const EMPTY = { category: 'internet', label: '', amount: '', currency: 'DZD', ca
 
 export default function ChargesPage() {
   const toast = useToast();
+  const isSuper = useIsSuper();
   const [filter, setFilter] = useState('');
   const charges = useApi(`/charges${filter ? `?category=${filter}` : ''}`);
   const caisses = useApi('/caisses');
@@ -32,6 +35,7 @@ export default function ChargesPage() {
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  const idem = useIdempotent();
   const run = async (fn, okMsg) => {
     setBusy(true);
     try {
@@ -94,11 +98,11 @@ export default function ChargesPage() {
       {form && (
         <form className="panel panel-accent op-form" onSubmit={(e) => {
           e.preventDefault();
-          run(() => api('/charges', { method: 'POST', body: {
+          run(() => idem((key) => api('/charges', { method: 'POST', idem: key, body: {
             category: form.category, label: form.label.trim(), amount: form.amount,
             currency: form.currency, caisseId: Number(form.caisseId),
             period: form.period || undefined, recurring: form.recurring, note: form.note || undefined,
-          } }), 'Charge enregistrée.');
+          } })), 'Charge enregistrée.');
         }}>
           <div className="money-head" style={{ flexBasis: '100%' }}>
             <span className="money-dir out">Sortie de caisse</span>
@@ -196,10 +200,13 @@ export default function ChargesPage() {
                         onClick={() => setEdit({ id: ch.id, category: ch.category, label: ch.label, amount: String(ch.amount), period: ch.period, recurring: ch.recurring, note: ch.note || '', currency_code: ch.currency_code })}>
                         <IconEl name="edit" />
                       </button>
-                      <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer" disabled={busy}
-                        onClick={() => setConfirm(ch)}>
-                        <IconEl name="trash" />
-                      </button>
+                      {/* Supprimer definitivement : reserve au super-administrateur. */}
+                      {isSuper && (
+                        <button className="icon-btn danger" title="Supprimer" aria-label="Supprimer" disabled={busy}
+                          onClick={() => setConfirm(ch)}>
+                          <IconEl name="trash" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

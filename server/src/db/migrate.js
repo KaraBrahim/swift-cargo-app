@@ -10,32 +10,49 @@ import { logger } from '../lib/logger.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, 'migrations');
 
+// Un entier arbitraire mais stable : deux processus qui migrent la MÊME base
+// doivent se reconnaître par lui. (Un redémarrage qui chevauche le précédent,
+// une seconde instance lancée par erreur, deux fichiers de tests en parallèle.)
+// Sans ce verrou, les deux lisent « pas encore appliquée » et exécutent le même
+// CREATE TABLE : l'un des deux meurt au démarrage sur une erreur Postgres brute.
+const MIGRATION_LOCK = 776_401_001;
+
 export async function runMigrations() {
-  await getPool().query(
-    `CREATE TABLE IF NOT EXISTS schema_migrations (
-       filename    TEXT PRIMARY KEY,
-       applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-     )`
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK]);
 
-  const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
-  const applied = new Set(
-    (await getPool().query('SELECT filename FROM schema_migrations')).rows.map((r) => r.filename)
-  );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS schema_migrations (
+         filename    TEXT PRIMARY KEY,
+         applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+       )`
+    );
 
-  let count = 0;
-  for (const file of files) {
-    if (applied.has(file)) continue;
-    const sql = await readFile(join(MIGRATIONS_DIR, file), 'utf8');
-    await withTx(async (client) => {
-      await client.query(sql);
-      await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
-    });
-    logger.info(`Migration applied: ${file}`);
-    count++;
+    const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+    // Relu SOUS le verrou : entre l'attente et ici, l'autre processus a pu tout
+    // appliquer, et cette liste doit alors être vide.
+    const applied = new Set(
+      (await client.query('SELECT filename FROM schema_migrations')).rows.map((r) => r.filename)
+    );
+
+    let count = 0;
+    for (const file of files) {
+      if (applied.has(file)) continue;
+      const sql = await readFile(join(MIGRATIONS_DIR, file), 'utf8');
+      await withTx(async (tx) => {
+        await tx.query(sql);
+        await tx.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+      });
+      logger.info(`Migration applied: ${file}`);
+      count++;
+    }
+    if (count === 0) logger.info('Migrations: already up to date.');
+    return count;
+  } finally {
+    await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK]).catch(() => {});
+    client.release();
   }
-  if (count === 0) logger.info('Migrations: already up to date.');
-  return count;
 }
 
 // CLI: `npm run migrate`

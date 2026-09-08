@@ -1,7 +1,9 @@
 // One goods line for a bon: an article picker + a single measure (Quantité, Poids,
 // or CBM) — the user chooses one and fills only that value. Used by both the bon
 // fournisseur (OrdersPage) and bon passager (BonsPage) forms.
+import { useEffect, useRef } from 'react';
 import { ArticlePicker } from './ArticlePicker.jsx';
+import { IconEl } from './icons.jsx';
 import AmountInput from './AmountInput.jsx';
 import { formatNumber, formatQty } from '../lib/format.js';
 
@@ -29,8 +31,21 @@ export const lineValid = (l) =>
   (Boolean(l.itemId) || Boolean(String(l.designation || '').trim())) &&
   Number(l.value) > 0 && Number(l.unitPrice) > 0;
 
-export function LineEditor({ line, items, categories, onPatch, onRemove, removable, autoFocus, allowCreate = true }) {
+export function LineEditor({ line, items, categories, onPatch, onRemove, removable, autoFocus, allowCreate = true, suggestion = null }) {
   const patch = (p) => onPatch({ ...line, ...p });
+
+  // Le dernier prix convenu se reprend tout seul des qu'un article est nomme —
+  // mais jamais par-dessus une saisie : on ne remplit que le vide, et une seule
+  // fois par article, sinon effacer le prix le ferait revenir.
+  const articleKey = line.itemId ? `i${line.itemId}` : String(line.designation || '').trim().toLowerCase();
+  const applied = useRef(null);
+  useEffect(() => {
+    if (!suggestion || !articleKey || applied.current === articleKey) return;
+    if (String(line.unitPrice ?? '').trim() !== '') return;
+    applied.current = articleKey;
+    onPatch({ ...line, unitPrice: String(suggestion.unit_price) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articleKey, suggestion]);
 
   // When items carry a per-office quantity (passager bon picking from China
   // stock), show what's available for the chosen measure.
@@ -63,6 +78,9 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
         <AmountInput decimals={3}
           className="line-value"
           placeholder={line.measure === 'quantite' ? 'Qté' : line.measure === 'poids' ? 'kg' : 'm³'}
+          // Un carton ou un kilo se comptent à l'unité ; un mètre cube, non —
+          // en sauter un d'un clic ferait passer un lot du simple au double.
+          step={line.measure === 'cbm' ? 0.1 : 1}
           value={line.value}
           onChange={(v) => patch({ value: v })}
         />
@@ -87,6 +105,19 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
           <button type="button" className="btn btn-ghost btn-sm line-remove" onClick={onRemove} aria-label="Retirer la ligne">✕</button>
         )}
       </div>
+
+      {suggestion && (
+        <button
+          type="button"
+          className="line-sugg"
+          onClick={() => patch({ unitPrice: String(suggestion.unit_price) })}
+          title="Reprendre ce prix"
+        >
+          <IconEl name="trend" />
+          <span>{formatNumber(suggestion.unit_price, { decimals: 2, trim: true })}</span>
+          <em>{suggestion.own ? 'dernier avec ce fournisseur' : 'dernier prix vu'}{suggestion.reference ? ` · ${suggestion.reference}` : ''}</em>
+        </button>
+      )}
 
       {Number(line.value) > 0 && Number(line.unitPrice) > 0 && (
         <div className="line-total">= {formatNumber(lineTotal(line), { decimals: 2, trim: true })}</div>
