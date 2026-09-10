@@ -37,6 +37,31 @@ const CURRENCIES = [
 
 const INITIAL_RATES = { DZD: '1', CNY: '30.00000000', ALP: '30.00000000', USD: '255.00000000', EUR: '270.00000000' };
 
+// Les comptes semés portent le MÊME uuid sur toutes les machines.
+//
+// La migration 026 le faisait déjà — mais par un UPDATE, et sur une base neuve
+// les migrations tournent AVANT le seed (server.js) : la table est vide,
+// l'UPDATE ne touche aucune ligne, et le seed insère ensuite un uuid tiré au
+// hasard (DEFAULT gen_random_uuid, migration 004). Un hub neuf et un poste déjà
+// installé se retrouvaient donc avec DEUX uuid pour le même `username`.
+//
+// Ce que cela donne à la première synchronisation : le hub pousse sa ligne,
+// `sync_apply_row` tente ON CONFLICT (uuid) — qui ne trouve rien — donc un
+// INSERT, qui heurte l'unicité de `username`. La transaction entière échoue.
+// Pas une ligne perdue : TOUT le cycle, et à chaque cycle suivant, pour
+// toujours. C'est précisément l'accident que la 026 voulait éviter, et que
+// l'ordre migrations-puis-seed lui reprenait.
+//
+// On pose donc l'uuid à l'INSERT, et on le ramène sur les lignes déjà créées.
+// Les deux côtés convergent au démarrage suivant, quel que soit leur passé.
+const SEED_UUID = {
+  superadmin: '00000000-0000-4000-8000-000000000001', // identique à la 026
+  admin1: '00000000-0000-4000-8000-000000000002',
+  admin2: '00000000-0000-4000-8000-000000000003',
+  admin3: '00000000-0000-4000-8000-000000000004',
+  admin4: '00000000-0000-4000-8000-000000000005',
+};
+
 const OFFICES = [
   { office: 'china', label: 'Caisse Chine' },
   { office: 'algeria', label: 'Caisse Algérie' },
@@ -96,11 +121,14 @@ export async function runSeed() {
       await client.query("SELECT set_config('app.sync_applying', 'on', true)");
     }
     for (const a of SEED_USERS) {
-      // Password is set only on first insert; role/name/office are kept in sync.
+      // Le mot de passe n'est posé qu'à la création ; le nom, le bureau, le rôle
+      // et l'uuid (voir SEED_UUID) sont maintenus. Ne pas toucher au mot de
+      // passe est ce qui permet au poste de garder celui qu'il a adopté du hub.
       await client.query(
-        `INSERT INTO admins (username, full_name, password_hash, office, role) VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name, office = EXCLUDED.office, role = EXCLUDED.role`,
-        [a.username, a.full_name, a.hash, a.office, a.role]
+        `INSERT INTO admins (uuid, username, full_name, password_hash, office, role) VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name, office = EXCLUDED.office,
+           role = EXCLUDED.role, uuid = EXCLUDED.uuid`,
+        [SEED_UUID[a.username], a.username, a.full_name, a.hash, a.office, a.role]
       );
     }
   });
