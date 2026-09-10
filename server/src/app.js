@@ -100,6 +100,22 @@ export function createApp() {
   });
 
   app.use('/api/auth', authRouter);
+
+  // AVANT les autres, et l'ordre est le correctif : dix-sept routeurs sont
+  // montés sur '/api' et appellent `router.use(requireAuth)`. Or `router.use()`
+  // s'exécute pour toute requête qui TRAVERSE le routeur, même sans route
+  // correspondante. Monté plus bas, /api/sync/pull était donc refusé par le
+  // requireAuth de `rates` avant même d'atteindre son propre `requireNode` : le
+  // hub répondait « Authentification requise » à un poste qui présentait
+  // pourtant le bon jeton. Entre deux machines, la synchronisation ne pouvait
+  // pas démarrer du tout — sur une seule, rien ne le montrait.
+  //
+  // syncRouter n'a pas de `router.use()` à lui, donc le monter tôt ne change
+  // rien pour les autres. Ses deux routes destinées à l'interface (/sync/run,
+  // /sync/status) portent `requireAuth` route par route et restent protégées.
+  // test/sync-auth.test.js échoue si on le redescend.
+  app.use('/api', syncRouter);
+
   app.use('/api', ratesRouter);
   app.use('/api', caisseRouter);
   app.use('/api', auditRouter);
@@ -109,7 +125,6 @@ export function createApp() {
   app.use('/api', ordersRouter);
   app.use('/api', accountsRouter);
   app.use('/api', adminsRouter);
-  app.use('/api', syncRouter);
   app.use('/api', transfersRouter);
   app.use('/api', dashboardRouter);
   app.use('/api', notificationsRouter);
