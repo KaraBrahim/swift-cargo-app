@@ -66,8 +66,9 @@ function loadConfig() {
       '# Swift Cargo — configuration de ce poste.',
       '# Refermez l\'application avant de modifier ce fichier.',
       '',
-      '# Mot de passe du compte « superadmin » de CE poste. Les comptes ne se',
-      '# synchronisent pas d\'une machine à l\'autre : chaque poste a les siens.',
+      '# Mot de passe de dépannage : il ne sert QUE tant que ce poste n\'a jamais',
+      '# joint le hub. Dès la première synchronisation, les comptes du hub',
+      '# remplacent ceux d\'ici, et c\'est le mot de passe du hub qui s\'applique.',
       `SUPERADMIN_PASSWORD=${randomBytes(9).toString('base64url')}`,
       '',
       '# Le hub. Laissez CLOUD_URL vide pour travailler seul, sans synchronisation.',
@@ -249,17 +250,25 @@ app.whenReady().then(async () => {
   if (first) {
     // Une seule fois, au premier lancement : le mot de passe tiré au hasard ne
     // se retrouve nulle part ailleurs, et sans le hub le poste travaille seul.
+    //
+    // Relié à un hub, ce mot de passe est un dépannage et rien de plus : la
+    // migration 026 réplique `admins`, donc la première synchronisation
+    // remplace le compte local par celui de l'entreprise. Le dire ici évite
+    // exactement la question déjà posée — « il dit que c'est faux alors que
+    // j'en suis sûr » — quand on tape le mot de passe du hub sur un poste.
     dialog.showMessageBox(win, {
       type: 'info',
       title: 'Premier démarrage',
       message: `Poste ${BUILT_SITE === 'china' ? 'Chine' : 'Algérie'} prêt.`,
       detail:
         `Connectez-vous avec l'identifiant « superadmin » et le mot de passe écrit dans :\n${CONFIG_FILE}\n\n`
-        + 'Changez-le depuis l\'application, puis créez les comptes des employés — '
-        + 'les comptes ne se synchronisent pas d\'un poste à l\'autre.\n\n'
         + (cfg.CLOUD_URL
-          ? `Synchronisation avec ${cfg.CLOUD_URL}.`
-          : 'Aucun hub configuré : ce poste travaille seul. Renseignez CLOUD_URL et NODE_TOKEN dans le fichier de configuration pour l\'activer.'),
+          ? 'Ce mot de passe ne sert qu\'en attendant : dès la première '
+            + `synchronisation avec ${cfg.CLOUD_URL}, ce poste adopte les comptes `
+            + 'de l\'entreprise. Connectez-vous alors avec les mêmes identifiants '
+            + 'que partout ailleurs.'
+          : 'Aucun hub configuré : ce poste travaille seul, avec ses propres comptes. '
+            + 'Renseignez CLOUD_URL et NODE_TOKEN dans le fichier de configuration pour le relier.'),
       buttons: ['Compris'],
     });
   }
