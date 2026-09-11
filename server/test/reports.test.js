@@ -180,3 +180,36 @@ test('a bon created in one month and settled in another is dated by the chosen c
   assert.ok(reglement.rows.some((r) => r.reference === ref), 'clôturé en septembre');
   assert.ok(!croise.rows.some((r) => r.reference === ref), 'jamais compté deux fois dans la même vue');
 });
+
+// ── Le tableau de bord : les quatre blocs « À surveiller » ───────────
+//
+// Ils sont faits de SQL écrit à la main — expressions corrélées, make_interval,
+// agrégats filtrés. Rien dans le reste de la suite ne les exécute, et une faute
+// de frappe dans une de ces requêtes ne se verrait qu'à l'ouverture de la page,
+// en production. Ce test les fait simplement tourner contre une vraie base.
+test('les agrégats « à surveiller » s’exécutent et ont la bonne forme', async () => {
+  const dash = await import('../src/modules/dashboard/dashboard.service.js');
+
+  const creances = await dash.receivables('DZD');
+  assert.ok(Array.isArray(creances.debiteurs) && Array.isArray(creances.crediteurs));
+  assert.equal(typeof creances.a_recevoir, 'string', 'les montants restent du texte, jamais des flottants');
+
+  const aRegler = await dash.carriersToSettle();
+  assert.ok(Array.isArray(aRegler.lignes));
+  assert.equal(typeof aRegler.nb, 'number');
+
+  const enAttente = await dash.goodsWaiting();
+  assert.ok(Array.isArray(enAttente.lignes));
+
+  const manquants = await dash.lossesByCarrier('DZD');
+  assert.ok(Array.isArray(manquants.lignes));
+  for (const l of manquants.lignes) {
+    assert.ok(l.taux >= 0 && l.taux <= 100, 'un taux de manquants sort des bornes');
+  }
+
+  // Et le tout ensemble, comme la page le demande.
+  const vue = await dash.overview({ period: 'mois', currency: 'DZD' });
+  for (const key of ['receivables', 'carriersToSettle', 'goodsWaiting', 'lossesByCarrier']) {
+    assert.ok(vue[key], `overview() ne renvoie pas ${key}`);
+  }
+});

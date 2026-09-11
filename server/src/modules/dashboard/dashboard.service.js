@@ -12,6 +12,10 @@
 import { getPool } from '../../db/pool.js';
 import { notSuperadmin } from '../../lib/visibility.js';
 import { Decimal } from '../../lib/money.js';
+// La quantité réellement arrivée sur une ligne fournisseur : même expression que
+// celle qui décide du statut d'un ordre, pour que le tableau de bord et la fiche
+// ne puissent pas se contredire.
+import { ARRIVED } from '../orders/orderStatus.js';
 
 // Window + sparkline resolution per period.
 export const PERIODS = {
@@ -337,7 +341,7 @@ export async function recentBons(limit = 5, db = getPool()) {
 // ── one call for the whole page ──────────────────────────────────────
 export async function overview({ period = 'mois', currency = 'DZD', isSuper = false } = {}) {
   const db = getPool();
-  const [s, fin, rev, pipe, stock, act, bons] = await Promise.all([
+  const [s, fin, rev, pipe, stock, act, bons, creances, aRegler, enAttente, manquants] = await Promise.all([
     stats(period, currency, db),
     financial(period, currency, db),
     revenue(period, currency, db),
@@ -345,6 +349,10 @@ export async function overview({ period = 'mois', currency = 'DZD', isSuper = fa
     stockByCategory(db),
     activity(4, isSuper, db),
     recentBons(4, db),
+    receivables(currency, db),
+    carriersToSettle(db),
+    goodsWaiting(db),
+    lossesByCarrier(currency, db),
   ]);
   return {
     period,
@@ -357,5 +365,144 @@ export async function overview({ period = 'mois', currency = 'DZD', isSuper = fa
     stockByCategory: stock,
     activity: act,
     recentBons: bons,
+    receivables: creances,
+    carriersToSettle: aRegler,
+    goodsWaiting: enAttente,
+    lossesByCarrier: manquants,
+  };
+}
+
+// ══ Ce qui appelle une action ════════════════════════════════════════
+//
+// Les blocs ci-dessus décrivent l'activité : combien, sur quelle période, en
+// hausse ou en baisse. Ceux-ci décrivent ce qui CLOCHE — de l'argent qui dort,
+// une marchandise que personne n'est venu chercher, un transporteur qui perd
+// des colis. Ils ne se lisent pas pour se rassurer, ils se lisent pour agir.
+
+// ── Créances et dettes ───────────────────────────────────────────────
+// Le signe suit la convention du reste de l'application (voir ProfilePage) :
+// solde > 0 = NOUS lui devons ; solde < 0 = IL nous doit.
+//
+// On somme par PERSONNE et non par rôle : quelqu'un peut être fournisseur et
+// passager à la fois, et deux lignes de sens contraire pour le même nom
+// donneraient deux fois la même personne dans deux colonnes opposées.
+export async function receivables(currency = 'DZD', db = getPool(), limit = 5) {
+  const net = `
+    SELECT p.id, p.name, SUM(pb.balance) AS solde
+      FROM person_balances pb
+      JOIN people p ON p.id = pb.person_id
+     WHERE pb.currency_code = $1
+     GROUP BY p.id, p.name`;
+
+  const [dus, dettes, totaux] = await Promise.all([
+    // Ils nous doivent : les soldes négatifs, du plus lourd au plus léger.
+    db.query(`WITH n AS (${net}) SELECT id, name, (-solde)::text AS montant FROM n
+               WHERE solde < 0 ORDER BY solde ASC LIMIT $2`, [currency, limit]),
+    // Nous leur devons.
+    db.query(`WITH n AS (${net}) SELECT id, name, solde::text AS montant FROM n
+               WHERE solde > 0 ORDER BY solde DESC LIMIT $2`, [currency, limit]),
+    db.query(`WITH n AS (${net})
+              SELECT COALESCE(SUM(-solde) FILTER (WHERE solde < 0), 0)::text AS a_recevoir,
+                     COALESCE(SUM(solde)  FILTER (WHERE solde > 0), 0)::text AS a_payer,
+                     COUNT(*) FILTER (WHERE solde < 0)::int AS nb_debiteurs,
+                     COUNT(*) FILTER (WHERE solde > 0)::int AS nb_crediteurs
+                FROM n`, [currency]),
+  ]);
+
+  return { currency, ...totaux.rows[0], debiteurs: dus.rows, crediteurs: dettes.rows };
+}
+
+// ── Transporteurs à régler ───────────────────────────────────────────
+// La marchandise est arrivée, le transporteur n'a pas encore été réglé. Le tri
+// est l'ancienneté et rien d'autre : c'est la seule chose qui rende la liste
+// utile, et le plus vieux est toujours celui qu'on a oublié.
+export async function carriersToSettle(db = getPool(), limit = 5) {
+  const { rows } = await db.query(
+    `SELECT b.id, b.reference, b.arrived_at, b.transport_fee::text AS montant,
+            b.transport_currency AS devise, p.name AS passager,
+            GREATEST(0, EXTRACT(day FROM now() - b.arrived_at)::int) AS jours
+       FROM bons b
+       LEFT JOIN people p ON p.id = b.passager_id
+      WHERE b.status = 'arrive' AND b.passager_id IS NOT NULL
+      ORDER BY b.arrived_at ASC NULLS FIRST, b.id
+      LIMIT $1`,
+    [limit]
+  );
+  const { rows: tot } = await db.query(
+    `SELECT COUNT(*)::int AS nb,
+            GREATEST(0, EXTRACT(day FROM now() - MIN(arrived_at))::int) AS plus_ancien
+       FROM bons WHERE status = 'arrive' AND passager_id IS NOT NULL`
+  );
+  return { ...tot[0], lignes: rows };
+}
+
+// ── Marchandise arrivée, pas encore remise ───────────────────────────
+// Groupée par PERSONNE, pas par commande : le geste qui vide ce tableau est un
+// appel téléphonique, et on appelle quelqu'un — pas une référence.
+export async function goodsWaiting(db = getPool(), limit = 5) {
+  const base = `
+    SELECT o.id AS order_id, o.fournisseur_id,
+           GREATEST((${ARRIVED}) - COALESCE(bl.delivered_quantity, 0), 0) AS restant,
+           (SELECT MIN(cb.arrived_at)
+              FROM bon_lines cl JOIN bons cb ON cb.id = cl.bon_id
+             WHERE cl.source_line_id = bl.id AND cb.status IN ('arrive','regle')) AS arrive_le
+      FROM bon_lines bl
+      JOIN bons b   ON b.id = bl.bon_id
+      JOIN orders o ON o.id = b.order_id
+     WHERE o.status IN ('arrivee','livree')`;
+
+  const [parPersonne, totaux] = await Promise.all([
+    db.query(
+      `WITH l AS (${base})
+       SELECT p.id, p.name,
+              COUNT(DISTINCT l.order_id)::int AS commandes,
+              SUM(l.restant)::text AS quantite,
+              GREATEST(0, EXTRACT(day FROM now() - MIN(l.arrive_le))::int) AS jours
+         FROM l JOIN people p ON p.id = l.fournisseur_id
+        WHERE l.restant > 0.0005
+        GROUP BY p.id, p.name
+        ORDER BY MIN(l.arrive_le) ASC NULLS FIRST
+        LIMIT $1`,
+      [limit]
+    ),
+    db.query(
+      `WITH l AS (${base})
+       SELECT COUNT(DISTINCT order_id)::int AS commandes,
+              COUNT(DISTINCT fournisseur_id)::int AS personnes,
+              GREATEST(0, EXTRACT(day FROM now() - MIN(arrive_le))::int) AS plus_ancien
+         FROM l WHERE restant > 0.0005`
+    ),
+  ]);
+
+  return { ...totaux.rows[0], lignes: parPersonne.rows };
+}
+
+// ── Manquants par transporteur ───────────────────────────────────────
+// Un manquant est un accident ; trois chez la même personne sont une habitude.
+// C'est pourquoi on agrège par transporteur et sur plusieurs mois, et pourquoi
+// le TAUX compte plus que le montant : il se compare d'un transporteur à
+// l'autre, ce qu'une somme en dinars ne fait pas — les bons n'ont ni la même
+// taille ni la même devise.
+export async function lossesByCarrier(currency = 'DZD', db = getPool(), months = 6, limit = 5) {
+  const { rows } = await db.query(
+    `SELECT p.id, p.name,
+            COUNT(*) FILTER (WHERE b.loss_total > 0)::int AS incidents,
+            COUNT(*)::int AS bons,
+            COALESCE(SUM(b.loss_total) FILTER (WHERE b.transport_currency = $2), 0)::text AS perte
+       FROM bons b
+       JOIN people p ON p.id = b.passager_id
+      WHERE b.passager_id IS NOT NULL
+        AND b.created_at >= now() - make_interval(months => $1::int)
+      GROUP BY p.id, p.name
+     HAVING COUNT(*) FILTER (WHERE b.loss_total > 0) > 0
+      ORDER BY (COUNT(*) FILTER (WHERE b.loss_total > 0))::numeric / COUNT(*) DESC,
+               COUNT(*) FILTER (WHERE b.loss_total > 0) DESC
+      LIMIT $3`,
+    [months, currency, limit]
+  );
+  return {
+    months,
+    currency,
+    lignes: rows.map((r) => ({ ...r, taux: Math.round((r.incidents / r.bons) * 100) })),
   };
 }
