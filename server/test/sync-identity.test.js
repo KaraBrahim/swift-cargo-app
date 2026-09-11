@@ -73,3 +73,60 @@ test('un uuid divergent est exactement ce qui casse le cycle', async () => {
     'si ceci cesse d’échouer, c’est que `username` n’est plus unique — et le compte peut se dédoubler'
   );
 });
+
+// ── La purge des évènements orphelins (migration 027) ────────────────
+//
+// La 026 puis le seed ont réécrit l'uuid du super-admin. La ligne est réparée,
+// mais le journal du hub garde les évènements d'AVANT, qui parlent d'un uuid que
+// plus personne ne porte — et c'est sur eux que le poste se bloquait, à chaque
+// cycle, sans jamais atteindre les bons évènements derrière.
+//
+// On exécute le vrai fichier de migration plutôt qu'une copie de sa requête :
+// une copie finirait par diverger de ce qui tourne en production.
+import { readFile } from 'node:fs/promises';
+
+const PRUNE = new URL('../src/db/migrations/027_prune_orphan_admin_events.sql', import.meta.url);
+
+async function outboxRow({ entityUuid, op = 'insert', username }) {
+  const { rows } = await getPool().query(
+    `INSERT INTO sync_outbox (uuid, entity, entity_uuid, op, snapshot, origin_site, server_seq)
+     VALUES (gen_random_uuid(), 'admins', $1, $2, $3, 'cloud', nextval('sync_server_seq'))
+     RETURNING id`,
+    [entityUuid, op, JSON.stringify({ username, uuid: entityUuid })]
+  );
+  return rows[0].id;
+}
+
+const stillThere = async (id) =>
+  (await getPool().query('SELECT 1 FROM sync_outbox WHERE id = $1', [id])).rows.length === 1;
+
+test('027 efface l’évènement dont l’identité a été réécrite', async () => {
+  // Exactement le cas du hub : uuid disparu, `username` toujours vivant ailleurs.
+  const orphan = await outboxRow({ entityUuid: '22222222-2222-4222-8222-222222222222', username: 'superadmin' });
+
+  await getPool().query(await readFile(PRUNE, 'utf8'));
+
+  assert.equal(await stillThere(orphan), false, 'cet évènement ne peut que faire échouer le cycle');
+});
+
+test('027 ne touche ni aux évènements valides ni à ceux d’une ligne supprimée', async () => {
+  const { rows: [su] } = await getPool().query('SELECT uuid FROM admins WHERE username = $1', ['superadmin']);
+
+  // Valide : l'identité existe toujours.
+  const live = await outboxRow({ entityUuid: su.uuid, username: 'superadmin' });
+  // Ligne réellement supprimée : l'uuid ET le nom ont disparu. Ces évènements
+  // DOIVENT être rejoués — sans eux, le poste garderait un compte que le hub a
+  // supprimé. C'est ce que la condition sur `username` protège.
+  const removed = await outboxRow({
+    entityUuid: '33333333-3333-4333-8333-333333333333', username: 'employe-parti',
+  });
+  const removalDelete = await outboxRow({
+    entityUuid: '33333333-3333-4333-8333-333333333333', op: 'delete', username: 'employe-parti',
+  });
+
+  await getPool().query(await readFile(PRUNE, 'utf8'));
+
+  assert.ok(await stillThere(live), 'un évènement dont la ligne existe doit être servi');
+  assert.ok(await stillThere(removed), 'une suppression réelle doit rester rejouable');
+  assert.ok(await stillThere(removalDelete), 'la suppression elle-même doit rester rejouable');
+});
