@@ -23,12 +23,14 @@
       { "from": "payload", "to": "payload" }
     ],
     "win": {
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "target": [{ "target": "nsis", "arch": ["x64"] }],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     },
     "nsis": {
       "oneClick": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "perMachine": false,
       "allowToChangeInstallationDirectory": false
     }
