@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
 import { IconEl, initialsOf } from './icons.jsx';
+import icon from '../assets/swift-cargo-logo-files/swift-cargo-icon.svg';
 import { TopBar } from './TopBar.jsx';
 import { CommandPalette } from './CommandPalette.jsx';
 import ConnectionBanner from './ConnectionBanner.jsx';
@@ -167,7 +168,7 @@ function Shell() {
 
       <aside className="sidebar">
         <div className="sb-brand">
-          <div className="sb-emblem">SC</div>
+          <img className="sb-emblem" src={icon} alt="" />
           <div className="sb-brand-text">
             <div className="sb-brand-name">SWIFT CARGO</div>
             <div className="sb-brand-sub">Gestion</div>

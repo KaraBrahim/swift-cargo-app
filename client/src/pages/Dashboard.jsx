@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../api/useApi.js';
 import { api } from '../api/client.js';
@@ -11,6 +11,8 @@ import { useDismiss } from '../components/SettingsMenu.jsx';
 import { activityLine } from '../components/activityLabels.js';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { DashWatch } from '../components/DashWatch.jsx';
+import { useSticky } from '../lib/useSticky.js';
 
 const PERIODS = [
   { key: 'jour', label: 'Aujourd’hui' },
@@ -101,30 +103,43 @@ const CURRENCY = 'DZD';
 
 export default function Dashboard() {
   const { admin } = useAuth();
-  const [caMode, setCaMode] = useState('argent');
+  // Les choix d'affichage sont retenus d'une session à l'autre : personne ne
+  // veut re-choisir « ce mois » chaque matin. Voir lib/useSticky.js.
+  const [caMode, setCaMode] = useSticky('sc_dash_ca_mode', 'argent');
   // The overview loads every panel at the default window; each period-scoped
   // control (the four stat cards, the financial panel) then refetches only its
   // own slice, so they move independently.
   const { data, loading, error } = useApi(`/dashboard/overview?period=mois&currency=${CURRENCY}`);
 
-  const [finPeriod, setFinPeriod] = useState('mois');
+  const [finPeriod, setFinPeriod] = useSticky('sc_dash_fin_period', 'mois');
   const [fin, setFin] = useState(null);
-  const changeFinPeriod = async (p) => {
-    setFinPeriod(p);
+  const loadFin = async (p) => {
     setFin(null);
     try { setFin(await api(`/dashboard/financial?period=${p}&currency=${CURRENCY}`)); } catch { setFin(null); }
   };
+  const changeFinPeriod = (p) => { setFinPeriod(p); loadFin(p); };
 
   // Per-card period + fetched override. Seeded from the overview (all 'mois').
-  const [tilePeriod, setTilePeriod] = useState({ bons: 'mois', revenue: 'mois', passagers: 'mois', stock: 'mois' });
+  const [tilePeriod, setTilePeriod] = useSticky('sc_dash_tile_periods', { bons: 'mois', revenue: 'mois', stock: 'mois' });
   const [tileData, setTileData] = useState({});
-  const changeTile = async (key, p) => {
-    setTilePeriod((tp) => ({ ...tp, [key]: p }));
+  const loadTile = async (key, p) => {
     try {
       const d = await api(`/dashboard/tile/${key}?period=${p}&currency=${CURRENCY}`);
       setTileData((td) => ({ ...td, [key]: d }));
     } catch { /* keep the previous value */ }
   };
+  const changeTile = (key, p) => { setTilePeriod((tp) => ({ ...tp, [key]: p })); loadTile(key, p); };
+
+  // L'aperçu arrive toujours au mois — c'est une seule requête pour toute la
+  // page. Un choix retenu d'une session précédente doit donc être rejoué au
+  // montage, sinon la carte afficherait « cette semaine » au-dessus de chiffres
+  // qui sont ceux du mois. On ne redemande que ce qui diffère.
+  useEffect(() => {
+    for (const [key, p] of Object.entries(tilePeriod)) if (p !== 'mois') loadTile(key, p);
+    if (finPeriod !== 'mois') loadFin(finPeriod);
+    // Au montage seulement : ensuite ce sont les sélecteurs qui pilotent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (loading && !data) return <Spinner />;
   if (error) return <div className="alert alert-error">{error}</div>;
@@ -136,7 +151,6 @@ export default function Dashboard() {
 
   // Card values: the fetched per-card override, else the overview slice.
   const bonsTile = tileData.bons ?? stats.bonsActifs;
-  const passagersTile = tileData.passagers ?? stats.passagers;
   const stockTile = tileData.stock ?? stats.stock;
   const revTile = tileData.revenue ?? data.revenue;
   const revPeriodLabel = periodLabelOf(tilePeriod.revenue);
@@ -159,62 +173,6 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
-
-      {/* ── the four tiles (each with its own period picker) ── */}
-      <div className="stat-grid">
-        <Stat
-          icon="bon" accent="var(--c-bon)" label="Bons passagers actifs"
-          value={bonsTile.value}
-          deltaPct={bonsTile.deltaPct} series={bonsTile.series}
-          period={tilePeriod.bons} onPeriod={(p) => changeTile('bons', p)}
-        />
-        <Stat
-          icon="coins" accent="var(--c-caisse)" label="Chiffre d’affaires"
-          value={caMode === 'argent' ? formatMoney(revTile.money.value) : formatQty(revTile.quantity.weightKg)}
-          unit={caMode === 'argent' ? currency : 'kg'}
-          deltaPct={caMode === 'argent' ? revTile.money.deltaPct : null}
-          series={caMode === 'argent' ? revTile.money.series : null}
-          period={tilePeriod.revenue} onPeriod={(p) => changeTile('revenue', p)}
-          footer={
-            <div className="ca-switch">
-              <button className={caMode === 'argent' ? 'active' : ''} onClick={() => setCaMode('argent')} type="button">Argent</button>
-              <button className={caMode === 'quantite' ? 'active' : ''} onClick={() => setCaMode('quantite')} type="button">Quantité</button>
-            </div>
-          }
-        />
-        <Stat
-          icon="passager" accent="var(--c-people)" label="Passagers"
-          value={passagersTile.value}
-          deltaPct={passagersTile.deltaPct} series={passagersTile.series}
-          period={tilePeriod.passagers} onPeriod={(p) => changeTile('passagers', p)}
-        />
-        <Stat
-          icon="stock" accent="var(--c-stock)" label="Stock total"
-          value={formatQty(stockTile.value)}
-          deltaPct={stockTile.deltaPct} series={stockTile.series}
-          period={tilePeriod.stock} onPeriod={(p) => changeTile('stock', p)}
-        />
-      </div>
-
-      {/* Quantity detail for the CA tile — units are never summed across
-          different units of measure, so they're listed separately. Follows the
-          CA card's own period. */}
-      {caMode === 'quantite' && (
-        <div className="panel qty-panel">
-          <h2 className="panel-title">Chiffre d’affaires — quantité expédiée ({revPeriodLabel})</h2>
-          <div className="qty-grid">
-            <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.weightKg)}</span><span className="qty-k">kg au total</span></div>
-            <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.cbm)}</span><span className="qty-k">CBM au total</span></div>
-            <div className="qty-cell"><span className="qty-v">{revTile.quantity.bons}</span><span className="qty-k">bons expédiés</span></div>
-            {revTile.quantity.byUnit.map((u) => (
-              <div key={u.unit} className="qty-cell">
-                <span className="qty-v">{formatQty(u.quantity)}</span>
-                <span className="qty-k">{u.unit}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── pipeline + financial ── */}
       <div className="dash-cols">
@@ -250,6 +208,65 @@ export default function Dashboard() {
         </div>
 
       </div>
+
+
+      {/* ── les tuiles (chacune avec son propre choix de période) ── */}
+      <div className="stat-grid">
+        <Stat
+          icon="bon" accent="var(--c-bon)" label="Bons passagers actifs"
+          value={bonsTile.value}
+          deltaPct={bonsTile.deltaPct} series={bonsTile.series}
+          period={tilePeriod.bons} onPeriod={(p) => changeTile('bons', p)}
+        />
+        <Stat
+          icon="coins" accent="var(--c-caisse)" label="Chiffre d’affaires"
+          value={caMode === 'argent' ? formatMoney(revTile.money.value) : formatQty(revTile.quantity.weightKg)}
+          unit={caMode === 'argent' ? currency : 'kg'}
+          deltaPct={caMode === 'argent' ? revTile.money.deltaPct : null}
+          series={caMode === 'argent' ? revTile.money.series : null}
+          period={tilePeriod.revenue} onPeriod={(p) => changeTile('revenue', p)}
+          footer={
+            <div className="ca-switch">
+              <button className={caMode === 'argent' ? 'active' : ''} onClick={() => setCaMode('argent')} type="button">Argent</button>
+              <button className={caMode === 'quantite' ? 'active' : ''} onClick={() => setCaMode('quantite')} type="button">Quantité</button>
+            </div>
+          }
+        />
+        <Stat
+          icon="stock" accent="var(--c-stock)" label="Stock total"
+          value={formatQty(stockTile.value)}
+          deltaPct={stockTile.deltaPct} series={stockTile.series}
+          period={tilePeriod.stock} onPeriod={(p) => changeTile('stock', p)}
+        />
+      </div>
+
+      {/* Quantity detail for the CA tile — units are never summed across
+          different units of measure, so they're listed separately. Follows the
+          CA card's own period. */}
+      {caMode === 'quantite' && (
+        <div className="panel qty-panel">
+          <h2 className="panel-title">Chiffre d’affaires — quantité expédiée ({revPeriodLabel})</h2>
+          <div className="qty-grid">
+            <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.weightKg)}</span><span className="qty-k">kg au total</span></div>
+            <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.cbm)}</span><span className="qty-k">CBM au total</span></div>
+            <div className="qty-cell"><span className="qty-v">{revTile.quantity.bons}</span><span className="qty-k">bons expédiés</span></div>
+            {revTile.quantity.byUnit.map((u) => (
+              <div key={u.unit} className="qty-cell">
+                <span className="qty-v">{formatQty(u.quantity)}</span>
+                <span className="qty-k">{u.unit}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+
+      <DashWatch
+        receivables={data.receivables}
+        carriersToSettle={data.carriersToSettle}
+        goodsWaiting={data.goodsWaiting}
+        lossesByCarrier={data.lossesByCarrier}
+      />
 
       {/* ── stock / activity / recent bons ── */}
       <div className="dash-cols-3">
@@ -314,6 +331,7 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
     </div>
   );
 }

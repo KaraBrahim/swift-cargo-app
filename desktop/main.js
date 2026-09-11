@@ -222,6 +222,10 @@ function createWindow(port) {
     show: false,
     backgroundColor: '#0f111a',
     title: 'Swift Cargo',
+    // L'icône de la fenêtre et de la barre des tâches. L'exécutable lui-même
+    // n'est pas retouché (signAndEditExecutable: false), donc c'est ici qu'elle
+    // se pose.
+    icon: join(__dirname, 'build', 'icon.png'),
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   win.once('ready-to-show', () => win.show());

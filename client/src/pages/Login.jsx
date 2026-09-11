@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import icon from '../assets/swift-cargo-logo-files/swift-cargo-icon.svg';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getLastUser } from '../api/client.js';
 import { errorMessage } from '../components/ui.jsx';
@@ -76,7 +77,7 @@ export default function Login() {
           method="post"
           action="/api/auth/login"
         >
-          <div className="login-emblem">SC</div>
+          <img className="login-emblem" src={icon} alt="" />
           <div className="login-brand">SWIFT CARGO</div>
           <div className="login-sub">Espace de gestion</div>
 

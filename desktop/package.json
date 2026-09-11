@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Swift Cargo — poste de travail (Chine / Algérie)",
-  "author": "Affari",
+  "author": "Swift Cargo",
   "main": "main.js",
   "scripts": {
     "prepare-payload": "node prepare.mjs",
@@ -15,14 +15,15 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.affari.swiftcargo",
+    "appId": "com.swiftcargo.desk",
     "productName": "Swift Cargo Desk",
     "directories": { "output": "release" },
-    "files": ["main.js"],
+    "files": ["main.js", "build/icon.png"],
     "extraResources": [
       { "from": "payload", "to": "payload" }
     ],
     "win": {
+      "icon": "build/icon.png",
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "signAndEditExecutable": false
     },

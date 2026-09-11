@@ -1,6 +1,7 @@
 // L'écran de bienvenue, joué avant chaque connexion.
 // Choreography lives in theme/intro.css; this file only decides when it plays,
 // when it leaves, and how a letter gets its delay.
+import icon from '../assets/swift-cargo-logo-files/swift-cargo-icon.svg';
 import { useEffect, useRef, useState } from 'react';
 
 // The message finishes assembling around 2.4s; HOLD lets it rest well past
@@ -89,7 +90,7 @@ export function WelcomeIntro({ onHandover, onEnd }) {
       <div className="intro-aurora" aria-hidden="true"><i /><i /></div>
 
       <div className="intro-inner">
-        <div className="intro-emblem" aria-hidden="true">SC</div>
+        <img className="intro-emblem" src={icon} alt="" aria-hidden="true" />
 
         <Letters className="intro-line intro-hello" text="Bienvenue" start={520} step={45} />
         <Letters className="intro-line intro-title" text="SWIFT CARGO" start={1120} step={42} />
