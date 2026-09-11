@@ -4,7 +4,6 @@ import { useApi } from '../api/useApi.js';
 import { Spinner, errorMessage, useToast, PageHeader } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
-import { FontGrid } from '../components/FontPicker.jsx';
 import { ThemeGrid } from '../components/ThemePicker.jsx';
 
 const ACCENT = 'var(--c-audit)';
@@ -39,26 +38,6 @@ function ThemeSection() {
           </span>
         </span>
       </label>
-    </div>
-  );
-}
-
-// Same story as the theme: a per-machine preference. Each family is corrected
-// in theme/fonts.css so switching changes the look without changing how much
-// room the tables and the sidebar need.
-function FontSection() {
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <h2 className="panel-title">Police</h2>
-        <span className="muted" style={{ fontSize: '0.76rem' }}>Enregistré sur ce poste uniquement</span>
-      </div>
-      <p className="muted" style={{ fontSize: '0.78rem', marginTop: -4, marginBottom: 12 }}>
-        Chaque police est calibrée pour occuper la même place à l'écran : les tableaux et le
-        menu gardent exactement la même densité. « Système » n'a rien à télécharger — à choisir
-        si le poste n'accède pas à Internet.
-      </p>
-      <FontGrid wide />
     </div>
   );
 }
@@ -273,7 +252,6 @@ export default function ParametresPage() {
 
       <ThemeSection />
 
-      <FontSection />
 
       <ImpressionSection />
 

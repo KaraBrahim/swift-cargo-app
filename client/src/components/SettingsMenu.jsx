@@ -1,9 +1,8 @@
-// Gear button + settings popover: the two appearance settings — theme and
-// font — each presented as cards that preview themselves.
+// Gear button + settings popover: le thème, présenté par des cartes qui
+// s'aperçoivent elles-mêmes.
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { IconEl } from './icons.jsx';
-import { FontGrid } from './FontPicker.jsx';
 import { ThemeGrid } from './ThemePicker.jsx';
 
 // Close on outside click or Escape.
@@ -55,11 +54,6 @@ export function SettingsMenu({ compact = false }) {
             <div className="pop-section">
               <div className="pop-section-title">Thème</div>
               <ThemeGrid />
-            </div>
-
-            <div className="pop-section">
-              <div className="pop-section-title">Police</div>
-              <FontGrid />
             </div>
 
             <Link className="pop-item" to="/parametres" onClick={() => setOpen(false)}>
