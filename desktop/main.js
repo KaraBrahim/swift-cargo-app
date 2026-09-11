@@ -261,8 +261,10 @@ function createWindow(port, site) {
     // n'est pas retouché (signAndEditExecutable: false), donc c'est ici qu'elle
     // se pose.
     icon: join(__dirname, 'build', 'icon.png'),
+    autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
+  win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
   win.loadURL(`http://127.0.0.1:${port}/`);
 
@@ -275,6 +277,8 @@ function createWindow(port, site) {
   });
 }
 
+// Le menu existe pour ses raccourcis (Ctrl+P, Ctrl+R, zoom, F11, F12) ; la
+// barre elle-même est cachée — voir createWindow.
 function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
