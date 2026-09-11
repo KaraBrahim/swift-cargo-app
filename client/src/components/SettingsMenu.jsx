@@ -3,8 +3,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { IconEl } from './icons.jsx';
-import { useTheme } from '../theme/ThemeContext.jsx';
 import { FontGrid } from './FontPicker.jsx';
+import { ThemeGrid } from './ThemePicker.jsx';
 
 // Close on outside click or Escape.
 export function useDismiss(open, onClose) {
@@ -27,7 +27,6 @@ export function useDismiss(open, onClose) {
 
 export function SettingsMenu({ compact = false }) {
   const [open, setOpen] = useState(false);
-  const { themeId, themes, setTheme } = useTheme();
   const ref = useDismiss(open, () => setOpen(false));
 
   return (
@@ -55,27 +54,7 @@ export function SettingsMenu({ compact = false }) {
           <div className="pop-scroll">
             <div className="pop-section">
               <div className="pop-section-title">Thème</div>
-              <div className="theme-grid">
-                {themes.map((t) => (
-                  <button
-                    key={t.id}
-                    className={`theme-card ${themeId === t.id ? 'active' : ''}`}
-                    onClick={() => setTheme(t.id)}
-                    aria-pressed={themeId === t.id}
-                  >
-                    <span className="theme-preview">
-                      {t.swatch.map((c, i) => (
-                        <span key={i} className="theme-dot" style={{ background: c }} />
-                      ))}
-                      {themeId === t.id && (
-                        <span className="theme-check"><IconEl name="check" /></span>
-                      )}
-                    </span>
-                    <span className="theme-name">{t.name}</span>
-                    <span className="theme-hint">{t.hint}</span>
-                  </button>
-                ))}
-              </div>
+              <ThemeGrid />
             </div>
 
             <div className="pop-section">

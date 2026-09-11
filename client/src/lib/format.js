@@ -82,3 +82,17 @@ export function daysBetween(from, to) {
   const ms = Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d);
   return Math.round(ms / 86400000) + 1;
 }
+
+// « il y a 15 min ». Vivait dans SyncCard, qui a disparu avec la
+// synchronisation ; trois écrans s'en servent encore.
+export function relativeTime(iso) {
+  if (!iso) return 'jamais';
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+  const min = Math.round(diff / 60000);
+  if (min < 1) return "à l'instant";
+  if (min < 60) return `il y a ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `il y a ${h} h`;
+  const d = Math.round(h / 24);
+  return `il y a ${d} j`;
+}

@@ -6,7 +6,7 @@ import { Spinner, formatMoney, fitStyle } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { Sparkline, TrendBadge, Donut, Pipeline, RouteMap } from '../components/charts.jsx';
 import { formatQty } from '../lib/format.js';
-import { SyncCard, relativeTime } from '../components/SyncCard.jsx';
+import { relativeTime } from '../lib/format.js';
 import { useDismiss } from '../components/SettingsMenu.jsx';
 import { activityLine } from '../components/activityLabels.js';
 import { BON_STATUS } from '../components/bonStatus.js';
@@ -249,7 +249,6 @@ export default function Dashboard() {
             deltaPct={financial.net.deltaPct} series={financial.net.series} periodLabel={periodLabelOf(finPeriod)} />
         </div>
 
-        <SyncCard />
       </div>
 
       {/* ── stock / activity / recent bons ── */}

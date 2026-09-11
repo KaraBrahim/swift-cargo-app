@@ -10,7 +10,7 @@ import { api } from '../api/client.js';
 import { SettingsMenu, useDismiss } from './SettingsMenu.jsx';
 import { SHORTCUT_LABEL } from './CommandPalette.jsx';
 import { activityLine, entityHref } from './activityLabels.js';
-import { relativeTime } from './SyncCard.jsx';
+import { relativeTime } from '../lib/format.js';
 import { ConnectionChip } from './ConnectionBanner.jsx';
 import NavArrows from './NavArrows.jsx';
 

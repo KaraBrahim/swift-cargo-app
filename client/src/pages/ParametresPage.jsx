@@ -5,6 +5,7 @@ import { Spinner, errorMessage, useToast, PageHeader } from '../components/ui.js
 import { IconEl } from '../components/icons.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
 import { FontGrid } from '../components/FontPicker.jsx';
+import { ThemeGrid } from '../components/ThemePicker.jsx';
 
 const ACCENT = 'var(--c-audit)';
 
@@ -12,30 +13,14 @@ const ACCENT = 'var(--c-audit)';
 // can run the light theme while Chine keeps the dark one. So it is saved in this
 // browser only, while everything else on this page is stored server-side.
 function ThemeSection() {
-  const { themeId, themes, setTheme, navGroups, setNavGroups } = useTheme();
+  const { navGroups, setNavGroups } = useTheme();
   return (
     <div className="panel">
       <div className="panel-head">
         <h2 className="panel-title">Thème</h2>
         <span className="muted" style={{ fontSize: '0.76rem' }}>Enregistré sur ce poste uniquement</span>
       </div>
-      <div className="theme-grid theme-grid-wide">
-        {themes.map((t) => (
-          <button
-            key={t.id}
-            className={`theme-card ${themeId === t.id ? 'active' : ''}`}
-            onClick={() => setTheme(t.id)}
-            aria-pressed={themeId === t.id}
-          >
-            <span className="theme-preview">
-              {t.swatch.map((c, i) => <span key={i} className="theme-dot" style={{ background: c }} />)}
-              {themeId === t.id && <span className="theme-check"><IconEl name="check" /></span>}
-            </span>
-            <span className="theme-name">{t.name}</span>
-            <span className="theme-hint">{t.hint}</span>
-          </button>
-        ))}
-      </div>
+      <ThemeGrid wide />
 
       {/* Same kind of setting as the theme, so it sits with it rather than in a
           panel of its own. */}

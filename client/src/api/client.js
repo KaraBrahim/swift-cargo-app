@@ -1,6 +1,4 @@
-// Single fetch wrapper. Attaches the auth token, normalises every error into an
-// ApiError with the backend's { code, message, details }, and signals a global
-// logout on 401 so the whole app reacts consistently.
+
 const TOKEN_KEY = 'sc_token';
 const LAST_USER_KEY = 'sc_last_user';
 

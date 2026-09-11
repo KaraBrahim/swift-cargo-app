@@ -270,7 +270,13 @@
   }
   .theme-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
   .theme-card.active { border-color: var(--brand); background: var(--brand-tint); }
-  .theme-preview { @apply relative mb-1 flex h-8 overflow-hidden rounded-lg; border: 1px solid var(--border); }
+  /* `w-full` n'est pas décoratif. La carte est un <button>, et la feuille de
+     style du navigateur y pose `align-items: center` : dans une colonne flex,
+     les enfants ne sont donc plus étirés, ils prennent la largeur de leur
+     contenu. Or le contenu ici, ce sont quatre pastilles en `flex: 1` — donc
+     une base de 0. La bande de couleurs se refermait sur 1 px et la carte
+     paraissait vide. Elle porte sa largeur elle-même. */
+  .theme-preview { @apply relative mb-1 flex h-8 w-full overflow-hidden rounded-lg; border: 1px solid var(--border); }
   .theme-dot { @apply flex-1; }
   .theme-check { @apply absolute inset-0 grid place-items-center; background: rgba(0, 0, 0, 0.42); }
   .theme-check svg { @apply h-4 w-4; color: #fff; }

@@ -32,43 +32,45 @@
 import { useMemo } from 'react';
 import { ParticlesProvider, Particles } from '@tsparticles/react';
 import { loadSlim } from '@tsparticles/slim';
-import { useTheme } from '../theme/ThemeContext.jsx';
+import { useTheme, readThemeVars } from '../theme/ThemeContext.jsx';
 
 const reducedMotion = () =>
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-const readVar = (name, fallback) => {
-  if (typeof window === 'undefined') return fallback;
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || fallback;
-};
+// Les jetons dont le fond a besoin, dans cet ordre.
+const TOKENS = [
+  '--brand', '--brand-2', '--brand-text', '--brand-deep',
+  '--c-dash', '--c-order', '--c-caisse', '--c-bon', '--c-people',
+];
 
 export function AnimatedBackground() {
-  const { themeId } = useTheme();
-  const isLight = typeof document !== 'undefined' && document.documentElement.dataset.mode === 'light';
+  const { themeId, theme } = useTheme();
+  // Le MODE vient du thème choisi, pas de <html>. Voir juste en dessous.
+  const isLight = theme.mode === 'light';
 
   const options = useMemo(() => {
-    const brand = readVar('--brand', '#d8b45f');
-    const brand2 = readVar('--brand-2', '#b08c3c');
-    const text = readVar('--brand-text', '#f1da97');   // bright on dark, dark on light
-    const deep = readVar('--brand-deep', '#9a7c34');   // dark on dark, pale on light
-
-    // The palette's module hues, not just the brand: on the sober palette every
-    // --c-* resolves to var(--brand), so the constellation stays gold exactly as
-    // before; on the vivid palette they are the real spread (violet, blue,
-    // green, amber…) and the background finally shows the theme it is in
-    // instead of one flat colour.
-    const hues = ['--c-dash', '--c-order', '--c-caisse', '--c-bon', '--c-people']
-      .map((name) => readVar(name, ''))
-      .filter(Boolean);
+    // `readThemeVars` demande les couleurs DU THÈME CHOISI, et non celles
+    // posées sur <html>.
+    //
+    // La nuance était le défaut : ce fond lisait `getComputedStyle` pendant le
+    // rendu, alors que `applyTheme` écrit les attributs dans un effet — donc
+    // APRÈS. À chaque changement, les particules recevaient les couleurs du
+    // thème PRÉCÉDENT : en quittant un thème violet, les lignes restaient
+    // violettes jusqu'au changement suivant.
+    //
+    // Demander explicitement les couleurs du thème visé supprime la course :
+    // il n'y a plus d'ordre à respecter entre cet effet-ci et celui du thème.
+    const [brand, brand2, text, deep, ...hues] = readThemeVars(themeId, TOKENS);
 
     // Light: lean on the darker tones and push opacity UP so the constellation
     // actually reads against a near-white surface.
     const base = isLight ? [text, brand, brand2] : [brand, text, deep];
+    // Un jeton absent revient vide : il ne doit pas entrer dans la liste.
+    const usable = [...base, ...hues].filter(Boolean);
     // Deduplicated, because on the sober palette the hues ARE the brand and a
     // list of five identical colours only wastes work.
-    const colors = [...new Set([...base, ...hues])];
+    const colors = [...new Set(usable)];
     const linkColor = isLight ? brand2 : brand;
     const opacity = isLight ? { min: 0.35, max: 0.85 } : { min: 0.2, max: 0.7 };
     const linkOpacity = isLight ? 0.38 : 0.32;

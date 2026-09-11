@@ -3,7 +3,6 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
 import { IconEl, initialsOf } from './icons.jsx';
-import { useSyncPresence } from './SyncStatus.jsx';
 import { TopBar } from './TopBar.jsx';
 import { CommandPalette } from './CommandPalette.jsx';
 import ConnectionBanner from './ConnectionBanner.jsx';
@@ -57,7 +56,6 @@ const NAV = [
 
 const COLLAPSE_KEY = 'sc_sidebar_collapsed';
 
-const PRESENCE_TITLE = { on: 'En ligne — synchronisé', off: 'Hors ligne — données locales', hub: 'Serveur central' };
 
 // Toutes les pages ouvertes sont montées ; seule celle de l'onglet actif est
 // affichée. C'est ce qui fait qu'un formulaire à moitié rempli est encore là au
@@ -109,7 +107,6 @@ function Shell() {
   // Whether the sidebar shows its section headings — a per-desk preference,
   // kept with the theme. See ThemeContext.
   const { navGroups } = useTheme();
-  const { state: presence } = useSyncPresence();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
   const [searchOpen, setSearchOpen] = useState(false);
   // On a phone the sidebar is a drawer, not a column: `collapsed` is a desktop
@@ -219,7 +216,6 @@ function Shell() {
           <div className="sb-user">
             <div className="sb-avatar-wrap">
               <div className="sb-avatar">{initialsOf(admin?.full_name)}</div>
-              <span className={`presence presence-${presence}`} title={PRESENCE_TITLE[presence]} />
             </div>
             <div className="sb-user-info">
               <div className="sb-user-name">{admin?.full_name}</div>

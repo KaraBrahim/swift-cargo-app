@@ -4,7 +4,7 @@ import { useApi } from '../api/useApi.js';
 import { Spinner, errorMessage, useToast, PageHeader, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { relativeTime } from '../components/SyncCard.jsx';
+import { relativeTime } from '../lib/format.js';
 
 const EMPTY = { username: '', full_name: '', office: '', email: '', phone: '', password: '' };
 const OFFICE_LABEL = { china: 'Chine', algeria: 'Algérie' };
