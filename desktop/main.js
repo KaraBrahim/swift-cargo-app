@@ -70,6 +70,9 @@ function loadConfig() {
       '# application n\'en garde aucune.',
       `CLOUD_URL=${d.CLOUD_URL || ''}`,
       '',
+      '# Le bureau de ce poste : china ou algeria. Demandé au premier démarrage.',
+      'SITE=',
+      '',
       '# Port local, utilisé seulement pour afficher l\'interface sur cette',
       '# machine. À ne changer qu\'en cas de conflit avec un autre logiciel.',
       'PORT=47821',
@@ -87,6 +90,34 @@ function loadConfig() {
   // l'application démarrer sans savoir à qui parler.
   if (!env.CLOUD_URL && d.CLOUD_URL) env.CLOUD_URL = d.CLOUD_URL;
   return env;
+}
+
+// ── Le pays de ce poste ───────────────────────────────────────────────
+// Un seul installeur pour les deux bureaux : le pays se demande au premier
+// démarrage et se range dans le fichier de configuration.
+const SITES = { china: 'Chine', algeria: 'Algérie' };
+
+function setConfigValue(key, value) {
+  const lines = readFileSync(CONFIG_FILE, 'utf8').split(/\r?\n/);
+  const i = lines.findIndex((l) => l.trim().startsWith(`${key}=`));
+  if (i >= 0) lines[i] = `${key}=${value}`;
+  else lines.push(`${key}=${value}`);
+  writeFileSync(CONFIG_FILE, lines.join('\n'), 'utf8');
+}
+
+function askSite() {
+  const keys = Object.keys(SITES);
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Swift Cargo — bureau de ce poste',
+    message: 'Dans quel bureau ce poste se trouve-t-il ?',
+    detail: `Ce choix ne se fait qu'une fois. Pour le changer : SITE dans\n${CONFIG_FILE}`,
+    buttons: [...keys.map((k) => SITES[k]), 'Quitter'],
+    defaultId: 0,
+    cancelId: keys.length,
+    noLink: true,
+  });
+  return keys[choice] ?? null;
 }
 
 // ── Le serveur local : fichiers + relais vers le hub ──────────────────
@@ -215,13 +246,13 @@ async function wakeHub(cloudUrl, timeoutMs = 120_000) {
   }
 }
 
-function createWindow(port) {
+function createWindow(port, site) {
   win = new BrowserWindow({
     width: 1440,
     height: 900,
     show: false,
     backgroundColor: '#0f111a',
-    title: 'Swift Cargo',
+    title: `Swift Cargo — ${SITES[site]}`,
     // L'icône de la fenêtre et de la barre des tâches. L'exécutable lui-même
     // n'est pas retouché (signAndEditExecutable: false), donc c'est ici qu'elle
     // se pose.
@@ -279,6 +310,13 @@ app.whenReady().then(async () => {
   const cfg = loadConfig();
   const cloudUrl = (cfg.CLOUD_URL || '').replace(/\/+$/, '');
 
+  if (!SITES[cfg.SITE]) {
+    const chosen = askSite();
+    if (!chosen) { app.quit(); return; }
+    setConfigValue('SITE', chosen);
+    cfg.SITE = chosen;
+  }
+
   if (!cloudUrl) {
     dialog.showErrorBox(
       'Swift Cargo — serveur non configuré',
@@ -311,7 +349,7 @@ app.whenReady().then(async () => {
     if (answer === 1) { app.quit(); return; }
   }
 
-  createWindow(port);
+  createWindow(port, cfg.SITE);
 });
 
 app.on('before-quit', () => { try { local?.close(); } catch { /* déjà fermé */ } });
