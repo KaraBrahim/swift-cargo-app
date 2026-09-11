@@ -1,0 +1,31 @@
+-- Swift Cargo — retirer les taux d'amorçage du journal de réplication.
+--
+-- Ce que le poste affichait : « push failed 409 », à chaque cycle, rien de
+-- synchronisé. Le 409 venait du HUB : il refusait ce que le poste lui envoyait.
+--
+-- L'enchaînement. `applyIdRanges()` place la séquence de chaque table dans la
+-- plage propre au site — 1 pour le hub, 700 000 000 pour la Chine,
+-- 1 400 000 000 pour l'Algérie — pour que deux machines hors ligne ne puissent
+-- pas frapper le même identifiant. Mais elle tournait APRÈS le seed. Les cinq
+-- taux d'amorçage étaient donc écrits AVANT que la plage ne s'applique, et
+-- prenaient les identifiants 1 à 5 sur CHAQUE machine.
+--
+-- `exchange_rates` étant une table répliquée, le poste poussait ses cinq lignes
+-- n° 1 à 5 vers un hub qui avait déjà les siennes. `sync_apply_row` fait
+-- ON CONFLICT (uuid) : les uuid diffèrent, donc INSERT, donc collision sur la
+-- clé primaire. Et comme toujours, ce n'est pas la ligne qui se perd — c'est le
+-- lot entier, et tous les lots suivants.
+--
+-- La même faute dans l'autre sens : les cinq lignes du hub, servies au poste,
+-- s'y heurtaient aux siennes. La panne était donc symétrique.
+--
+-- Deux corrections en amont (server.js applique les plages avant de semer ;
+-- seed.js n'enregistre plus les taux d'amorçage). Reste le journal déjà écrit :
+-- on l'efface ici, des deux côtés, car ces évènements ne peuvent qu'échouer.
+--
+-- Ce que l'on garde : tout taux saisi par une personne. La note « seed » est
+-- posée par le seed et par lui seul ; un taux réel porte la note de qui l'a
+-- entré, ou rien.
+DELETE FROM sync_outbox
+ WHERE entity = 'exchange_rates'
+   AND snapshot->>'note' = 'seed';

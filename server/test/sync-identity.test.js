@@ -130,3 +130,57 @@ test('027 ne touche ni aux évènements valides ni à ceux d’une ligne supprim
   assert.ok(await stillThere(removed), 'une suppression réelle doit rester rejouable');
   assert.ok(await stillThere(removalDelete), 'la suppression elle-même doit rester rejouable');
 });
+
+// ── Les taux d'amorçage ne se répliquent pas (migration 028) ─────────
+//
+// `applyIdRanges()` tournait APRÈS le seed : les cinq taux d'amorçage étaient
+// écrits hors plage et prenaient les identifiants 1 à 5 sur chaque machine. Le
+// poste poussait donc sa ligne n° 1 vers un hub qui avait déjà la sienne —
+// collision de clé primaire, « push failed 409 », lot entier perdu.
+
+test('le seed n’enregistre aucun taux d’amorçage dans le journal', async () => {
+  // `op <> 'delete'` : une suppression de taux faite par un autre fichier de
+  // test est une capture légitime, et ces fichiers partagent une seule base.
+  // Ce qui doit rester vide, c'est ce que le SEED écrit — des insertions.
+  const { rows } = await getPool().query(
+    `SELECT id, op, origin_site, snapshot->>'id' AS row_id, snapshot->>'currency_code' AS code
+       FROM sync_outbox
+      WHERE entity = 'exchange_rates' AND snapshot->>'note' = 'seed' AND op <> 'delete'
+      ORDER BY id`
+  );
+  assert.equal(
+    rows.length, 0,
+    'un taux d’amorçage répliqué se heurte à celui que l’autre machine a déjà : ' + JSON.stringify(rows)
+  );
+});
+
+test('028 laisse en place les taux réellement saisis', async () => {
+  const { rows: [cur] } = await getPool().query(
+    "SELECT id, uuid FROM exchange_rates WHERE currency_code = 'CNY' ORDER BY id DESC LIMIT 1"
+  );
+  // Un taux entré par une personne : même table, mais ce n'est pas de l'amorçage.
+  const { rows: [kept] } = await getPool().query(
+    `INSERT INTO sync_outbox (uuid, entity, entity_uuid, op, snapshot, origin_site)
+     VALUES (gen_random_uuid(), 'exchange_rates', $1, 'insert', $2, 'algeria') RETURNING id`,
+    [cur.uuid, JSON.stringify({ id: cur.id, uuid: cur.uuid, note: 'taux du jour', currency_code: 'CNY' })]
+  );
+
+  await getPool().query(
+    await readFile(new URL('../src/db/migrations/028_prune_seed_rate_events.sql', import.meta.url), 'utf8')
+  );
+
+  assert.ok(await stillThere(kept.id), 'seul l’amorçage est tu ; un taux saisi doit atteindre l’autre bureau');
+});
+
+test('les lignes semées naissent dans la plage du site', async () => {
+  // La cause première : hors plage, chaque machine sème les identifiants 1..5.
+  const { rows } = await getPool().query(
+    "SELECT min(id)::bigint AS lo FROM exchange_rates WHERE note = 'seed'"
+  );
+  const offsets = { cloud: 1, china: 700_000_000, algeria: 1_400_000_000 };
+  const site = process.env.SITE || 'cloud';
+  assert.ok(
+    Number(rows[0].lo) >= offsets[site],
+    `les taux semés doivent démarrer à ${offsets[site]} pour le site « ${site} », pas à ${rows[0].lo}`
+  );
+});

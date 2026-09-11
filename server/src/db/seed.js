@@ -81,12 +81,26 @@ export async function runSeed() {
     );
   }
 
-  for (const [code, rate] of Object.entries(INITIAL_RATES)) {
-    const { rows } = await pool.query('SELECT 1 FROM exchange_rates WHERE currency_code = $1 LIMIT 1', [code]);
-    if (rows.length === 0) {
-      await pool.query(`INSERT INTO exchange_rates (currency_code, dzd_per_unit, note) VALUES ($1,$2,'seed')`, [code, rate]);
+  // Les taux d'amorçage ne se répliquent pas.
+  //
+  // Chaque machine crée les siens au premier démarrage : ce sont les mêmes cinq
+  // valeurs partout, et les diffuser n'apprend rien à personne. Les échanger
+  // faisait en revanche du dégât — cinq lignes identiques par machine, et
+  // surtout une collision : `exchange_rates` est une table répliquée, donc le
+  // poste poussait ses taux d'amorçage vers le hub, qui avait déjà les siens.
+  //
+  // Les VRAIS taux, ceux qu'une personne saisit, passent par l'application et
+  // se répliquent normalement. Seul l'amorçage est tu, comme l'est déjà le
+  // super-admin d'un poste.
+  await withTx(async (client) => {
+    await client.query("SELECT set_config('app.sync_applying', 'on', true)");
+    for (const [code, rate] of Object.entries(INITIAL_RATES)) {
+      const { rows } = await client.query('SELECT 1 FROM exchange_rates WHERE currency_code = $1 LIMIT 1', [code]);
+      if (rows.length === 0) {
+        await client.query(`INSERT INTO exchange_rates (currency_code, dzd_per_unit, note) VALUES ($1,$2,'seed')`, [code, rate]);
+      }
     }
-  }
+  });
 
   // Without this the super-admin would be created with an empty password — and
   // it is the only account, so the whole app would hang on an unusable login.

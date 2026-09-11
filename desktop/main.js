@@ -1,56 +1,54 @@
-// Swift Cargo — le poste de travail.
+// Swift Cargo — l'application de bureau.
 //
-// Une fenêtre, et derrière elle l'application entière : le serveur Node, sa base
-// PostgreSQL locale, et l'interface. Rien de ce que fait la personne au comptoir
-// ne dépend d'Internet — saisir un bon, encaisser, régler et imprimer marchent
-// avec le câble débranché. La connexion ne sert qu'à la synchronisation avec le
-// hub, qui tourne en arrière-plan et rattrape son retard toute seule.
+// Une fenêtre, l'interface dedans, et le serveur EN LIGNE. Il n'y a pas de base
+// de données ici : toutes les données vivent sur le hub, et les deux bureaux
+// voient la même chose au même instant, sans rien à synchroniser.
 //
-// Le serveur tourne dans un PROCESSUS SÉPARÉ, pas dans celui de la fenêtre :
-// s'il meurt, on peut le dire proprement au lieu de faire disparaître
-// l'application, et son arrêt (PostgreSQL compris) reste maîtrisable.
+// Pourquoi un petit serveur local malgré tout. La fenêtre doit charger
+// l'interface depuis quelque part. Chargée en `file://`, son origine vaut
+// « null » : le navigateur traiterait chaque appel au hub comme une requête
+// inter-origines, et il faudrait déclarer cette origine côté serveur, gérer les
+// requêtes préalables, et recommencer à chaque changement d'adresse.
+//
+// On sert donc l'interface sur http://127.0.0.1 et on fait suivre /api vers le
+// hub. Pour la page, tout vient de la même origine : aucun CORS, aucun réglage
+// à poser sur le serveur en ligne. Ce serveur-là ne fait que ça — servir des
+// fichiers et transmettre des requêtes.
 
 const { app, BrowserWindow, dialog, shell, Menu } = require('electron');
-const { fork } = require('node:child_process');
-const { randomBytes } = require('node:crypto');
-const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { createServer } = require('node:http');
+const { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, statSync } = require('node:fs');
+const { join, normalize, extname } = require('node:path');
 
 // Le nom est fixé ICI, et pas laissé au `productName` de l'installeur : c'est
-// lui qui donne le dossier de données (app.getPath('userData')). Le renommer
-// déplacerait la base d'un poste déjà en service — l'entreprise rouvrirait
-// l'application sur une base vide. Doit précéder tout getPath().
+// lui qui donne le dossier de configuration. Le renommer ferait repartir
+// l'application sur une configuration vide.
 app.setName('swift-cargo-desktop');
 
-// En développement, `npm start` lance depuis le dossier desktop/ ; une fois
-// empaquetée, la charge utile vit à côté de l'exécutable.
 const PAYLOAD = app.isPackaged ? join(process.resourcesPath, 'payload') : join(__dirname, 'payload');
-const SERVER_ENTRY = join(PAYLOAD, 'server', 'src', 'server.js');
+const DIST = join(PAYLOAD, 'client', 'dist');
 
-// Les données de l'utilisateur, JAMAIS dans le dossier d'installation : celui-ci
-// est remplacé à chaque mise à jour, et une base de données effacée par une
-// mise à jour est une entreprise à l'arrêt.
 const DATA_DIR = app.getPath('userData');
-const PG_DIR = join(DATA_DIR, 'pgdata');
 const CONFIG_FILE = join(DATA_DIR, 'swift-cargo.env');
 
-// Le bureau auquel ce poste appartient — Chine ou Algérie.
+// Deux fenêtres se disputeraient le même port local. Autant refuser tout de
+// suite et ramener celle qui est déjà ouverte.
 //
-// Il était décidé à la CONSTRUCTION, ce qui imposait deux installeurs pour une
-// seule application. Il n'y en a plus qu'un : le bureau se demande au premier
-// démarrage et se range dans le fichier de configuration, à côté des données.
-//
-// Ce n'est pas une étiquette. `SITE` réserve au poste sa plage d'identifiants
-// (ID_OFFSETS, server/src/config.js) et signe chaque écriture envoyée au hub :
-// deux postes qui se croiraient dans le même bureau produiraient des
-// identifiants qui se heurtent. D'où une question posée une seule fois, AVANT
-// que le serveur ne démarre et ne sème quoi que ce soit.
-const SITES = { china: 'Chine', algeria: 'Algérie' };
+// `app.quit()` ne coupe pas l'exécution : la seconde instance continuait
+// jusqu'à `listen()`, tombait sur le port déjà pris et affichait une erreur —
+// alors qu'il ne s'était rien passé d'anormal, quelqu'un avait simplement
+// double-cliqué deux fois. D'où ce drapeau, relu avant de démarrer quoi que ce
+// soit.
+const IS_FIRST_INSTANCE = app.requestSingleInstanceLock();
+if (!IS_FIRST_INSTANCE) app.quit();
 
-// Ce que la construction a pré-rempli : l'adresse du hub et le jeton de
-// synchronisation (prepare.mjs). Sans eux, chaque poste devrait être configuré
-// à la main après l'installation — et un poste mal configuré est un poste qui
-// travaille seul sans que personne s'en aperçoive.
+let win = null;
+let local = null;
+
+// ── La configuration ─────────────────────────────────────────────────
+// L'adresse du hub est écrite dans la charge utile à la construction
+// (prepare.mjs). Le fichier de configuration ne sert qu'à la changer sur place
+// — déménagement du serveur, essai contre un autre environnement.
 function buildDefaults() {
   try {
     return JSON.parse(readFileSync(join(PAYLOAD, 'defaults.json'), 'utf8'));
@@ -59,48 +57,22 @@ function buildDefaults() {
   }
 }
 
-// Deux instances se disputeraient le même dossier PostgreSQL. La seconde ne
-// démarrerait pas, avec un message parlant de fichier verrou : autant refuser
-// tout de suite et ramener la fenêtre déjà ouverte.
-if (!app.requestSingleInstanceLock()) app.quit();
-
-let child = null;
-let win = null;
-
-// ── La configuration du poste ────────────────────────────────────────
-// Un fichier texte à côté des données. Écrit au premier lancement avec un mot
-// de passe tiré au hasard — le code ne contient aucun mot de passe par défaut,
-// et deux postes installés le même jour ne doivent pas partager le leur.
 function loadConfig() {
   mkdirSync(DATA_DIR, { recursive: true });
-  let first = false;
+  const d = buildDefaults();
 
   if (!existsSync(CONFIG_FILE)) {
-    first = true;
-    const d = buildDefaults();
     writeFileSync(CONFIG_FILE, [
-      '# Swift Cargo — configuration de ce poste.',
+      '# Swift Cargo — configuration de cette installation.',
       '# Refermez l\'application avant de modifier ce fichier.',
       '',
-      '# Le bureau de ce poste : china ou algeria. Demandé au premier démarrage.',
-      '# Ne le changez QUE sur un poste encore vierge : il détermine la plage',
-      '# d\'identifiants du poste, et les lignes déjà saisies gardent la leur.',
-      'SITE=',
-      '',
-      '# Mot de passe de dépannage : il ne sert QUE tant que ce poste n\'a jamais',
-      '# joint le hub. Dès la première synchronisation, les comptes du hub',
-      '# remplacent ceux d\'ici, et c\'est le mot de passe du hub qui s\'applique.',
-      `SUPERADMIN_PASSWORD=${randomBytes(9).toString('base64url')}`,
-      '',
-      '# Le hub. Laissez CLOUD_URL vide pour travailler seul, sans synchronisation.',
+      '# L\'adresse du serveur. C\'est là que vivent TOUTES les données ; cette',
+      '# application n\'en garde aucune.',
       `CLOUD_URL=${d.CLOUD_URL || ''}`,
-      '# Le même jeton que sur le hub et sur l\'autre poste. Sans lui, le hub',
-      '# refuse toute synchronisation.',
-      `NODE_TOKEN=${d.NODE_TOKEN || ''}`,
       '',
-      '# À ne changer qu\'en cas de conflit avec un autre logiciel de la machine.',
+      '# Port local, utilisé seulement pour afficher l\'interface sur cette',
+      '# machine. À ne changer qu\'en cas de conflit avec un autre logiciel.',
       'PORT=47821',
-      'EMBEDDED_PG_PORT=55433',
       '',
     ].join('\n'), 'utf8');
   }
@@ -110,149 +82,160 @@ function loadConfig() {
     const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
     if (m) env[m[1]] = m[2].trim();
   }
-  return { env, first };
+  // Une installation antérieure peut avoir un fichier sans CLOUD_URL, ou vide :
+  // la valeur de construction reprend alors la main plutôt que de laisser
+  // l'application démarrer sans savoir à qui parler.
+  if (!env.CLOUD_URL && d.CLOUD_URL) env.CLOUD_URL = d.CLOUD_URL;
+  return env;
 }
 
-// Réécrit UNE valeur en gardant le reste du fichier — les commentaires
-// expliquent chaque réglage, et les réécrire d'un bloc les effacerait.
-function setConfigValue(key, value) {
-  const lines = readFileSync(CONFIG_FILE, 'utf8').split(/\r?\n/);
-  const i = lines.findIndex((l) => l.trim().startsWith(`${key}=`));
-  if (i >= 0) lines[i] = `${key}=${value}`;
-  else lines.push(`${key}=${value}`);
-  writeFileSync(CONFIG_FILE, lines.join('\n'), 'utf8');
-}
+// ── Le serveur local : fichiers + relais vers le hub ──────────────────
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.map': 'application/json; charset=utf-8',
+};
 
-// Posée avant le démarrage du serveur, et une seule fois. Une base semée sous
-// le mauvais bureau ne se corrige pas d'un clic : les identifiants déjà
-// attribués gardent leur plage.
-function askSite() {
-  const keys = Object.keys(SITES);
-  const choice = dialog.showMessageBoxSync({
-    type: 'question',
-    title: 'Swift Cargo — bureau de ce poste',
-    message: 'Dans quel bureau ce poste se trouve-t-il ?',
-    detail:
-      'Ce choix ne se fait qu’une fois. Il identifie les écritures que ce poste '
-      + 'envoie au hub et lui réserve sa propre plage d’identifiants — deux postes '
-      + 'qui se déclareraient dans le même bureau finiraient par produire des '
-      + 'identifiants qui se heurtent.\n\n'
-      + 'En cas d’erreur, corrigez SITE dans le fichier de configuration avant de '
-      + 'saisir quoi que ce soit :\n' + CONFIG_FILE,
-    buttons: [...keys.map((k) => SITES[k]), 'Quitter'],
-    defaultId: 0,
-    cancelId: keys.length,
-    noLink: true,
-  });
-  return keys[choice] ?? null;
-}
+// Ces en-têtes décrivent la connexion qui vient de se terminer, pas le contenu.
+// Les recopier ferait mentir la réponse qu'on écrit nous-mêmes — une longueur
+// ou un encodage hérités de l'autre connexion, et le navigateur coupe.
+const HOP_BY_HOP = new Set([
+  'connection', 'keep-alive', 'transfer-encoding', 'upgrade',
+  'proxy-authenticate', 'proxy-authorization', 'te', 'trailer',
+  'content-encoding', 'content-length',
+]);
 
-// ── Le serveur ───────────────────────────────────────────────────────
-function startServer(cfg) {
-  const env = {
-    ...process.env,
-    NODE_ENV: 'production',
-    SITE: cfg.SITE,
-    // Le poste parle à sa base LOCALE. DATABASE_URL vide = PostgreSQL embarqué,
-    // dans le dossier de données de l'utilisateur.
-    DATABASE_URL: '',
-    USE_EMBEDDED_PG: '1',
-    EMBEDDED_PG_DIR: PG_DIR,
-    EMBEDDED_PG_PORT: cfg.EMBEDDED_PG_PORT || '55433',
-    PORT: cfg.PORT || '47821',
-    SUPERADMIN_PASSWORD: cfg.SUPERADMIN_PASSWORD || '',
-    // Vide en production : aucun compte de démonstration sur un poste réel.
-    SEED_ADMIN_PASSWORD: '',
-    CLOUD_URL: cfg.CLOUD_URL || '',
-    NODE_TOKEN: cfg.NODE_TOKEN || '',
-    // L'interface est servie par ce même serveur, sur http://localhost : c'est
-    // la même origine, il n'y a pas de HTTPS à exiger et le jeton ne quitte
-    // jamais la machine.
-    COOKIE_SECURE: '0',
-    // Indispensable : `fork` depuis Electron doit lancer du Node, pas une
-    // seconde fenêtre Electron.
-    ELECTRON_RUN_AS_NODE: '1',
-  };
+async function forwardToHub(req, res, cloudUrl) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
 
-  child = fork(SERVER_ENTRY, [], { env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  const headers = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!HOP_BY_HOP.has(k) && k !== 'host') headers[k] = v;
+  }
 
-  let tail = '';
-  const keep = (buf) => {
-    tail = (tail + buf.toString()).slice(-4000);
-    process.stdout.write(buf);
-  };
-  child.stdout.on('data', keep);
-  child.stderr.on('data', keep);
+  try {
+    const upstream = await fetch(cloudUrl + req.url, {
+      method: req.method,
+      headers,
+      body: req.method === 'GET' || req.method === 'HEAD' ? undefined : Buffer.concat(chunks),
+      redirect: 'manual',
+    });
 
-  child.on('exit', (code) => {
-    child = null;
-    if (app.isQuitting || code === 0) return;
-
-    // PostgreSQL embarqué remet les droits d'exécution sur ses binaires au
-    // démarrage. Dans « C:\Program Files », un utilisateur ordinaire n'a pas le
-    // droit d'écrire : chmod échoue et rien ne démarre. L'installeur pose donc
-    // l'application dans le dossier de l'utilisateur — mais une installation
-    // faite avant cette correction, ou déplacée à la main, tombe encore dessus,
-    // et le message brut ne dit pas quoi faire.
-    const readOnly = /EPERM|EACCES/.test(tail) && /chmod/.test(tail);
-    dialog.showErrorBox(
-      'Swift Cargo n’a pas pu démarrer',
-      readOnly
-        ? 'L’application est installée dans un dossier protégé par Windows '
-          + `(${app.getAppPath()}).\n\n`
-          + 'PostgreSQL a besoin d’écrire dans son propre dossier pour démarrer.\n\n'
-          + 'Désinstallez Swift Cargo, puis réinstallez-le en laissant le dossier '
-          + 'proposé par défaut — il s’installe alors dans votre profil utilisateur.\n\n'
-          + 'Vos données ne sont pas concernées : elles sont ailleurs, dans\n'
-          + DATA_DIR
-        : `Le service s’est arrêté (code ${code}).\n\n${tail.slice(-1500)}\n\n`
-          + `Configuration : ${CONFIG_FILE}`
-    );
-    app.quit();
-  });
-}
-
-// Attendre que le serveur réponde vraiment. Le premier démarrage est long : il
-// initialise PostgreSQL, applique les migrations et sème la base. Charger la
-// fenêtre trop tôt donnerait un écran d'erreur au lieu d'une application qui
-// démarre.
-async function waitForServer(port, timeoutMs = 180_000) {
-  const url = `http://localhost:${port}/api/health`;
-  const until = Date.now() + timeoutMs;
-  for (;;) {
-    if (!child) throw new Error('Le service s’est arrêté pendant le démarrage.');
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch { /* pas encore prêt */ }
-    if (Date.now() > until) throw new Error('Le service n’a pas répondu à temps.');
-    await new Promise((r) => setTimeout(r, 400));
+    const out = {};
+    upstream.headers.forEach((v, k) => { if (!HOP_BY_HOP.has(k)) out[k] = v; });
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.writeHead(upstream.status, out);
+    res.end(buf);
+  } catch {
+    // Le serveur en ligne est injoignable. On répond dans la forme que
+    // l'interface sait lire, pour qu'elle affiche « Serveur injoignable »
+    // plutôt qu'une erreur brute.
+    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      error: { code: 'SERVER_DOWN', message: 'Le serveur est injoignable. Vérifiez la connexion Internet.' },
+    }));
   }
 }
 
-function createWindow(port, site) {
+function serveFile(res, path) {
+  res.writeHead(200, {
+    'content-type': MIME[extname(path).toLowerCase()] || 'application/octet-stream',
+    // L'interface est remplacée à chaque mise à jour de l'application : la
+    // garder en cache ferait rouvrir l'ancienne après une réinstallation.
+    'cache-control': 'no-store',
+  });
+  createReadStream(path).pipe(res);
+}
+
+async function startLocalServer(cfg) {
+  const cloudUrl = (cfg.CLOUD_URL || '').replace(/\/+$/, '');
+
+  local = createServer((req, res) => {
+    if (req.url.startsWith('/api/')) return forwardToHub(req, res, cloudUrl);
+
+    // `normalize` puis la vérification du préfixe : sans elles, une adresse
+    // contenant « ../ » servirait n'importe quel fichier de la machine.
+    const rel = decodeURIComponent(req.url.split('?')[0]);
+    const file = normalize(join(DIST, rel));
+    if (file.startsWith(DIST) && existsSync(file) && statSync(file).isFile()) {
+      return serveFile(res, file);
+    }
+    // React Router utilise de vraies adresses : /bons-passager/12 doit rendre
+    // index.html, pas une erreur 404.
+    return serveFile(res, join(DIST, 'index.html'));
+  });
+
+  // Si le port demandé est pris, on en prend un autre au lieu de refuser de
+  // démarrer. Rien d'extérieur ne dépend de ce numéro : la fenêtre est le seul
+  // client, et elle apprend le port ici même. Un conflit de port n'est donc pas
+  // un problème de l'utilisateur, et n'a pas à lui être montré.
+  const listen = (port) => new Promise((resolve, reject) => {
+    const onError = (err) => reject(err);
+    local.once('error', onError);
+    local.listen(port, '127.0.0.1', () => {
+      local.removeListener('error', onError);
+      resolve(local.address().port);
+    });
+  });
+
+  try {
+    return await listen(Number(cfg.PORT) || 47821);
+  } catch (err) {
+    if (err.code !== 'EADDRINUSE') throw err;
+    return listen(0); // 0 = « n'importe lequel de libre »
+  }
+}
+
+// Render endort les instances inactives : la première requête peut mettre une
+// minute à revenir. Réveiller le serveur AVANT d'afficher l'interface évite que
+// la toute première action de la journée — la connexion — parte en délai
+// dépassé sous les yeux de la personne.
+async function wakeHub(cloudUrl, timeoutMs = 120_000) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const r = await fetch(`${cloudUrl}/api/health`);
+      if (r.ok) return true;
+    } catch { /* pas encore réveillé */ }
+    if (Date.now() > until) return false;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+function createWindow(port) {
   win = new BrowserWindow({
     width: 1440,
     height: 900,
     show: false,
     backgroundColor: '#0f111a',
-    title: `Swift Cargo — ${SITES[site]}`,
+    title: 'Swift Cargo',
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   win.once('ready-to-show', () => win.show());
-  win.loadURL(`http://localhost:${port}/`);
+  win.loadURL(`http://127.0.0.1:${port}/`);
 
   // Un lien externe s'ouvre dans le navigateur, pas dans la fenêtre de
-  // l'application : on ne veut pas qu'un clic remplace le poste de travail par
-  // une page web sans moyen de revenir.
+  // l'application : un clic ne doit pas remplacer le poste de travail par une
+  // page web sans moyen de revenir.
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 }
 
-// Un menu réduit à ce qui sert : recharger, zoomer, imprimer, quitter. Le menu
-// par défaut d'Electron parle d'un navigateur, pas de cette application.
 function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
@@ -260,7 +243,6 @@ function buildMenu() {
       submenu: [
         { label: 'Imprimer…', accelerator: 'CmdOrCtrl+P', click: () => win?.webContents.print() },
         { type: 'separator' },
-        { label: 'Ouvrir le dossier des données', click: () => shell.openPath(DATA_DIR) },
         { label: 'Modifier la configuration', click: () => shell.openPath(CONFIG_FILE) },
         { type: 'separator' },
         { role: 'quit', label: 'Quitter' },
@@ -286,69 +268,47 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
-  const { env: cfg, first } = loadConfig();
-  const port = cfg.PORT || '47821';
+  // Une seconde instance ne doit rien démarrer : la première a déjà le port et
+  // la fenêtre, et `second-instance` la ramène au premier plan.
+  if (!IS_FIRST_INSTANCE) return;
 
-  // AVANT le serveur : c'est lui qui applique les migrations et sème la base,
-  // et il le fait sous l'identité de site qu'on lui donne ici.
-  if (!SITES[cfg.SITE]) {
-    const chosen = askSite();
-    if (!chosen) { app.quit(); return; }
-    setConfigValue('SITE', chosen);
-    cfg.SITE = chosen;
-  }
+  const cfg = loadConfig();
+  const cloudUrl = (cfg.CLOUD_URL || '').replace(/\/+$/, '');
 
-  buildMenu();
-  startServer(cfg);
-
-  try {
-    await waitForServer(port);
-  } catch (err) {
-    dialog.showErrorBox('Swift Cargo n’a pas pu démarrer', `${err.message}\n\nConfiguration : ${CONFIG_FILE}`);
+  if (!cloudUrl) {
+    dialog.showErrorBox(
+      'Swift Cargo — serveur non configuré',
+      'Aucune adresse de serveur n’est renseignée, et cette application ne garde '
+      + 'aucune donnée en local : sans serveur, elle ne peut rien afficher.\n\n'
+      + `Indiquez CLOUD_URL dans :\n${CONFIG_FILE}`
+    );
     app.quit();
     return;
   }
 
-  createWindow(port, cfg.SITE);
+  buildMenu();
 
-  if (first) {
-    // Une seule fois, au premier lancement : le mot de passe tiré au hasard ne
-    // se retrouve nulle part ailleurs, et sans le hub le poste travaille seul.
-    //
-    // Relié à un hub, ce mot de passe est un dépannage et rien de plus : la
-    // migration 026 réplique `admins`, donc la première synchronisation
-    // remplace le compte local par celui de l'entreprise. Le dire ici évite
-    // exactement la question déjà posée — « il dit que c'est faux alors que
-    // j'en suis sûr » — quand on tape le mot de passe du hub sur un poste.
-    dialog.showMessageBox(win, {
-      type: 'info',
-      title: 'Premier démarrage',
-      message: `Poste ${SITES[cfg.SITE]} prêt.`,
+  const port = await startLocalServer(cfg);
+
+  if (!(await wakeHub(cloudUrl))) {
+    const answer = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: 'Serveur injoignable',
+      message: 'Le serveur ne répond pas.',
       detail:
-        `Connectez-vous avec l'identifiant « superadmin » et le mot de passe écrit dans :\n${CONFIG_FILE}\n\n`
-        + (cfg.CLOUD_URL
-          ? 'Ce mot de passe ne sert qu\'en attendant : dès la première '
-            + `synchronisation avec ${cfg.CLOUD_URL}, ce poste adopte les comptes `
-            + 'de l\'entreprise. Connectez-vous alors avec les mêmes identifiants '
-            + 'que partout ailleurs.'
-          : 'Aucun hub configuré : ce poste travaille seul, avec ses propres comptes. '
-            + 'Renseignez CLOUD_URL et NODE_TOKEN dans le fichier de configuration pour le relier.'),
-      buttons: ['Compris'],
+        `Swift Cargo n’a pas réussi à joindre ${cloudUrl}.\n\n`
+        + 'Vérifiez la connexion Internet. Vous pouvez ouvrir quand même : '
+        + 'l’application réessaiera à chaque action.',
+      buttons: ['Ouvrir quand même', 'Quitter'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
     });
+    if (answer === 1) { app.quit(); return; }
   }
+
+  createWindow(port);
 });
 
-// L'arrêt doit être PROPRE : PostgreSQL a besoin qu'on le lui demande. Le tuer
-// laisse un verrou périmé, et le démarrage suivant s'en plaint. On demande, puis
-// on force au bout de dix secondes plutôt que de rester bloqué.
-app.on('before-quit', (e) => {
-  if (!child || app.isQuitting) return;
-  app.isQuitting = true;
-  e.preventDefault();
-  const done = () => { child = null; app.quit(); };
-  const hard = setTimeout(() => { try { child?.kill('SIGKILL'); } catch {} done(); }, 10_000);
-  child.once('exit', () => { clearTimeout(hard); done(); });
-  child.kill('SIGTERM');
-});
-
+app.on('before-quit', () => { try { local?.close(); } catch { /* déjà fermé */ } });
 app.on('window-all-closed', () => app.quit());

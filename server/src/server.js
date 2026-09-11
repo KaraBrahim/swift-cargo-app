@@ -42,8 +42,13 @@ async function main() {
 
   const conn = await ensureConnection();
   await runMigrations();
-  await runSeed();
+  // Les plages d'identifiants AVANT le seed, et non après : le seed écrit de
+  // vraies lignes. Semées hors plage, elles prenaient les identifiants 1, 2,
+  // 3… sur CHAQUE machine — et deux machines qui poussent leur ligne n° 1 vers
+  // le hub se heurtent sur sa clé primaire. Le cycle entier échouait alors avec
+  // « push failed 409 », sans jamais rien synchroniser.
   await applyIdRanges();
+  await runSeed();
   startSyncWorker();
 
   if (config.isProduction && !config.cookieSecure) {
