@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Swift Cargo — premier démarrage</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: grid; place-items: center; background: #0f111a; color: #f3f4f7;
+         font: 15px system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-user-select: none; }
+  .card { width: 380px; padding: 32px; border-radius: 18px; background: #14161f; border: 1px solid #2a2d3a; }
+  h1 { margin: 0 0 6px; font-size: 1.1rem; letter-spacing: 2px; }
+  p { margin: 0 0 22px; color: #9a9db0; font-size: 0.9rem; line-height: 1.4; }
+  label { display: block; font-size: 0.75rem; letter-spacing: 1px; color: #9a9db0; margin-bottom: 8px; }
+  select { width: 100%; padding: 11px 12px; border-radius: 10px; background: #0f111a; color: #f3f4f7;
+           border: 1px solid #2a2d3a; font-size: 1rem; }
+  button { width: 100%; margin-top: 20px; padding: 12px; border: 0; border-radius: 10px; font-weight: 700;
+           font-size: 1rem; color: #221806; background: linear-gradient(145deg, #E7C877, #C9A24B 60%, #8A6D2F); }
+  button:disabled { opacity: 0.4; }
+</style>
+</head>
+<body>
+  <form class="card" id="f">
+    <h1>SWIFT CARGO</h1>
+    <p>Dans quel pays ce poste se trouve-t-il ? Ce choix ne se fait qu'une fois.</p>
+    <label for="c">PAYS</label>
+    <select id="c" required><option value="" selected disabled>Choisir un pays…</option></select>
+    <button id="ok" disabled>Continuer</button>
+  </form>
+  <script>
+    // Les noms viennent du système, en français : rien à maintenir, tous les
+    // pays sont là. Seule la liste des codes ISO 3166-1 est écrite ici.
+    const CODES = 'AF AL DZ AD AO AG AR AM AU AT AZ BS BH BD BB BY BE BZ BJ BT BO BA BW BR BN BG BF BI KH CM CA CV CF TD CL CN CO KM CG CD CR CI HR CU CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FJ FI FR GA GM GE DE GH GR GD GT GN GW GY HT HN HU IS IN ID IR IQ IE IL IT JM JP JO KZ KE KI KW KG LA LV LB LS LR LY LI LT LU MG MW MY MV ML MT MH MR MU MX FM MD MC MN ME MA MZ MM NA NR NP NL NZ NI NE NG MK NO OM PK PW PA PG PY PE PH PL PT QA RO RU RW KN LC VC WS SM ST SA SN RS SC SL SG SK SI SB SO ZA SS ES LK SD SR SE CH SY TW TJ TZ TH TL TG TO TT TN TR TM TV UG UA AE GB US UY UZ VU VE VN YE ZM ZW HK MO PS'.split(' ');
+    const names = new Intl.DisplayNames(['fr'], { type: 'region' });
+    const sel = document.getElementById('c'), ok = document.getElementById('ok');
+    CODES.map((c) => [c, names.of(c)]).sort((a, b) => a[1].localeCompare(b[1], 'fr'))
+      .forEach(([c, n]) => sel.add(new Option(n, c)));
+    sel.onchange = () => { ok.disabled = !sel.value; };
+    document.getElementById('f').onsubmit = (e) => { e.preventDefault(); if (sel.value) window.setup.choose(sel.value); };
+  </script>
+</body>
+</html>

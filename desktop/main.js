@@ -15,7 +15,7 @@
 // à poser sur le serveur en ligne. Ce serveur-là ne fait que ça — servir des
 // fichiers et transmettre des requêtes.
 
-const { app, BrowserWindow, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, dialog, shell, Menu, ipcMain } = require('electron');
 const { createServer } = require('node:http');
 const { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, statSync } = require('node:fs');
 const { join, normalize, extname } = require('node:path');
@@ -70,7 +70,7 @@ function loadConfig() {
       '# application n\'en garde aucune.',
       `CLOUD_URL=${d.CLOUD_URL || ''}`,
       '',
-      '# Le bureau de ce poste : china ou algeria. Demandé au premier démarrage.',
+      '# Le pays de ce poste (code ISO, ex. DZ). Demandé au premier démarrage.',
       'SITE=',
       '',
       '# Port local, utilisé seulement pour afficher l\'interface sur cette',
@@ -93,9 +93,13 @@ function loadConfig() {
 }
 
 // ── Le pays de ce poste ───────────────────────────────────────────────
-// Un seul installeur pour les deux bureaux : le pays se demande au premier
-// démarrage et se range dans le fichier de configuration.
-const SITES = { china: 'Chine', algeria: 'Algérie' };
+// Un seul installeur pour tous : le pays se choisit au premier démarrage,
+// dans une liste, et se range dans le fichier de configuration (code ISO).
+const countryName = (code) => {
+  try { return new Intl.DisplayNames(['fr'], { type: 'region' }).of(code.toUpperCase()); }
+  catch { return code; }
+};
+const isCountry = (v) => /^[A-Za-z]{2}$/.test(v || '');
 
 function setConfigValue(key, value) {
   const lines = readFileSync(CONFIG_FILE, 'utf8').split(/\r?\n/);
@@ -105,19 +109,19 @@ function setConfigValue(key, value) {
   writeFileSync(CONFIG_FILE, lines.join('\n'), 'utf8');
 }
 
-function askSite() {
-  const keys = Object.keys(SITES);
-  const choice = dialog.showMessageBoxSync({
-    type: 'question',
-    title: 'Swift Cargo — bureau de ce poste',
-    message: 'Dans quel bureau ce poste se trouve-t-il ?',
-    detail: `Ce choix ne se fait qu'une fois. Pour le changer : SITE dans\n${CONFIG_FILE}`,
-    buttons: [...keys.map((k) => SITES[k]), 'Quitter'],
-    defaultId: 0,
-    cancelId: keys.length,
-    noLink: true,
+function askCountry() {
+  return new Promise((resolve) => {
+    const w = new BrowserWindow({
+      width: 460, height: 360, resizable: false, minimizable: false, maximizable: false,
+      title: 'Swift Cargo — premier démarrage', backgroundColor: '#0f111a',
+      icon: join(__dirname, 'build', 'icon.png'),
+      webPreferences: { preload: join(__dirname, 'setup-preload.js'), contextIsolation: true },
+    });
+    w.setMenuBarVisibility(false);
+    ipcMain.handleOnce('setup:choose', (_e, code) => { resolve(code); w.close(); });
+    w.on('closed', () => resolve(null));
+    w.loadFile(join(__dirname, 'setup.html'));
   });
-  return keys[choice] ?? null;
 }
 
 // ── Le serveur local : fichiers + relais vers le hub ──────────────────
@@ -252,7 +256,7 @@ function createWindow(port, site) {
     height: 900,
     show: false,
     backgroundColor: '#0f111a',
-    title: `Swift Cargo — ${SITES[site]}`,
+    title: `Swift Cargo — ${countryName(site)}`,
     // L'icône de la fenêtre et de la barre des tâches. L'exécutable lui-même
     // n'est pas retouché (signAndEditExecutable: false), donc c'est ici qu'elle
     // se pose.
@@ -310,8 +314,12 @@ app.whenReady().then(async () => {
   const cfg = loadConfig();
   const cloudUrl = (cfg.CLOUD_URL || '').replace(/\/+$/, '');
 
-  if (!SITES[cfg.SITE]) {
-    const chosen = askSite();
+  // Une configuration d'avant portait « algeria » / « china » : on la reprend
+  // telle quelle plutôt que de reposer la question.
+  const legacy = { algeria: 'DZ', china: 'CN' };
+  if (legacy[cfg.SITE]) { cfg.SITE = legacy[cfg.SITE]; setConfigValue('SITE', cfg.SITE); }
+  if (!isCountry(cfg.SITE)) {
+    const chosen = await askCountry();
     if (!chosen) { app.quit(); return; }
     setConfigValue('SITE', chosen);
     cfg.SITE = chosen;

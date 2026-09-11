@@ -60,6 +60,7 @@
 
   --radius-card: 14px;
   --radius-soft: 10px;
+  --radius-btn: 6px;
   --radius-pill: 999px;
 
   --shadow-card: var(--shadow-sm);
@@ -122,8 +123,8 @@
 
   /* ── Buttons ── */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-soft)]
-           px-2.5 py-1.5 text-[0.76rem] font-semibold leading-none cursor-pointer
+    @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius-btn)]
+           px-3.5 py-2 text-[0.78rem] font-semibold leading-none cursor-pointer tracking-[0.01em]
            transition-[background,border-color,box-shadow,filter,transform] duration-150;
     background: var(--surface-3);
     color: var(--text);
@@ -134,10 +135,10 @@
      control stays brand. Swapping a grey button border to gold on hover read
      as the control changing identity mid-interaction. */
   .btn:hover { background: var(--surface-hover); border-color: var(--border-hover); }
-  .btn:active { transform: scale(0.985); filter: brightness(0.97); }
+  .btn:active { transform: translateY(1px); filter: brightness(0.96); }
   .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-glow); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn svg { @apply h-3.5 w-3.5; }
+  .btn svg { @apply h-4 w-4; }
   .btn-gold {
     background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2) 55%, var(--brand-fill-3));
     color: var(--brand-ink);
@@ -156,7 +157,7 @@
   .btn-danger-solid { background: var(--red); color: #fff; border: none; }
   .btn-danger-solid:hover { filter: brightness(1.06); box-shadow: 0 6px 18px -6px var(--red); }
   .btn-block { @apply w-full; }
-  .btn-sm { @apply px-3 py-1.5 text-[0.78rem]; }
+  .btn-sm { @apply px-2.5 py-1.5 text-[0.74rem]; }
 
   /* ── Fields ── */
   .field { @apply flex flex-col gap-1; }

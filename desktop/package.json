@@ -18,7 +18,7 @@
     "appId": "com.swiftcargo.desk",
     "productName": "Swift Cargo Desk",
     "directories": { "output": "release" },
-    "files": ["main.js", "build/icon.png"],
+    "files": ["main.js", "setup.html", "setup-preload.js", "build/icon.png"],
     "extraResources": [
       { "from": "payload", "to": "payload" }
     ],
