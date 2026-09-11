@@ -6,20 +6,34 @@ travailler quand la connexion tombe — saisir un bon, encaisser, régler, impri
 ne demandent rien à Internet. La ligne ne sert qu'à la synchronisation avec le
 hub, qui tourne en arrière-plan et rattrape son retard toute seule.
 
-## Construire les installeurs
+## Construire l'installeur
+
+**Un seul**, pour les deux bureaux — `desktop/release/Swift Cargo Desk Setup …exe`.
 
 ```bash
 npm --prefix desktop install
-npm --prefix desktop run dist:china      # → desktop/release/…Chine…exe
-npm --prefix desktop run dist:algeria    # → desktop/release/…Algérie…exe
+
+# Windows (PowerShell)
+$env:SWIFT_CLOUD_URL  = 'https://…onrender.com'
+$env:SWIFT_NODE_TOKEN = '…'
+npm --prefix desktop run dist
 ```
 
-Les deux installeurs sont le même logiciel ; ils ne diffèrent que par le bureau
-auquel ils appartiennent (`SITE`), fixé à la construction pour qu'il ne puisse
-pas être changé par erreur sur place.
+Ces deux variables sont **pré-remplies dans l'installeur** (`payload/defaults.json`),
+pour que le poste installé parle au hub sans configuration manuelle. Elles
+viennent de l'environnement de construction et **jamais du dépôt** : le jeton est
+un secret partagé, et un secret écrit dans le code est un secret publié au
+premier `git push`. Construire sans elles reste permis — le poste travaille
+alors seul, et `prepare.mjs` le dit en toutes lettres.
 
-Comptez **250–350 Mo** par installeur : PostgreSQL est dedans. C'est le prix du
-fonctionnement hors ligne, et c'est un prix qu'on paie une fois.
+Le bureau (`SITE`) n'est plus fixé à la construction : l'application le **demande
+au premier démarrage** et le range dans le fichier de configuration. C'est ce qui
+permet un installeur unique. Il reste un vrai réglage, pas une étiquette — il
+réserve au poste sa plage d'identifiants et signe ses écritures vers le hub —
+d'où une question posée avant que la base ne soit semée, et une seule fois.
+
+Comptez **250–350 Mo** : PostgreSQL est dedans. C'est le prix du fonctionnement
+hors ligne, et on le paie une fois.
 
 Pour essayer sans empaqueter : `npm --prefix desktop start`.
 

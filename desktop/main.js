@@ -16,6 +16,12 @@ const { randomBytes } = require('node:crypto');
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 
+// Le nom est fixé ICI, et pas laissé au `productName` de l'installeur : c'est
+// lui qui donne le dossier de données (app.getPath('userData')). Le renommer
+// déplacerait la base d'un poste déjà en service — l'entreprise rouvrirait
+// l'application sur une base vide. Doit précéder tout getPath().
+app.setName('swift-cargo-desktop');
+
 // En développement, `npm start` lance depuis le dossier desktop/ ; une fois
 // empaquetée, la charge utile vit à côté de l'exécutable.
 const PAYLOAD = app.isPackaged ? join(process.resourcesPath, 'payload') : join(__dirname, 'payload');
@@ -28,21 +34,30 @@ const DATA_DIR = app.getPath('userData');
 const PG_DIR = join(DATA_DIR, 'pgdata');
 const CONFIG_FILE = join(DATA_DIR, 'swift-cargo.env');
 
-// Le bureau auquel ce poste appartient est décidé à la CONSTRUCTION
-// (dist:china / dist:algeria) : c'est ce qui distingue les deux installeurs, et
-// ce n'est pas un réglage qu'on veut voir changé par erreur sur place.
-// Écrit dans la charge utile par prepare.mjs, au moment de la construction.
-// C'est ce qui distingue les deux installeurs, et ce n'est volontairement pas
-// un réglage modifiable sur place : un poste qui se croirait dans l'autre
-// bureau enverrait ses écritures sous la mauvaise identité de site.
-function builtSite() {
+// Le bureau auquel ce poste appartient — Chine ou Algérie.
+//
+// Il était décidé à la CONSTRUCTION, ce qui imposait deux installeurs pour une
+// seule application. Il n'y en a plus qu'un : le bureau se demande au premier
+// démarrage et se range dans le fichier de configuration, à côté des données.
+//
+// Ce n'est pas une étiquette. `SITE` réserve au poste sa plage d'identifiants
+// (ID_OFFSETS, server/src/config.js) et signe chaque écriture envoyée au hub :
+// deux postes qui se croiraient dans le même bureau produiraient des
+// identifiants qui se heurtent. D'où une question posée une seule fois, AVANT
+// que le serveur ne démarre et ne sème quoi que ce soit.
+const SITES = { china: 'Chine', algeria: 'Algérie' };
+
+// Ce que la construction a pré-rempli : l'adresse du hub et le jeton de
+// synchronisation (prepare.mjs). Sans eux, chaque poste devrait être configuré
+// à la main après l'installation — et un poste mal configuré est un poste qui
+// travaille seul sans que personne s'en aperçoive.
+function buildDefaults() {
   try {
-    return JSON.parse(readFileSync(join(PAYLOAD, 'site.json'), 'utf8')).site;
+    return JSON.parse(readFileSync(join(PAYLOAD, 'defaults.json'), 'utf8'));
   } catch {
-    return 'algeria';
+    return {};
   }
 }
-const BUILT_SITE = builtSite();
 
 // Deux instances se disputeraient le même dossier PostgreSQL. La seconde ne
 // démarrerait pas, avec un message parlant de fichier verrou : autant refuser
@@ -62,9 +77,15 @@ function loadConfig() {
 
   if (!existsSync(CONFIG_FILE)) {
     first = true;
+    const d = buildDefaults();
     writeFileSync(CONFIG_FILE, [
       '# Swift Cargo — configuration de ce poste.',
       '# Refermez l\'application avant de modifier ce fichier.',
+      '',
+      '# Le bureau de ce poste : china ou algeria. Demandé au premier démarrage.',
+      '# Ne le changez QUE sur un poste encore vierge : il détermine la plage',
+      '# d\'identifiants du poste, et les lignes déjà saisies gardent la leur.',
+      'SITE=',
       '',
       '# Mot de passe de dépannage : il ne sert QUE tant que ce poste n\'a jamais',
       '# joint le hub. Dès la première synchronisation, les comptes du hub',
@@ -72,10 +93,10 @@ function loadConfig() {
       `SUPERADMIN_PASSWORD=${randomBytes(9).toString('base64url')}`,
       '',
       '# Le hub. Laissez CLOUD_URL vide pour travailler seul, sans synchronisation.',
-      'CLOUD_URL=',
+      `CLOUD_URL=${d.CLOUD_URL || ''}`,
       '# Le même jeton que sur le hub et sur l\'autre poste. Sans lui, le hub',
       '# refuse toute synchronisation.',
-      'NODE_TOKEN=',
+      `NODE_TOKEN=${d.NODE_TOKEN || ''}`,
       '',
       '# À ne changer qu\'en cas de conflit avec un autre logiciel de la machine.',
       'PORT=47821',
@@ -92,12 +113,46 @@ function loadConfig() {
   return { env, first };
 }
 
+// Réécrit UNE valeur en gardant le reste du fichier — les commentaires
+// expliquent chaque réglage, et les réécrire d'un bloc les effacerait.
+function setConfigValue(key, value) {
+  const lines = readFileSync(CONFIG_FILE, 'utf8').split(/\r?\n/);
+  const i = lines.findIndex((l) => l.trim().startsWith(`${key}=`));
+  if (i >= 0) lines[i] = `${key}=${value}`;
+  else lines.push(`${key}=${value}`);
+  writeFileSync(CONFIG_FILE, lines.join('\n'), 'utf8');
+}
+
+// Posée avant le démarrage du serveur, et une seule fois. Une base semée sous
+// le mauvais bureau ne se corrige pas d'un clic : les identifiants déjà
+// attribués gardent leur plage.
+function askSite() {
+  const keys = Object.keys(SITES);
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Swift Cargo — bureau de ce poste',
+    message: 'Dans quel bureau ce poste se trouve-t-il ?',
+    detail:
+      'Ce choix ne se fait qu’une fois. Il identifie les écritures que ce poste '
+      + 'envoie au hub et lui réserve sa propre plage d’identifiants — deux postes '
+      + 'qui se déclareraient dans le même bureau finiraient par produire des '
+      + 'identifiants qui se heurtent.\n\n'
+      + 'En cas d’erreur, corrigez SITE dans le fichier de configuration avant de '
+      + 'saisir quoi que ce soit :\n' + CONFIG_FILE,
+    buttons: [...keys.map((k) => SITES[k]), 'Quitter'],
+    defaultId: 0,
+    cancelId: keys.length,
+    noLink: true,
+  });
+  return keys[choice] ?? null;
+}
+
 // ── Le serveur ───────────────────────────────────────────────────────
 function startServer(cfg) {
   const env = {
     ...process.env,
     NODE_ENV: 'production',
-    SITE: BUILT_SITE,
+    SITE: cfg.SITE,
     // Le poste parle à sa base LOCALE. DATABASE_URL vide = PostgreSQL embarqué,
     // dans le dossier de données de l'utilisateur.
     DATABASE_URL: '',
@@ -175,13 +230,13 @@ async function waitForServer(port, timeoutMs = 180_000) {
   }
 }
 
-function createWindow(port) {
+function createWindow(port, site) {
   win = new BrowserWindow({
     width: 1440,
     height: 900,
     show: false,
     backgroundColor: '#0f111a',
-    title: `Swift Cargo — ${BUILT_SITE === 'china' ? 'Chine' : 'Algérie'}`,
+    title: `Swift Cargo — ${SITES[site]}`,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   win.once('ready-to-show', () => win.show());
@@ -234,6 +289,15 @@ app.whenReady().then(async () => {
   const { env: cfg, first } = loadConfig();
   const port = cfg.PORT || '47821';
 
+  // AVANT le serveur : c'est lui qui applique les migrations et sème la base,
+  // et il le fait sous l'identité de site qu'on lui donne ici.
+  if (!SITES[cfg.SITE]) {
+    const chosen = askSite();
+    if (!chosen) { app.quit(); return; }
+    setConfigValue('SITE', chosen);
+    cfg.SITE = chosen;
+  }
+
   buildMenu();
   startServer(cfg);
 
@@ -245,7 +309,7 @@ app.whenReady().then(async () => {
     return;
   }
 
-  createWindow(port);
+  createWindow(port, cfg.SITE);
 
   if (first) {
     // Une seule fois, au premier lancement : le mot de passe tiré au hasard ne
@@ -259,7 +323,7 @@ app.whenReady().then(async () => {
     dialog.showMessageBox(win, {
       type: 'info',
       title: 'Premier démarrage',
-      message: `Poste ${BUILT_SITE === 'china' ? 'Chine' : 'Algérie'} prêt.`,
+      message: `Poste ${SITES[cfg.SITE]} prêt.`,
       detail:
         `Connectez-vous avec l'identifiant « superadmin » et le mot de passe écrit dans :\n${CONFIG_FILE}\n\n`
         + (cfg.CLOUD_URL

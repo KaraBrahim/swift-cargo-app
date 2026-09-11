@@ -48,16 +48,32 @@ run('npm ci --omit=dev', join(payload, 'server'));
 console.log('\n— Interface construite');
 cpSync(dist, join(payload, 'client', 'dist'), { recursive: true });
 
-// Le bureau auquel appartient cet installeur, écrit DANS la charge utile.
+// Ce que le poste trouvera déjà rempli à l'installation : l'adresse du hub et
+// le jeton de synchronisation.
+//
+// Il y avait ici un `site.json` — le bureau, décidé à la construction, qui
+// imposait deux installeurs. Le bureau se demande maintenant au premier
+// démarrage (main.js) : un seul installeur suffit pour les deux postes.
+//
+// Le jeton vient de l'ENVIRONNEMENT de construction, jamais du dépôt : c'est un
+// secret partagé, et un secret écrit dans le code est un secret publié au
+// premier `git push`. Construire sans lui reste permis — le poste démarre alors
+// seul, et le message ci-dessous dit exactement ce qu'il manque.
 //
 // Pas via `--config.extraMetadata` d'electron-builder : cette option réécrit le
 // package.json SOURCE, et lui fait perdre ses scripts et ses dépendances. Un
-// fichier à nous, dans un dossier qui est de toute façon reconstruit à chaque
-// fois, ne peut rien abîmer.
-const site = process.argv[2] || 'algeria';
-if (!['china', 'algeria'].includes(site)) {
-  throw new Error(`Bureau inconnu : « ${site} ». Attendu « china » ou « algeria ».`);
-}
-writeFileSync(join(payload, 'site.json'), JSON.stringify({ site }, null, 2) + '\n', 'utf8');
+// fichier à nous, dans un dossier de toute façon reconstruit à chaque fois, ne
+// peut rien abîmer.
+const defaults = {
+  CLOUD_URL: (process.env.SWIFT_CLOUD_URL || '').replace(/\/+$/, ''),
+  NODE_TOKEN: process.env.SWIFT_NODE_TOKEN || '',
+};
+writeFileSync(join(payload, 'defaults.json'), JSON.stringify(defaults, null, 2) + '\n', 'utf8');
 
-console.log(`\npayload/ prêt — bureau « ${site} ».`);
+const missing = Object.entries(defaults).filter(([, v]) => !v).map(([k]) => k);
+console.log(
+  missing.length
+    ? `\npayload/ prêt — MAIS ${missing.join(' et ')} manque(nt) : les postes installés `
+      + 'travailleront seuls.\nDéfinissez SWIFT_CLOUD_URL et SWIFT_NODE_TOKEN avant de construire.'
+    : `\npayload/ prêt — hub ${defaults.CLOUD_URL}, jeton pré-rempli.`
+);

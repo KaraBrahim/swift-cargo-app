@@ -7,9 +7,8 @@
   "main": "main.js",
   "scripts": {
     "prepare-payload": "node prepare.mjs",
-    "start": "node prepare.mjs algeria && electron .",
-    "dist:china": "node prepare.mjs china && electron-builder --win --config.productName=\"Swift Cargo Chine\"",
-    "dist:algeria": "node prepare.mjs algeria && electron-builder --win --config.productName=\"Swift Cargo Algerie\""
+    "start": "node prepare.mjs && electron .",
+    "dist": "node prepare.mjs && electron-builder --win"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -17,6 +16,7 @@
   },
   "build": {
     "appId": "com.affari.swiftcargo",
+    "productName": "Swift Cargo Desk",
     "directories": { "output": "release" },
     "files": ["main.js"],
     "extraResources": [
