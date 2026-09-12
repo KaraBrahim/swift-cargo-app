@@ -1,6 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import compression from 'compression';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +79,9 @@ export function createApp() {
       credentials: true,
     })
   );
+  // Le client est loin : une liste de bons en JSON se compresse cinq à dix
+  // fois, et c'est du temps d'attente en moins sur chaque page.
+  app.use(compression());
   app.use(express.json({ limit: '256kb' }));
   app.use(cookieParser());
 

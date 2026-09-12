@@ -3,8 +3,21 @@ const TOKEN_KEY = 'sc_token';
 const LAST_USER_KEY = 'sc_last_user';
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (t) =>
-  t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
+export const setToken = (t) => {
+  if (t) localStorage.setItem(TOKEN_KEY, t);
+  else {
+    localStorage.removeItem(TOKEN_KEY);
+    // Plus de session : plus de copie des données non plus. Le poste suivant
+    // qui ouvre l'application ne doit rien voir de l'utilisateur d'avant.
+    try { localStorage.removeItem('sc_cache_v1'); } catch { /* ignore */ }
+  }
+};
+
+// Après chaque écriture réussie, les pages ouvertes redemandent leurs données
+// (useApi s'abonne ici) : le cache ne montre jamais un état d'avant vos
+// propres modifications.
+const mutationListeners = new Set();
+export const onMutation = (fn) => { mutationListeners.add(fn); return () => mutationListeners.delete(fn); };
 
 // The last username, remembered when « Rester connecté » is ticked. A username
 // is not a secret — it is on every bon and in the audit trail. The password is
@@ -141,5 +154,6 @@ export async function api(path, { method = 'GET', body, timeout = TIMEOUT_MS, id
       ref: err.ref,
     });
   }
+  if (method !== 'GET') for (const fn of mutationListeners) fn();
   return json;
 }
