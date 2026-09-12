@@ -229,7 +229,7 @@ export default function OrderDetailPage() {
 
       <Kpis>
         <Kpi icon="fournisseur" label="Fournisseur" value={o.fournisseur_name} sub={o.fournisseur_phone} person to={`/personnes/${o.fournisseur_id}`} />
-        <Kpi icon="coins" label="Facturé" value={formatMoney(o.totals.billed, cur)} tone="gold"
+        <Kpi hero icon="coins" label="Facturé" value={formatMoney(o.totals.billed, cur)} tone="gold"
           sub={o.totals.commission > 0 ? `dont ${formatMoney(o.totals.commission, cur)} de commission` : null} />
         <Kpi icon="plane" label="Confié" value={`${done} / ${lines.length}`} sub="lots partis" />
         <Kpi icon="check" label="Livré" value={`${deliveredLots} / ${arrivedLots}`} sub="lots remis"

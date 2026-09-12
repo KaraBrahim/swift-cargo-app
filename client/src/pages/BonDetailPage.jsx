@@ -380,7 +380,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
         )}
         <Kpi icon="fournisseur" label={fourns.length > 1 ? 'Fournisseurs' : 'Fournisseur'} value={fournValue}
           sub={fourns.length > 1 ? fourns.map((f) => f.name).join(', ') : null} to={fournTo || undefined} />
-        <Kpi icon="coins" tone="gold"
+        <Kpi hero icon="coins" tone="gold"
           label={isFournisseurBon ? 'Facturé' : bon.status === 'regle' ? 'Payé au passager' : 'À payer'}
           value={formatMoney(bon.status === 'regle' && bon.passager_payment != null ? bon.passager_payment : bon.transport_fee, cur)}
           sub={isFournisseurBon && Number(bon.commission) > 0

@@ -29,7 +29,9 @@ export function Kpis({ children }) {
 
 // Une tuile = une icône, un chiffre, un mot. Le lien facultatif en fait une
 // porte : la tuile « Fournisseur » ouvre sa fiche.
-export function Kpi({ icon, label, value, sub, tone = '', to, person = false }) {
+// `hero` : la carte qui compte — l'argent — en couleurs inversées, pour qu'elle
+// se lise avant les autres.
+export function Kpi({ icon, label, value, sub, tone = '', to, person = false, hero = false }) {
   const inner = (
     <>
       <span className="dt-kpi-ico">
@@ -45,9 +47,8 @@ export function Kpi({ icon, label, value, sub, tone = '', to, person = false }) 
       {to && <IconEl name="chevronRight" className="dt-kpi-go" />}
     </>
   );
-  return to
-    ? <Link to={to} className="dt-kpi link">{inner}</Link>
-    : <div className="dt-kpi">{inner}</div>;
+  const cls = `dt-kpi${to ? ' link' : ''}${hero ? ' hero' : ''}`;
+  return to ? <Link to={to} className={cls}>{inner}</Link> : <div className={cls}>{inner}</div>;
 }
 
 // Le fil du parcours, partagé par les deux fiches.
