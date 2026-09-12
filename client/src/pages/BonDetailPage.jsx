@@ -298,10 +298,16 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
     return step;
   });
 
+  // Un manquant vaut ce que vaut la marchandise (« valeur du manquant »), pas
+  // son tarif de portage — exactement ce que le serveur enregistre. Si les
+  // pertes dépassent le portage, le passager n'est pas payé : il nous doit la
+  // différence.
   const recMissingTotal = bon.lines.reduce(
-    (s, l) => s + Number(l.unit_price) * Math.max(qtyNum(l) - receivedOf(l), 0), 0
+    (s, l) => s + Number(l.missing_unit_price ?? l.unit_price) * Math.max(qtyNum(l) - receivedOf(l), 0), 0
   );
-  const recDeliveredTotal = Math.max(Number(bon.transport_fee) - recMissingTotal, 0);
+  const recNet = Number(bon.transport_fee) - recMissingTotal;
+  const recDeliveredTotal = Math.max(recNet, 0);
+  const recOwedByPassager = Math.max(-recNet, 0);
 
   const fourns = bon.fournisseurs ?? [];
   const fournValue = isFournisseurBon
@@ -578,13 +584,15 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
             <div className="recon-sum">
               <span>Commandé <strong>{formatMoney(bon.transport_fee, cur)}</strong></span>
               <span>Manquants <strong className={recMissingTotal > 0 ? 'neg' : ''}>{formatMoney(recMissingTotal, cur)}</strong></span>
-              <span>Dû au passager <strong className="gold">{formatMoney(payMode === 'manual' && payment !== '' ? Number(payment || 0) : recDeliveredTotal, cur)}</strong></span>
+              {recOwedByPassager > 0 && payMode === 'auto'
+                ? <span>À la charge du passager <strong className="neg">{formatMoney(recOwedByPassager, cur)}</strong></span>
+                : <span>Dû au passager <strong className="gold">{formatMoney(payMode === 'manual' && payment !== '' ? Number(payment || 0) : recDeliveredTotal, cur)}</strong></span>}
             </div>
-            {payMode === 'auto' && recMissingTotal > Number(bon.transport_fee) && (
+            {payMode === 'auto' && recOwedByPassager > 0 && (
               <p className="dt-hint">
                 <IconEl name="alert" />
-                Les manquants dépassent le portage : le passager ne sera pas payé, et
-                <strong className="neg"> {formatMoney(recMissingTotal - Number(bon.transport_fee), cur)}</strong> resteront à sa charge.
+                Les manquants ({formatMoney(recMissingTotal, cur)}) dépassent le portage ({formatMoney(bon.transport_fee, cur)}) :
+                le passager ne sera pas payé et devra <strong className="neg">{formatMoney(recOwedByPassager, cur)}</strong>, inscrits à son compte au règlement.
               </p>
             )}
 
