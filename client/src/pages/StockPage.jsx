@@ -12,14 +12,17 @@ import AmountInput from '../components/AmountInput.jsx';
 import { formatQty } from '../lib/format.js';
 
 const ACCENT = 'var(--c-stock)';
+// Deux bureaux, et l'entre-deux : parti de Chine, pas encore arrivé en Algérie.
 const OFFICES = [{ key: 'china', label: 'Chine' }, { key: 'algeria', label: 'Algérie' }];
+const TRANSIT = 'transit';
 const q3 = (v) => formatQty(v);
 const held = (it) => Number(it.quantity) > 0 || Number(it.weight_kg) > 0 || Number(it.cbm) > 0;
 
 export default function StockPage() {
   const toast = useToast();
   const [office, setOffice] = useState('china');
-  const levels = useApi(`/stock/levels?office=${office}`);
+  const transit = office === TRANSIT;
+  const levels = useApi(transit ? '/stock/in-transit' : `/stock/levels?office=${office}`);
   const items = useApi('/stock/items');
   const cats = useApi('/stock/categories');
   const [search, setSearch] = useState('');
@@ -43,7 +46,7 @@ export default function StockPage() {
   };
 
   if (levels.loading) return <Spinner />;
-  const officeLabel = OFFICES.find((o) => o.key === office).label;
+  const officeLabel = transit ? 'en transit' : OFFICES.find((o) => o.key === office).label;
   const all = levels.data?.items ?? [];
   const inStock = all.filter(held);                     // the real stock
   const registeredOnly = all.length - inStock.length;   // catalogue-only articles
@@ -53,18 +56,23 @@ export default function StockPage() {
     <div style={{ '--accent': ACCENT }}>
       <PageHeader
         icon="stock" accent={ACCENT} title="Stock"
-        subtitle={`Marchandises réellement présentes au bureau ${officeLabel}.`}
+        subtitle={transit ? 'Marchandises parties de Chine et pas encore arrivées en Algérie.' : `Marchandises réellement présentes au bureau ${officeLabel}.`}
       >
         <div className="seg">
           {OFFICES.map((o) => (
-            <button key={o.key} type="button" className={office === o.key ? 'active' : ''} onClick={() => setOffice(o.key)}>
+            <button key={o.key} type="button" className={office === o.key ? 'active' : ''} onClick={() => { setOffice(o.key); setLvl(null); }}>
               Stock {o.label}
             </button>
           ))}
+          <button type="button" className={transit ? 'active' : ''} onClick={() => { setOffice(TRANSIT); setLvl(null); }}>
+            En transit
+          </button>
         </div>
+        {!transit && (
         <button className="btn btn-gold" onClick={() => setLvl(lvl ? null : { id: '', name: '', quantity: '0', weight_kg: '0', cbm: '0', note: '' })}>
           <IconEl name={lvl ? 'close' : 'plus'} />{lvl ? 'Fermer' : 'Entrer du stock'}
         </button>
+        )}
       </PageHeader>
 
       {/* Catalogue KPIs double as the way in to managing it. */}
@@ -136,7 +144,7 @@ export default function StockPage() {
                 <tr>
                   <th>Article</th><th>Catégorie</th>
                   <th className="right">Quantité</th><th className="right">Poids (kg)</th><th className="right">CBM</th>
-                  <th className="right">Actions</th>
+                  <th className="right">{transit ? 'Bons' : 'Actions'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -148,10 +156,12 @@ export default function StockPage() {
                     <td className="right">{q3(it.weight_kg)}</td>
                     <td className="right">{q3(it.cbm)}</td>
                     <td className="right nowrap">
-                      <button className="icon-btn" title="Ajuster la quantité" aria-label="Ajuster"
-                        onClick={() => setLvl({ id: it.id, name: it.name, quantity: it.quantity, weight_kg: it.weight_kg, cbm: it.cbm, note: '' })}>
-                        <IconEl name="swap" />
-                      </button>
+                      {transit ? it.bons : (
+                        <button className="icon-btn" title="Ajuster la quantité" aria-label="Ajuster"
+                          onClick={() => setLvl({ id: it.id, name: it.name, quantity: it.quantity, weight_kg: it.weight_kg, cbm: it.cbm, note: '' })}>
+                          <IconEl name="swap" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -161,8 +171,10 @@ export default function StockPage() {
         ) : (
           <EmptyState
             icon="stock"
-            title={search ? 'Aucun résultat' : `Rien en stock à ${officeLabel}`}
-            sub={search ? 'Aucun article en stock ne correspond à cette recherche.' : 'Les marchandises apparaissent ici dès qu’un bon fournisseur est réceptionné.'}
+            title={search ? 'Aucun résultat' : transit ? 'Rien en transit' : `Rien en stock à ${officeLabel}`}
+            sub={search ? 'Aucun article ne correspond à cette recherche.'
+              : transit ? 'Les articles apparaissent ici dès qu’un bon passager part de Chine, jusqu’à son arrivée.'
+                : 'Les marchandises apparaissent ici dès qu’un bon fournisseur est réceptionné.'}
           />
         )}
       </div>

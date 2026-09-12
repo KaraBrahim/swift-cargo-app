@@ -215,6 +215,32 @@ export async function listLevels({ office = 'china', search, categoryId } = {}) 
   return rows;
 }
 
+// Ce qui n'est plus en Chine et pas encore en Algérie : les lignes des bons
+// passagers en transit, regroupées par article. Le départ a débité la Chine,
+// l'arrivée créditera l'Algérie — entre les deux, la marchandise est ici.
+export async function listInTransit({ search, categoryId } = {}) {
+  const params = [];
+  const conds = ["b.status = 'en_transit'", 'i.active = TRUE'];
+  if (categoryId) { params.push(categoryId); conds.push(`i.category_id = $${params.length}`); }
+  if (search) { params.push(`%${search}%`); conds.push(`i.name ILIKE $${params.length}`); }
+  const { rows } = await getPool().query(
+    `SELECT i.id, i.name, i.category_id, c.name AS category_name,
+            SUM(bl.quantity)::numeric(16,3)  AS quantity,
+            SUM(bl.weight_kg)::numeric(16,3) AS weight_kg,
+            SUM(bl.cbm)::numeric(16,4)       AS cbm,
+            COUNT(DISTINCT b.id)::int        AS bons
+       FROM bon_lines bl
+       JOIN bons b ON b.id = bl.bon_id
+       JOIN stock_items i ON i.id = bl.item_id
+       LEFT JOIN stock_categories c ON c.id = i.category_id
+      WHERE ${conds.join(' AND ')}
+      GROUP BY i.id, i.name, i.category_id, c.name
+      ORDER BY i.name`,
+    params
+  );
+  return rows;
+}
+
 export async function setItemActive({ admin, id, active, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('UPDATE stock_items SET active=$2, updated_at=now() WHERE id=$1 RETURNING *', [id, active]);

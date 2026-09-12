@@ -89,6 +89,13 @@ stockRouter.get(
   asyncHandler(async (req, res) => res.json({ items: await svc.listLevels(req.validatedQuery) }))
 );
 
+// En transit : parti de Chine, pas encore arrivé en Algérie.
+stockRouter.get(
+  '/stock/in-transit',
+  validate({ query: z.object({ search: z.string().trim().max(80).optional(), categoryId: z.coerce.number().int().positive().optional() }) }),
+  asyncHandler(async (req, res) => res.json({ items: await svc.listInTransit(req.validatedQuery) }))
+);
+
 // Set an article's absolute level at one office (manual inventory / adjustment).
 stockRouter.post(
   '/stock/items/:id/level',
