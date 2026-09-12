@@ -51,9 +51,14 @@ export const PRINT_CSS = `
   .r { text-align:right; }
   .totals { margin-top:14px; text-align:right; font-size:14px; }
   .totals strong { color:#9A7C30; }
+  .totals .big { font-size:16px; }
+  h2 { margin:18px 0 0; font-size:14px; letter-spacing:1px; text-transform:uppercase; color:#9A7C30; }
+  tfoot th { background:#faf7ee; }
+  .small { font-size:11px; color:#666; margin:6px 0 0; }
+  .muted { color:#888; text-align:center; }
   .foot { margin-top:26px; border-top:1px solid #ddd; padding-top:8px; font-size:11px; color:#666; }
   .sign { margin-top:44px; display:flex; justify-content:space-between; font-size:13px; }
-  .sign div { border-top:1px solid #999; padding-top:6px; width:40%; text-align:center; }
+  .sign div { border-top:1px solid #999; padding-top:6px; width:30%; text-align:center; }
   /* Le code qui ramène ce papier dans le système, avec sa référence en clair
      dessous : un QR abîmé doit rester retapable. */
   .qr { margin-top:22px; text-align:center; }
@@ -161,34 +166,91 @@ export function personStatementBody(d, qr) {
     <div class="sign"><div>Signature</div><div>Cachet société</div></div>`;
 }
 
+export const ORDER_STATUS_FR = {
+  ouverte: 'Ouverte', en_transit: 'En transit', arrivee: 'Arrivée', livree: 'Livrée', cloturee: 'Clôturée',
+};
+
+// Le bon fournisseur, complet : c'est la pièce que le fournisseur garde et sur
+// laquelle on discute. Chaque marchandise y suit ses quatre états — reçue,
+// confiée à un passager, arrivée en Algérie, remise au fournisseur — et le
+// récapitulatif dit exactement ce qui est facturé et pourquoi.
 export function orderManifestBody(d, qr) {
-  return `
-    <div class="meta">
-      <div><span class="k">Bon fournisseur :</span>${esc(d.reference)}</div>
-      <div><span class="k">Fournisseur :</span>${esc(d.fournisseur_name)}</div>
-      <div><span class="k">Statut :</span>${esc(d.status)}</div>
-      <div><span class="k">Créé le :</span>${new Date(d.created_at).toLocaleString('fr-FR')}</div>
-    </div>
-    <table>
-      <thead><tr><th>Bon passager</th><th>Passager</th><th class="r">Lignes</th><th class="r">Frais</th><th class="r">Pertes</th><th>Statut</th></tr></thead>
-      <tbody>${rows(d.bons, (b) => `
+  const cur = d.bons?.[0]?.transport_currency || d.carriers?.[0]?.transport_currency || '';
+  const money = (v) => formatMoney(v, cur);
+  const dt = (v) => (v ? new Date(v).toLocaleString('fr-FR') : '—');
+  const lines = d.lines || [];
+  const t = d.totals || {};
+
+  // Les quantités, par ligne et en tout. `arrived` déduit déjà les manquants.
+  const sumQ = (f) => lines.reduce((a, l) => a + Number(l[f] || 0), 0);
+  const q = { recu: sumQ('quantity'), confie: sumQ('allocated'), arrive: sumQ('arrived'), livre: sumQ('delivered_quantity'), reste: Number(t.unallocated || 0) };
+
+  const lineRows = rows(lines, (l) => {
+    const unit = esc(measureUnit(l));
+    const amount = Number(l.unit_price || 0) * Number(l.quantity || 0);
+    return `
+        <td>${esc(l.designation)}</td>
+        <td class="r">${money(l.unit_price)} / ${unit}</td>
+        <td class="r">${num(l.quantity)} ${unit}</td>
+        <td class="r">${num(l.allocated)}</td>
+        <td class="r">${num(l.arrived)}</td>
+        <td class="r">${num(l.delivered_quantity)}</td>
+        <td class="r">${num(l.remaining)}</td>
+        <td class="r"><strong>${money(amount)}</strong></td>`;
+  });
+
+  const carriers = d.carriers || [];
+  const carrierRows = carriers.length
+    ? rows(carriers, (b) => `
         <td>${esc(b.reference)}</td>
         <td>${esc(b.passager_name || '—')}</td>
-        <td class="r">${num(b.line_count)}</td>
-        <td class="r">${formatMoney(b.transport_fee)}</td>
-        <td class="r">${formatMoney(b.loss_total)}</td>
-        <td>${esc(b.status)}</td>`)}
-      </tbody>
+        <td>${esc(BON_STATUS_FR[b.status] || b.status)}</td>
+        <td class="r">${formatMoney(b.transport_fee, b.transport_currency)}</td>
+        <td class="r">${b.passager_payment != null ? formatMoney(b.passager_payment, b.transport_currency) : '—'}</td>`)
+    : `<tr><td colspan="5" class="muted">Aucun passager n’a encore pris cette marchandise — tout est au bureau de Chine.</td></tr>`;
+
+  return `
+    <div class="meta">
+      <div><span class="k">Référence :</span><strong>${esc(d.reference)}</strong></div>
+      <div><span class="k">Statut :</span><strong>${esc(ORDER_STATUS_FR[d.status] || d.status)}</strong></div>
+      <div><span class="k">Fournisseur :</span>${esc(d.fournisseur_name)}${d.fournisseur_phone ? ` · ${esc(d.fournisseur_phone)}` : ''}</div>
+      <div><span class="k">Devise :</span>${esc(cur)}</div>
+      <div><span class="k">Reçu le :</span>${dt(d.created_at)}${d.created_by_name ? ` <span class="k">par</span> ${esc(d.created_by_name)}` : ''}</div>
+      <div><span class="k">Remis le :</span>${dt(d.delivered_at)}</div>
+      ${d.note ? `<div style="grid-column:1/-1"><span class="k">Note :</span>${esc(d.note)}</div>` : ''}
+    </div>
+
+    <h2>Marchandises</h2>
+    <table>
+      <thead><tr>
+        <th>Désignation</th><th class="r">Prix unitaire</th><th class="r">Reçu</th>
+        <th class="r">Confié</th><th class="r">Arrivé</th><th class="r">Remis</th><th class="r">Reste en Chine</th><th class="r">Montant</th>
+      </tr></thead>
+      <tbody>${lineRows}</tbody>
+      <tfoot><tr>
+        <th>Total</th><th></th>
+        <th class="r">${num(q.recu)}</th><th class="r">${num(q.confie)}</th><th class="r">${num(q.arrive)}</th>
+        <th class="r">${num(q.livre)}</th><th class="r">${num(q.reste)}</th><th class="r">${money(t.goods ?? t.transport_fee)}</th>
+      </tr></tfoot>
     </table>
+    <p class="small">Confié : pris par un passager. Arrivé : compté au bureau d’Algérie, manquants déduits. Remis : emporté par le fournisseur.
+      Reste en Chine : pas encore confié.</p>
+
+    <h2>Transport</h2>
+    <table>
+      <thead><tr><th>Bon passager</th><th>Passager</th><th>Statut</th><th class="r">Frais de transport</th><th class="r">Dû au passager</th></tr></thead>
+      <tbody>${carrierRows}</tbody>
+    </table>
+
     <div class="totals">
-      Marchandises : ${formatMoney(d.totals.goods ?? d.totals.transport_fee)}<br>
-      ${Number(d.totals.commission) ? `Commission : ${formatMoney(d.totals.commission)}<br>` : ''}
-      ${Number(d.totals.discount) ? `Remise : − ${formatMoney(d.totals.discount)}<br>` : ''}
-      À facturer : <strong>${formatMoney(d.totals.billed ?? d.totals.transport_fee)}</strong><br>
-      Total pertes : ${formatMoney(d.totals.loss_total)}
+      Marchandises : ${money(t.goods ?? t.transport_fee)}<br>
+      ${Number(t.commission) ? `Commission : ${money(t.commission)}<br>` : ''}
+      ${Number(t.discount) ? `Remise : − ${money(t.discount)}<br>` : ''}
+      <span class="big">À facturer au fournisseur : <strong>${money(t.billed ?? t.transport_fee)}</strong></span><br>
+      ${Number(t.loss_total) ? `Valeur des manquants (portée en avoir) : ${money(t.loss_total)}<br>` : ''}
     </div>
     ${qrBlock(qr, d.reference)}
-    <div class="sign"><div>Responsable Chine</div><div>Responsable Algérie</div></div>`;
+    <div class="sign"><div>Responsable Chine</div><div>Responsable Algérie</div><div>Le fournisseur</div></div>`;
 }
 
 // ── Generic table document ───────────────────────────────────────────
