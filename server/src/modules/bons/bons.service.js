@@ -382,7 +382,9 @@ export async function updateBon({ admin, id, data, ip }) {
       await postFournisseurCharge(c, { bon, fournisseurId: bon.fournisseur_id, currency: newCur, fee: newFee, discount: newDiscount, orderId: bon.order_id, adminId: admin.id });
     }
 
-    await c.query('INSERT INTO bon_status_history (bon_id, status, admin_id, note) VALUES ($1,$2,$3,$4)', [id, 'cree', admin.id, 'Modification']);
+    // Pas de ligne d'historique ici : elle portait le statut « cree », et la
+    // chronologie affichait un second « Créé » — le bon semblait recréé. Le
+    // journal d'audit (bon.update, ci-dessous) garde la trace de la modification.
     for (const oid of new Set([...touched, ...(await sourceOrderIds(c, id)), bon.order_id].filter(Boolean))) {
       await recomputeOrderStatus(c, oid);
     }

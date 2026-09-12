@@ -66,7 +66,7 @@ const declared = (l) => {
 // BP-… ne désigne, pour l'utilisateur, aucune pièce qui existe. D'où le
 // paramètre : l'adresse reste celle du bon fournisseur, et l'écran s'annonce
 // sous le numéro BF-… que la personne a en main.
-export default function BonDetailPage({ bonId }) {
+export default function BonDetailPage({ bonId, autoEdit = false }) {
   const { id: routeId } = useParams();
   const id = bonId ?? routeId;
   const navigate = useNavigate();
@@ -243,6 +243,14 @@ export default function BonDetailPage({ bonId }) {
   const setEditLine = (i, next) => setEdit((e) => ({ ...e, lines: e.lines.map((l, idx) => (idx === i ? next : l)) }));
   const addEditLine = () => setEdit((e) => ({ ...e, lines: [...e.lines, emptyLine()] }));
   const removeEditLine = (i) => setEdit((e) => ({ ...e, lines: e.lines.filter((_, idx) => idx !== i) }));
+  // « Modifier » depuis le bon fournisseur ouvre le formulaire tout de suite :
+  // un second clic sur le même mot, sur une autre page, n'apprend rien.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoEdit || autoOpened.current || !bon || bon.status !== 'cree' || allocatable.loading) return;
+    autoOpened.current = true;
+    openEdit();
+  }, [autoEdit, bon, allocatable.loading]); // eslint-disable-line react-hooks/exhaustive-deps
   const editValid = edit && edit.lines.length > 0 && edit.lines.every(isFournisseurBon ? lineValid : pickedValid);
   const editLinesTotal = edit ? edit.lines.reduce((s, l) => s + (isFournisseurBon ? lineTotal(l) : pickedTotal(l)), 0) : 0;
   const editTotal = editLinesTotal + (isFournisseurBon ? Number(edit?.commission || 0) : 0);

@@ -90,6 +90,34 @@ export default function OrderDetailPage() {
     return step;
   });
 
+  // Le statut d'un bon fournisseur DÉCOULE des faits : un passager emporte,
+  // arrive, la marchandise est remise, les frais sont encaissés. Cliquer une
+  // étape mène donc à l'action qui la produit — jamais à un statut posé à la
+  // main, qui serait recalculé à la seconde d'après.
+  const jumpTo = (key) => {
+    const order = ORDER_ORDER.indexOf(key), cur = ORDER_ORDER.indexOf(o.status);
+    if (order < cur) {
+      toast.error('Pour revenir en arrière, ouvrez le bon passager concerné : c’est lui qui porte l’étape.');
+      return;
+    }
+    const carrier = o.carriers?.[0];
+    if (key === 'en_transit' || key === 'arrivee') {
+      if (carrier) { navigate(`/bons-passager/${carrier.id}`); return; }
+      toast.error('Aucun passager ne transporte encore cette marchandise. Créez un bon passager qui l’emporte.');
+      navigate('/bons-passager/nouveau');
+      return;
+    }
+    if (key === 'livree') {
+      if (lotsAuBureau > 0 || arrivedLots > 0) openDeliver();
+      else toast.error('Rien n’est encore arrivé au bureau : la remise attend l’arrivée d’un passager.');
+      return;
+    }
+    if (key === 'cloturee') {
+      toast.error('Clôture : encaissez les frais du fournisseur et réglez chaque passager.');
+      navigate(`/bons-fournisseur/${o.id}/marchandises`);
+    }
+  };
+
   // Le formulaire s'ouvre déjà rempli avec tout ce qui est arrivé et n'est pas
   // encore parti : le cas normal est une seule confirmation. Baisser un chiffre
   // reste possible pour le client qui n'emporte que la moitié.
@@ -197,7 +225,7 @@ export default function OrderDetailPage() {
           et rien ici ne peut l'écrire. Le bouton cliquable d'avant ne
           déplaçait que le bon fournisseur enfant : l'écran ne bougeait pas,
           mais ses lignes devenaient silencieusement immodifiables. */}
-      <StepFlow steps={steps} current={o.status} />
+      <StepFlow steps={steps} current={o.status} onJump={jumpTo} />
 
       <Kpis>
         <Kpi icon="fournisseur" label="Fournisseur" value={o.fournisseur_name} sub={o.fournisseur_phone} person to={`/personnes/${o.fournisseur_id}`} />

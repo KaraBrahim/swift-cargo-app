@@ -23,6 +23,10 @@ export default function StockPage() {
   const [office, setOffice] = useState('china');
   const transit = office === TRANSIT;
   const levels = useApi(transit ? '/stock/in-transit' : `/stock/levels?office=${office}`);
+  // Le nombre d'articles en route, toujours visible sur l'onglet : c'est ce
+  // qui dit d'un coup d'œil qu'un avion est en l'air.
+  const transitCount = useApi('/stock/in-transit');
+  const nbTransit = transitCount.data?.items?.length ?? 0;
   const items = useApi('/stock/items');
   const cats = useApi('/stock/categories');
   const [search, setSearch] = useState('');
@@ -58,14 +62,16 @@ export default function StockPage() {
         icon="stock" accent={ACCENT} title="Stock"
         subtitle={transit ? 'Marchandises parties de Chine et pas encore arrivées en Algérie.' : `Marchandises réellement présentes au bureau ${officeLabel}.`}
       >
-        <div className="seg">
-          {OFFICES.map((o) => (
-            <button key={o.key} type="button" className={office === o.key ? 'active' : ''} onClick={() => { setOffice(o.key); setLvl(null); }}>
-              Stock {o.label}
-            </button>
-          ))}
-          <button type="button" className={transit ? 'active' : ''} onClick={() => { setOffice(TRANSIT); setLvl(null); }}>
-            En transit
+        {/* Chine → en l'air → Algérie : l'ordre des onglets est celui du voyage. */}
+        <div className="seg seg-route">
+          <button type="button" className={office === 'china' ? 'active' : ''} onClick={() => { setOffice('china'); setLvl(null); }}>
+            <IconEl name="stock" />Chine
+          </button>
+          <button type="button" className={`seg-transit ${transit ? 'active' : ''}`} onClick={() => { setOffice(TRANSIT); setLvl(null); }}>
+            <IconEl name="plane" />En transit{nbTransit > 0 && <span className="seg-count">{nbTransit}</span>}
+          </button>
+          <button type="button" className={office === 'algeria' ? 'active' : ''} onClick={() => { setOffice('algeria'); setLvl(null); }}>
+            <IconEl name="stock" />Algérie
           </button>
         </div>
         {!transit && (

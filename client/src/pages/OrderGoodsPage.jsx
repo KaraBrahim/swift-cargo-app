@@ -38,5 +38,5 @@ export default function OrderGoodsPage() {
       </EmptyState>
     );
   }
-  return <BonDetailPage bonId={bonId} />;
+  return <BonDetailPage bonId={bonId} autoEdit />;
 }

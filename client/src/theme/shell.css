@@ -839,6 +839,16 @@ a.kpi-card > svg:last-child { margin-left: auto; width: 18px; height: 18px; colo
 .seg button:hover { color: var(--text); }
 .seg button.active { background: var(--surface-1); color: var(--brand-text); }
 
+/* L'itinéraire du stock : Chine → en transit → Algérie. Le milieu est le
+   voyage lui-même, avec le nombre d'articles en l'air. */
+.seg-route button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 0.8rem; }
+.seg-route button svg { width: 15px; height: 15px; }
+.seg-route .seg-transit { position: relative; }
+.seg-route .seg-transit.active { background: linear-gradient(180deg, var(--brand-fill-1), var(--brand-fill-2)); color: var(--brand-ink); box-shadow: var(--brand-shadow); }
+.seg-count { min-width: 18px; padding: 0 5px; border-radius: 999px; font-size: 0.68rem; line-height: 18px; text-align: center;
+  background: var(--brand); color: var(--brand-ink); }
+.seg-transit.active .seg-count { background: rgba(0,0,0,.25); color: inherit; }
+
 .line-avail { display: block; margin-top: 4px; font-size: 0.7rem; color: var(--muted); }
 
 /* ── Rôles d'une personne ───────────────────────────────────────────
