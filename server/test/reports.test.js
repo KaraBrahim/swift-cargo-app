@@ -18,11 +18,13 @@ let db, ctx, caisseId;
 const CUR = 'ALP';
 
 // Des mouvements posés à la main dans le passé : la seule façon de vérifier une
-// frontière de mois sans attendre un mois.
+// frontière de mois sans attendre un mois. Type « order_fee » : un vrai
+// encaissement de l'activité — un « deposit » est l'argent du patron, et le
+// rapport l'exclut justement des entrées.
 async function seedAt(when, direction, amount) {
   const { rows } = await getPool().query(
     `INSERT INTO transactions (caisse_id, currency_code, direction, amount, balance_after, type, admin_id, created_at)
-     VALUES ($1,$2,$3,$4,0,'deposit',$5,$6) RETURNING id`,
+     VALUES ($1,$2,$3,$4,0,'order_fee',$5,$6) RETURNING id`,
     [caisseId, CUR, direction, amount, ctx.admin.id, when]
   );
   return rows[0].id;

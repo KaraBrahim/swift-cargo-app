@@ -26,11 +26,13 @@ export const PERIODS = {
   annee: { interval: '365 days', buckets: 12, label: 'cette année' },
 };
 
-// Internal caisse movements — a conversion writes an 'in' AND an 'out' in the
-// same caisse, a transfer moves money between our own caisses. Counting either
-// as revenue or spending would double-count the books, so they are excluded from
-// Entrées / Dépenses.
-const EXTERNAL_ONLY = `t.type NOT IN ('conversion','transfer')`;
+// Ce qui n'est PAS une entrée ni une dépense de l'activité :
+//   • conversion, transfer — de l'argent qu'on possède déjà, qui change de
+//     devise ou de caisse ; le compter doublerait les livres ;
+//   • deposit, withdrawal — l'argent du patron qui entre dans la caisse ou en
+//     ressort. Un apport n'est pas un gain, un retrait n'est pas une charge :
+//     le bénéfice ne bouge pas d'un dinar quand on remplit la caisse soi-même.
+const EXTERNAL_ONLY = `t.type NOT IN ('conversion','transfer','deposit','withdrawal')`;
 
 // ── generic helpers ──────────────────────────────────────────────────
 // `from`, `dateCol`, `sumExpr` and `where` are module-internal SQL constants,

@@ -29,7 +29,9 @@ const head = (report, range, extra = {}) => ({
 // Une conversion et un transfert déplacent de l'argent qu'on possède déjà :
 // les compter en « entrées » gonflerait le chiffre sans qu'un dinar de plus
 // soit entré. Ils ont leur propre bloc dans le rapport Argent.
-const EXTERNAL_ONLY = "type NOT IN ('conversion','transfer')";
+// Les apports et retraits du patron (deposit / withdrawal) sont exclus pour la
+// même raison : remplir la caisse de sa poche n'est pas un gain.
+const EXTERNAL_ONLY = "type NOT IN ('conversion','transfer','deposit','withdrawal')";
 
 // ── 1. Synthèse financière ───────────────────────────────────────────
 export async function financialSummary({ from, to, currency = 'DZD' } = {}, db = getPool()) {
