@@ -953,7 +953,7 @@ async function reverseShip(c, bon, leg, adminId) {
   }
 }
 
-export async function settle({ admin, id, passagerPayment, note, ip }) {
+export async function settle({ admin, id, passagerPayment, caisseId, note, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
     const bon = rows[0];
@@ -970,7 +970,12 @@ export async function settle({ admin, id, passagerPayment, note, ip }) {
 
     await bookSettlement(c, bon, admin, payment, note, owed);
     await recomputeAffectedOrders(c, bon);
-    await writeAudit(c, { adminId: admin.id, action: 'bon.settle', entity: 'bon', entityId: id, details: { passager_payment: payment, loss_total: bon.loss_total }, ip });
+    await writeAudit(c, { adminId: admin.id, action: 'bon.settle', entity: 'bon', entityId: id, details: { passager_payment: payment, loss_total: bon.loss_total, caisse_id: caisseId ?? null }, ip });
+    // « Régler et payer » : la caisse choisie verse le dû tout de suite. Sans
+    // caisse, le bon est réglé et le passager reste à payer depuis « Argent ».
+    if (caisseId && bon.passager_id && new Decimal(payment).gt(0)) {
+      await payPassagerTx(c, { ...bon, status: 'regle', passager_payment: payment }, { admin, caisseId, note, ip });
+    }
     return getBonDetail(id, c);
   });
 }
@@ -1102,11 +1107,13 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
 }
 
 // Pay the passager → cash OUT of an office caisse + reduce what we owe them.
-export async function payPassager({ admin, id, caisseId, amount, note, ip }) {
-  return withTx(async (c) => {
-    const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
-    const bon = rows[0];
-    if (!bon) throw errors.notFound('Bon introuvable.');
+// Payer le passager depuis une caisse, sur un bon déjà verrouillé et réglé.
+// Partagé par payPassager() et settle() : régler ET payer est un seul geste au
+// comptoir, il doit être une seule transaction — un bon marqué réglé sans que
+// la caisse bouge est exactement ce qu'on ne veut jamais voir.
+async function payPassagerTx(c, bon, { admin, caisseId, amount, note, ip }) {
+  const id = bon.id;
+  {
     if (bon.status !== 'regle') throw errors.conflict('Le bon doit être réglé avant de payer le passager.');
     if (!bon.passager_id) throw errors.conflict('Aucun passager sur ce bon.');
     const paid = await alreadyMoved(c, id, 'passager_payment');
@@ -1130,6 +1137,15 @@ export async function payPassager({ admin, id, caisseId, amount, note, ip }) {
       refOrderId: bon.order_id, refBonId: bon.id, caisseTxId: txId, adminId: admin.id, note,
     });
     await writeAudit(c, { adminId: admin.id, action: 'bon.pay_passager', entity: 'bon', entityId: id, details: { amount: amt, caisseId }, ip });
+  }
+}
+
+export async function payPassager({ admin, id, caisseId, amount, note, ip }) {
+  return withTx(async (c) => {
+    const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
+    const bon = rows[0];
+    if (!bon) throw errors.notFound('Bon introuvable.');
+    await payPassagerTx(c, bon, { admin, caisseId, amount, note, ip });
     return getBonDetail(id, c);
   });
 }

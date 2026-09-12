@@ -158,8 +158,8 @@ bonsRouter.post(
 
 bonsRouter.post(
   '/bons/:id/settle',
-  validate({ params: z.object({ id }), body: z.object({ passagerPayment: num.optional(), note: z.string().trim().max(300).optional() }) }),
-  asyncHandler(async (req, res) => res.json({ bon: await svc.settle({ admin: req.admin, id: req.params.id, passagerPayment: req.body.passagerPayment, note: req.body.note, ip: req.ip }) }))
+  validate({ params: z.object({ id }), body: z.object({ passagerPayment: num.optional(), caisseId: id.optional(), note: z.string().trim().max(300).optional() }) }),
+  asyncHandler(async (req, res) => res.json({ bon: await svc.settle({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))
 );
 
 const moneyAction = {

@@ -91,6 +91,8 @@ export default function BonDetailPage({ bonId }) {
   const [payMode, setPayMode] = useState('auto');
   const [feeForm, setFeeForm] = useState({ caisseId: '', amount: '' });
   const [payForm, setPayForm] = useState({ caisseId: '', amount: '' });
+  // La caisse qui paie au règlement. Vide = régler sans payer tout de suite.
+  const [settleCaisse, setSettleCaisse] = useState('');
   const [edit, setEdit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPayment, setConfirmPayment] = useState(null);
@@ -193,7 +195,10 @@ export default function BonDetailPage({ bonId }) {
       },
     })), 'Réconciliation enregistrée.');
   const settle = () =>
-    act(() => idem((key) => api(`/bons/${id}/settle`, { method: 'POST', idem: key, body: { passagerPayment: payment || undefined } })), 'Bon réglé.');
+    act(() => idem((key) => api(`/bons/${id}/settle`, {
+      method: 'POST', idem: key,
+      body: { passagerPayment: payment || undefined, caisseId: settleCaisse ? Number(settleCaisse) : undefined },
+    })), settleCaisse ? 'Bon réglé et passager payé.' : 'Bon réglé — passager à payer.');
   const collectFee = () =>
     act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount } })), 'Frais encaissés.');
   const payPassager = () =>
@@ -599,9 +604,23 @@ export default function BonDetailPage({ bonId }) {
                 <label className="field wz-amount"><span>Prix du service ({cur})</span>
                   <AmountInput autoFocus value={payment} onChange={(v) => setPayment(v)} /></label>
               )}
+              <div className="wz-money" style={{ marginTop: 10 }}>
+                <div className="field field-grow"><span>Caisse qui paie le passager</span>
+                  <EntityPicker
+                    icon="caisse"
+                    value={settleCaisse}
+                    onChange={setSettleCaisse}
+                    options={offices}
+                    labelOf={(c) => c.label}
+                    subOf={caisseSub}
+                    searchOf={(c) => c.label}
+                    placeholder="Payer plus tard (choisir une caisse pour payer maintenant)"
+                    emptyText="Aucune caisse de bureau."
+                  /></div>
+              </div>
               <div className="dt-actions">
                 <button className="btn btn-gold" disabled={busy || (payMode === 'manual' && !(Number(payment) >= 0))} onClick={settle}>
-                  <IconEl name="check" />Régler et payer le passager
+                  <IconEl name="check" />{settleCaisse ? 'Régler et payer le passager' : 'Régler (payer plus tard)'}
                 </button>
               </div>
             </div>
