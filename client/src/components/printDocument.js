@@ -7,6 +7,28 @@
 import { formatMoney } from './ui.jsx';
 import { formatQty } from '../lib/format.js';
 
+// Imprimer un document HTML complet SANS ouvrir de fenêtre.
+//
+// window.open() est une fenêtre surgissante : un bloqueur la refuse, et
+// l'application de bureau refuse toute nouvelle fenêtre. Un iframe caché dans
+// la page courante est de la même origine, ne demande rien à personne et
+// s'imprime avec la même boîte de dialogue. Il est retiré une fois imprimé.
+export function printHtml(html) {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(frame);
+  const w = frame.contentWindow;
+  const remove = () => setTimeout(() => frame.remove(), 500);
+  w.addEventListener('afterprint', remove, { once: true });
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // Sans onload, Chrome imprime parfois avant la mise en page des tableaux.
+  frame.onload = () => { w.focus(); w.print(); };
+  return true;
+}
+
 export const esc = (s) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -48,7 +70,7 @@ export const qrBlock = (qr, reference) =>
   (qr ? `<div class="qr"><img src="${qr}" alt=""><div>${esc(reference || '')}</div></div>` : '');
 
 // Open a standalone window with a finished document and trigger the print dialog.
-export function openPrintWindow({ title, societe, docTitle, subtitle, body }) {
+export function printWindowHtml({ title, societe, docTitle, subtitle, body }) {
   const s = societe ?? {};
   const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
     <title>${esc(title)}</title><style>${PRINT_CSS}</style></head><body>
@@ -65,15 +87,11 @@ export function openPrintWindow({ title, societe, docTitle, subtitle, body }) {
     </div>
     ${body}
     <div class="foot">${esc(s.pied_de_page || 'Document généré par Swift Cargo')}</div>
-    <script>window.onload = () => { window.print(); };<\/script>
   </body></html>`;
-
-  const w = window.open('', '_blank', 'width=900,height=1000');
-  if (!w) return false;
-  w.document.write(html);
-  w.document.close();
-  return true;
+  return html;
 }
+
+export const openPrintWindow = (doc) => printHtml(printWindowHtml(doc));
 
 // Print a region of the current page (used by Rapports, which already renders
 // the tables on screen — no point rebuilding them as a string).

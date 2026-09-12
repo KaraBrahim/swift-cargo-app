@@ -32,6 +32,7 @@ export const Icon = {
   search: svg(<><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></>),
   logout: svg(<><path d="M15 4.5h3a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5h-3" /><path d="M10 8 6 12l4 4M6 12h11" /></>),
   print: svg(<><path d="M7 9V3.5h10V9" /><rect x="4" y="9" width="16" height="7" rx="2" /><path d="M7 14h10v6.5H7z" /></>),
+  download: svg(<><path d="M12 4v11" /><path d="m7 10 5 5 5-5" /><path d="M4 19h16" /></>),
 
   // ── data / misc ──
   wallet: svg(<><rect x="3" y="6" width="18" height="13" rx="2.5" /><path d="M16 12.5h2" /><path d="M3 9h15a1 1 0 0 1 1 1" /></>),

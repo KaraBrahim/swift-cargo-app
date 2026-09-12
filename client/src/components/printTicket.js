@@ -14,7 +14,7 @@
 // The same window is also how you get a PDF: "Imprimer → Enregistrer au format
 // PDF" produces a single long page matching the roll.
 import {
-  esc, BON_STATUS_FR, measureUnit, qtyFr,
+  esc, printHtml, BON_STATUS_FR, measureUnit, qtyFr,
   declaredOf, missingOf, lineAmount,
 } from './printDocument.js';
 import { formatMoney } from '../lib/format.js';
@@ -61,16 +61,13 @@ export const ticketCss = (mm = 80) => `
 `;
 
 // Open a roll-sized window and fire the print dialog.
-export function openTicketWindow({ title, mm = 80, body }) {
-  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
+export function ticketWindowHtml({ title, mm = 80, body }) {
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
     <title>${esc(title)}</title><style>${ticketCss(mm)}</style></head>
-    <body>${body}<script>window.onload=()=>{window.print()};<\/script></body></html>`;
-  const w = window.open('', '_blank', 'width=420,height=800');
-  if (!w) return false;
-  w.document.write(html);
-  w.document.close();
-  return true;
+    <body>${body}</body></html>`;
 }
+
+export const openTicketWindow = (doc) => printHtml(ticketWindowHtml(doc));
 
 const header = (societe, docLabel, ref) => {
   const s = societe ?? {};

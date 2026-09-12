@@ -46,7 +46,6 @@ const PRINT_MODES = [
   { key: 'navigateur', label: 'Navigateur', hint: 'Pas d’impression directe : les documents passent par la fenêtre d’impression.' },
   { key: 'reseau', label: 'Réseau', hint: 'Imprimante avec une adresse IP sur le réseau local. Le mode à préférer.' },
   { key: 'windows', label: 'USB / Windows', hint: 'Imprimante branchée sur ce poste et installée dans Windows.' },
-  { key: 'fichier', label: 'Fichier', hint: 'Écrit le ticket dans un fichier — pour vérifier une mise en page sans gâcher de papier.' },
 ];
 
 // Direct printing: what turns « Imprimer » on a bon into paper coming out of the
@@ -111,10 +110,14 @@ function ImpressionSection() {
         <span className="muted" style={{ fontSize: '0.76rem' }}>Imprimante de ce bureau</span>
       </div>
       <p className="muted" style={{ fontSize: '0.78rem', marginTop: -4, marginBottom: 12 }}>
-        Une fois configurée, « Imprimer » sur un bon envoie le ticket directement à l’imprimante
-        thermique — sans fenêtre ni boîte de dialogue. L’impression par le navigateur (A4, PDF,
-        rouleau) reste toujours disponible.
+        Une fois configurée, « Imprimer directement » sur un bon envoie le ticket à l’imprimante
+        thermique, sans boîte de dialogue.
       </p>
+      <div className="alert" style={{ marginBottom: 14 }}>
+        Ces modes s’exécutent <strong>sur le serveur</strong> : l’imprimante doit être joignable
+        depuis lui. Depuis ce poste, « Imprimer » et « Enregistrer en PDF » (A4 ou rouleau) sont
+        toujours disponibles sur chaque document, sans aucune configuration.
+      </div>
 
       <div className="theme-grid theme-grid-wide" style={{ marginBottom: 16 }}>
         {PRINT_MODES.map((m) => (

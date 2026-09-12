@@ -262,7 +262,7 @@ function createWindow(port, site) {
     // se pose.
     icon: join(__dirname, 'build', 'icon.png'),
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'desk-preload.js') },
   });
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
@@ -305,6 +305,38 @@ function buildMenu() {
     },
   ]));
 }
+
+// ── Enregistrer un document en PDF ────────────────────────────────────
+// La page envoie le HTML complet du document (le même qu'elle imprime) ; on le
+// rend dans une fenêtre invisible et on demande à Chromium son PDF. Un rouleau
+// n'a pas de hauteur fixe : on mesure le document rendu et on fabrique une
+// page de cette hauteur, à la largeur du rouleau.
+const MICRONS_PER_MM = 1000;
+ipcMain.handle('desk:save-pdf', async (_e, { html, title, widthMm }) => {
+  const { filePath, canceled } = await dialog.showSaveDialog(win, {
+    title: 'Enregistrer en PDF',
+    defaultPath: join(app.getPath('documents'), `${String(title || 'document').replace(/[\\/:*?"<>|]+/g, '-')}.pdf`),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (canceled || !filePath) return { saved: false };
+
+  const page = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+  try {
+    await page.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    let pageSize = 'A4';
+    if (widthMm) {
+      const heightPx = await page.webContents.executeJavaScript('document.documentElement.scrollHeight');
+      // 96 px par pouce, 25,4 mm par pouce ; une marge de sécurité pour la fin.
+      const heightMm = Math.ceil(heightPx / 96 * 25.4) + 10;
+      pageSize = { width: widthMm * MICRONS_PER_MM, height: heightMm * MICRONS_PER_MM };
+    }
+    const pdf = await page.webContents.printToPDF({ pageSize, printBackground: true, margins: widthMm ? { marginType: 'none' } : undefined });
+    writeFileSync(filePath, pdf);
+    return { saved: true, path: filePath };
+  } finally {
+    page.destroy();
+  }
+});
 
 app.on('second-instance', () => {
   if (win) { if (win.isMinimized()) win.restore(); win.focus(); }

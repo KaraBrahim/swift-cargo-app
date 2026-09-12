@@ -19,8 +19,18 @@ import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
 import { IconEl } from './icons.jsx';
 import { useToast, errorMessage } from './ui.jsx';
-import { openPrintWindow } from './printDocument.js';
-import { openTicketWindow } from './printTicket.js';
+import { printHtml, printWindowHtml } from './printDocument.js';
+import { ticketWindowHtml } from './printTicket.js';
+
+// Le poste de travail expose window.desk (desktop/desk-preload.js) : lui seul
+// peut écrire un fichier sur cette machine. Dans un navigateur, « Enregistrer
+// en PDF » passe par la boîte d'impression, qui le propose déjà.
+const desk = () => (typeof window !== 'undefined' && typeof window.desk?.savePdf === 'function' ? window.desk : null);
+
+// Le dernier format choisi revient en tête : on imprime presque toujours pareil.
+const FORMAT_KEY = 'sc_print_format';
+const lastFormat = () => { try { return localStorage.getItem(FORMAT_KEY); } catch { return null; } };
+const rememberFormat = (k) => { try { localStorage.setItem(FORMAT_KEY, k); } catch { /* mode privé */ } };
 
 const BROWSER_FORMATS = [
   { key: 'a4', label: 'A4 / PDF', hint: 'Document classique, pour archive ou e-mail' },
@@ -58,17 +68,31 @@ export function PrintButton({
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [open]);
 
+  // Le même HTML sert à imprimer et à enregistrer.
+  const buildHtml = (format) => (format === 'a4'
+    ? printWindowHtml({ title, societe, docTitle: docTitle || title, subtitle, body: a4() })
+    : ticketWindowHtml({ title, mm: Number(format), body: ticket(societe) }));
+
   const runBrowser = (format) => {
     setOpen(false);
+    rememberFormat(format);
     try {
-      const ok = format === 'a4'
-        ? openPrintWindow({ title, societe, docTitle: docTitle || title, subtitle, body: a4() })
-        : openTicketWindow({ title, mm: Number(format), body: ticket(societe) });
-      // window.open returning null is the popup blocker — say so, because
-      // otherwise nothing happens and it looks like the button is broken.
-      if (!ok) toast.error('Fenêtre d’impression bloquée. Autorisez les pop-ups pour ce site.');
+      printHtml(buildHtml(format));
     } catch (err) {
       toast.error(`Impression impossible : ${err.message}`);
+    }
+  };
+
+  const runSave = async (format) => {
+    setOpen(false);
+    rememberFormat(format);
+    try {
+      const html = buildHtml(format);
+      if (!desk()) { printHtml(html); return; } // la boîte d'impression propose « Enregistrer en PDF »
+      const res = await desk().savePdf({ html, title, widthMm: format === 'a4' ? null : Number(format) });
+      if (res.saved) toast.success(`PDF enregistré : ${res.path}`);
+    } catch (err) {
+      toast.error(`Enregistrement impossible : ${err.message}`);
     }
   };
 
@@ -87,7 +111,9 @@ export function PrintButton({
     }
   };
 
-  const formats = ticket ? BROWSER_FORMATS : BROWSER_FORMATS.slice(0, 1);
+  const all = ticket ? BROWSER_FORMATS : BROWSER_FORMATS.slice(0, 1);
+  const last = lastFormat();
+  const formats = [...all].sort((x, y) => (x.key === last ? -1 : y.key === last ? 1 : 0));
 
   // Nothing to choose from: no roll builder and no printer — print A4 directly.
   if (!direct && formats.length === 1) {
@@ -131,11 +157,19 @@ export function PrintButton({
             </div>
           )}
           <div className="pop-section">
-            <div className="pop-section-title">Via le navigateur</div>
+            <div className="pop-section-title">Imprimer</div>
             {formats.map((f) => (
               <button key={f.key} className="print-opt" role="menuitem" onClick={() => runBrowser(f.key)}>
                 <span className="print-opt-label">{f.label}</span>
                 <span className="print-opt-hint">{f.hint}</span>
+              </button>
+            ))}
+          </div>
+          <div className="pop-section">
+            <div className="pop-section-title">{desk() ? 'Enregistrer en PDF' : 'Enregistrer en PDF (via la boîte d’impression)'}</div>
+            {formats.map((f) => (
+              <button key={`pdf-${f.key}`} className="print-opt" role="menuitem" onClick={() => runSave(f.key)}>
+                <span className="print-opt-label"><IconEl name="download" />{f.label}</span>
               </button>
             ))}
           </div>
