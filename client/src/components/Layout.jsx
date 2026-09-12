@@ -49,8 +49,9 @@ const NAV = [
     group: 'Système',
     items: [
       { to: '/taux', label: 'Taux de change', icon: 'taux' },
-      { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' },
+      { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users', superadmin: true },
       { to: '/audit', label: "Journal d'audit", icon: 'audit' },
+      { to: '/maintenance', label: 'Maintenance', icon: 'alert', superadmin: true },
     ],
   },
 ];
@@ -182,7 +183,7 @@ function Shell() {
           {NAV.map((section) => (
             <div key={section.group}>
               {navGroups && <div className="sb-group-label">{section.group}</div>}
-              {section.items.filter((it) => it.to !== '/utilisateurs' || admin?.role === 'superadmin').map((it) => (
+              {section.items.filter((it) => !it.superadmin || admin?.role === 'superadmin').map((it) => (
                 <NavLink
                   key={it.to}
                   to={it.to}

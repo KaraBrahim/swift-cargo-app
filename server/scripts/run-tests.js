@@ -23,8 +23,8 @@ try {
   try { rmSync(dataDir, { recursive: true, force: true }); } catch {}
   embedded = await startEmbeddedPg({ dataDir, port: PORT, persistent: false });
 
-  code = await new Promise((resolve) => {
-    const child = spawn(process.execPath, ['--test', 'test/*.test.js'], {
+  const run = (glob) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--test', glob], {
       cwd: join(__dirname, '..'),
       env: { ...process.env, DATABASE_URL: embedded.connectionString, USE_EMBEDDED_PG: '0' },
       stdio: 'inherit',
@@ -33,6 +33,11 @@ try {
     child.on('exit', (c) => resolve(c ?? 1));
     child.on('error', () => resolve(1));
   });
+  // Les fichiers de test/ tournent en parallèle sur la même base. Ceux de
+  // test/destructive/ la vident (purge, remise à zéro) : ils passent APRÈS,
+  // seuls, une fois que plus personne ne compte sur son contenu.
+  code = await run('test/*.test.js');
+  if (code === 0) code = await run('test/destructive/*.test.js');
 } catch (e) {
   console.error('Test bootstrap failed:', e);
 } finally {

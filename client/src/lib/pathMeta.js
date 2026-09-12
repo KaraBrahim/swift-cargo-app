@@ -18,6 +18,7 @@ const PAGES = [
   ['/impressions', 'Impressions', 'print'],
   ['/taux', 'Taux de change', 'taux'],
   ['/utilisateurs', 'Utilisateurs', 'users'],
+  ['/maintenance', 'Maintenance', 'alert'],
   ['/audit', "Journal d'audit", 'audit'],
   ['/parametres', 'Paramètres', 'gear'],
 ];

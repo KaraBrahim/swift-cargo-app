@@ -29,6 +29,7 @@
     },
     "nsis": {
       "oneClick": false,
+      "include": "build/installer.nsh",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "perMachine": false,

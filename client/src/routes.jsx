@@ -24,6 +24,7 @@ import ProfilePage from './pages/ProfilePage.jsx';
 import RapportsPage from './pages/RapportsPage.jsx';
 import ImpressionsPage from './pages/ImpressionsPage.jsx';
 import UtilisateursPage from './pages/UtilisateursPage.jsx';
+import MaintenancePage from './pages/MaintenancePage.jsx';
 import ParametresPage from './pages/ParametresPage.jsx';
 
 // Les pages de l'application, rendues pour UNE adresse donnée.
@@ -85,6 +86,7 @@ export function AppPages({ path }) {
       <Route path="/rapports" element={<RapportsPage />} />
       <Route path="/impressions" element={<ImpressionsPage />} />
       <Route path="/utilisateurs" element={<SuperAdminOnly><UtilisateursPage /></SuperAdminOnly>} />
+      <Route path="/maintenance" element={<SuperAdminOnly><MaintenancePage /></SuperAdminOnly>} />
       <Route path="/parametres" element={<ParametresPage />} />
       <Route path="/taux" element={<RatesPage />} />
       <Route path="/audit" element={<AuditPage />} />
