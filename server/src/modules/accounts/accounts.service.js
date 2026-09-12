@@ -270,8 +270,11 @@ export async function listCharges({ category, period, limit = 200 } = {}) {
   return { charges: rows, totals: sumBy(rows, 'currency_code'), byCategory: sumBy(rows, 'category') };
 }
 
-export async function createCharge({ admin, category, label, amount, currency = 'DZD', caisseId, period, recurring, note, ip }) {
-  return withTx(async (c) => {
+// `client` : pour s'inscrire dans une transaction déjà ouverte (une paie
+// rattache ensuite la charge à son salarié — tout ou rien).
+export async function createCharge({ admin, category, label, amount, currency = 'DZD', caisseId, period, recurring, note, ip }, client) {
+  const inTx = client ? (fn) => fn(client) : withTx;
+  return inTx(async (c) => {
     const amt = new Decimal(amount);
     if (!amt.gt(0)) throw errors.invalidAmount('Le montant doit être supérieur à zéro.');
     const { txId } = await postMovement(c, {

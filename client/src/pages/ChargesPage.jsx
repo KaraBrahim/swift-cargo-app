@@ -12,6 +12,7 @@ import { defaultCurrencyFor } from '../lib/offices.js';
 import AmountInput from '../components/AmountInput.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
+import { SalairesPanel } from '../components/SalairesPanel.jsx';
 
 const ACCENT = 'var(--c-caisse)';
 const CATEGORIES = [
@@ -27,6 +28,9 @@ export default function ChargesPage() {
   const toast = useToast();
   const isSuper = useIsSuper();
   const [filter, setFilter] = useState('');
+  // Deux onglets : les charges, et les salariés que l'entreprise paie.
+  const [tab, setTab] = useState(() => { try { return localStorage.getItem('sc_charges_tab') || 'charges'; } catch { return 'charges'; } });
+  const pickTab = (t) => { setTab(t); try { localStorage.setItem('sc_charges_tab', t); } catch { /* ignore */ } };
   const charges = useApi(`/charges${filter ? `?category=${filter}` : ''}`);
   const caisses = useApi('/caisses');
   const currencies = useApi('/currencies');
@@ -58,9 +62,13 @@ export default function ChargesPage() {
     <div style={{ '--accent': ACCENT }}>
       <PageHeader
         icon="wallet" accent={ACCENT} title="Charges & abonnements"
-        subtitle="Dépenses de l’entreprise elle-même : internet, électricité, loyer, salaires…"
+        subtitle={tab === 'salaires' ? 'Les personnes que l’entreprise paie : le mois, un acompte, ou un montant libre.' : 'Dépenses de l’entreprise elle-même : internet, électricité, loyer…'}
       >
-        <button
+        <div className="seg">
+          <button type="button" className={tab === 'charges' ? 'active' : ''} onClick={() => pickTab('charges')}><IconEl name="wallet" />Charges</button>
+          <button type="button" className={tab === 'salaires' ? 'active' : ''} onClick={() => pickTab('salaires')}><IconEl name="users" />Salaires</button>
+        </div>
+        {tab === 'charges' && <button
           className="btn btn-gold"
           onClick={() => setForm(form ? null : {
             ...EMPTY,
@@ -69,8 +77,10 @@ export default function ChargesPage() {
           })}
         >
           <IconEl name={form ? 'close' : 'plus'} />{form ? 'Fermer' : 'Nouvelle charge'}
-        </button>
+        </button>}
       </PageHeader>
+
+      {tab === 'salaires' ? <SalairesPanel offices={offices} currencies={currencies.data?.currencies ?? []} /> : (<>
 
       <div className="kpi-row">
         <div className="kpi-card kpi-static">
@@ -228,6 +238,7 @@ export default function ChargesPage() {
         onCancel={() => setConfirm(null)}
         onConfirm={() => run(() => api(`/charges/${confirm.id}`, { method: 'DELETE' }), 'Charge supprimée.')}
       />
+      </>)}
     </div>
   );
 }

@@ -26,6 +26,7 @@ import { settingsRouter } from './modules/settings/settings.routes.js';
 import { printingRouter } from './modules/printing/printing.routes.js';
 import { scanRouter } from './modules/scan/scan.routes.js';
 import { maintenanceRouter } from './modules/maintenance/maintenance.routes.js';
+import { employeesRouter } from './modules/employees/employees.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { scrubResponses } from './lib/visibility.js';
 import { nudgeSync } from './modules/sync/sync.service.js';
@@ -139,6 +140,7 @@ export function createApp() {
   app.use('/api', printingRouter);
   app.use('/api', scanRouter);
   app.use('/api', maintenanceRouter);
+  app.use('/api', employeesRouter);
 
   // After every API route, before the 404 handler.
   serveClient(app);

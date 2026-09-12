@@ -25,7 +25,7 @@ export const DOMAINS = [
              'person_ledger', 'charges', 'conversions', 'transactions'],
     requires: [],
   },
-  { key: 'people', label: 'Passagers et fournisseurs', hint: 'Le répertoire des personnes.', tables: ['people'], requires: ['activite'] },
+  { key: 'people', label: 'Passagers, fournisseurs et salariés', hint: 'Le répertoire des personnes et les salariés.', tables: ['people', 'employees'], requires: ['activite'] },
   { key: 'stock', label: 'Articles et stock', hint: 'Catalogue, catégories, niveaux et inventaires.', tables: ['stock_inventory', 'stock_levels', 'stock_items', 'stock_categories'], requires: ['activite'] },
   { key: 'rates', label: 'Taux de change', hint: 'Historique des taux. Les taux de départ sont recréés.', tables: ['pair_rates', 'currency_pairs', 'exchange_rates'], requires: [] },
   { key: 'journal', label: 'Journal', hint: 'Journal d’audit, tentatives de connexion, clés d’idempotence.', tables: ['audit_log', 'login_attempts', 'idempotency_keys'], requires: [] },
