@@ -135,6 +135,18 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
     }
   }, [bon]);
 
+  // « Modifier » depuis le bon fournisseur ouvre le formulaire tout de suite.
+  // Ce hook DOIT précéder les retours anticipés ci-dessous : un hook placé
+  // après change le nombre de hooks d'un rendu à l'autre, et React s'arrête
+  // (erreur #310). openEdit est défini plus bas ; on le lit via une ref.
+  const autoOpened = useRef(false);
+  const openEditRef = useRef(null);
+  useEffect(() => {
+    if (!autoEdit || autoOpened.current || !bon || bon.status !== 'cree' || allocatable.loading) return;
+    autoOpened.current = true;
+    openEditRef.current?.();
+  }, [autoEdit, bon, allocatable.loading]);
+
   if (loading) return <Spinner />;
   if (error) return <div className="alert alert-error">{error}</div>;
 
@@ -240,17 +252,10 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
       lines: bon.lines.map((l) => (isFournisseurBon ? toEditLine(l) : toPickedLine(l, index))),
     });
   };
+  openEditRef.current = openEdit;
   const setEditLine = (i, next) => setEdit((e) => ({ ...e, lines: e.lines.map((l, idx) => (idx === i ? next : l)) }));
   const addEditLine = () => setEdit((e) => ({ ...e, lines: [...e.lines, emptyLine()] }));
   const removeEditLine = (i) => setEdit((e) => ({ ...e, lines: e.lines.filter((_, idx) => idx !== i) }));
-  // « Modifier » depuis le bon fournisseur ouvre le formulaire tout de suite :
-  // un second clic sur le même mot, sur une autre page, n'apprend rien.
-  const autoOpened = useRef(false);
-  useEffect(() => {
-    if (!autoEdit || autoOpened.current || !bon || bon.status !== 'cree' || allocatable.loading) return;
-    autoOpened.current = true;
-    openEdit();
-  }, [autoEdit, bon, allocatable.loading]); // eslint-disable-line react-hooks/exhaustive-deps
   const editValid = edit && edit.lines.length > 0 && edit.lines.every(isFournisseurBon ? lineValid : pickedValid);
   const editLinesTotal = edit ? edit.lines.reduce((s, l) => s + (isFournisseurBon ? lineTotal(l) : pickedTotal(l)), 0) : 0;
   const editTotal = editLinesTotal + (isFournisseurBon ? Number(edit?.commission || 0) : 0);
