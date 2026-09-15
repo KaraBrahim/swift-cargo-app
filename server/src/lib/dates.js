@@ -13,15 +13,11 @@
 // n'a tort ; c'est pourquoi chaque rapport ANNONCE le fuseau qui l'a produit.
 // Pour revenir à une horloge commune, il suffit de faire pointer les trois
 // entrées de OFFICE_TZ sur la même valeur.
-import { config } from '../config.js';
 import { errors } from './AppError.js';
 
-const OFFICE_TZ = {
-  algeria: 'Africa/Algiers',
-  china: 'Asia/Shanghai',
-  // Le hub n'a pas de guichet : il compte à l'heure de la maison mère.
-  cloud: 'Africa/Algiers',
-};
+// Une seule horloge : celle de la maison mère. Un serveur unique ne sait pas
+// devant quel guichet on se trouve, et un rapport doit se lire pareil partout.
+const COMPANY_TZ = 'Africa/Algiers';
 
 // Étiquette lisible, imprimée sur le rapport à côté de la période.
 const TZ_LABEL = {
@@ -29,7 +25,7 @@ const TZ_LABEL = {
   'Asia/Shanghai': 'heure de Chine',
 };
 
-export const reportTz = () => OFFICE_TZ[config.site] ?? OFFICE_TZ.cloud;
+export const reportTz = () => COMPANY_TZ;
 export const tzLabel = (tz = reportTz()) => TZ_LABEL[tz] ?? tz;
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;

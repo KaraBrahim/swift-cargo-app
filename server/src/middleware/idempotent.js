@@ -33,20 +33,6 @@ export function idempotent(req, res, next) {
     return next(errors.validation([{ field: 'Idempotency-Key', message: 'Clé d’idempotence invalide.' }]));
   }
 
-  // Une clé se vérifie une fois par REQUÊTE, pas une fois par routeur.
-  //
-  // Tous les routeurs sont montés sur '/api' (voir app.js), et `router.use()`
-  // s'exécute pour TOUTE requête qui traverse le routeur — y compris celles
-  // dont aucune route ne correspond. Un POST /api/bons/:id/reconcile traverse
-  // donc caisse, puis people, puis bons : la première traversée posait la clé,
-  // la deuxième la retrouvait et répondait « Opération déjà en cours de
-  // traitement » à une requête qui n'avait jamais commencé.
-  //
-  // Autrement dit : AUCUNE opération portant une clé ne pouvait aboutir. Le
-  // défaut n'a été visible qu'aujourd'hui, parce que la table idempotency_keys
-  // n'existe que depuis la migration 024 — avant, ce chemin échouait plus tôt.
-  if (req.idempotencyChecked) return next();
-  req.idempotencyChecked = true;
 
   const pool = getPool();
   const fingerprint = fingerprintOf(req);

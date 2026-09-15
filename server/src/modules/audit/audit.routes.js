@@ -2,12 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import { getPool } from '../../db/pool.js';
 import { notSuperadmin, isSuperadmin } from '../../lib/visibility.js';
 
 export const auditRouter = Router();
-auditRouter.use(requireAuth);
 
 // Every action is named `<domain>.<verb>`, so the domain already IS the
 // category — no extra column needed, just a prefix match. Kept here rather than

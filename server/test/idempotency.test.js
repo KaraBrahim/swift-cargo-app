@@ -1,19 +1,4 @@
 // La clé d'idempotence, vue depuis le middleware lui-même.
-//
-// Il existait déjà un test sur la TABLE (money-integrity : la contrainte
-// d'unicité, la réponse mémorisée). Il passait au vert pendant que le
-// middleware, lui, refusait absolument toutes les opérations : personne
-// n'exerçait le middleware.
-//
-// Le défaut : tous les routeurs sont montés sur '/api' (app.js), et
-// `router.use()` s'exécute pour toute requête qui TRAVERSE le routeur, même
-// sans route correspondante. Six routeurs appellent `idempotent`. Un POST
-// /api/bons/:id/reconcile traversait donc caisse (qui posait la clé), puis
-// people, puis bons — et la deuxième traversée retrouvait la clé qu'elle venait
-// elle-même de poser et répondait « Opération déjà en cours de traitement ».
-//
-// Seules les routes de `caisse` marchaient : c'est le premier routeur monté qui
-// appelle le middleware, et il sert sa route immédiatement.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { setupTestDb, firstAdminAndCaisse } from './helpers/testdb.js';
@@ -70,21 +55,6 @@ async function stored(key, ms = 3000) {
   }
 }
 
-test('la clé ne se vérifie qu’une fois par requête, pas une fois par routeur', async () => {
-  const key = uniqueKey('multi');
-  const req = makeReq(key);
-  const res = makeRes();
-
-  const first = await run(req, res);
-  assert.equal(first.err, undefined, 'le premier routeur traversé laisse passer');
-
-  // LA MÊME requête, traversant un second routeur monté sur '/api'. C'est
-  // exactement ce que fait Express, et c'est ce qui cassait tout.
-  const second = await run(req, res);
-  assert.equal(second.err, undefined,
-    'le second routeur doit laisser passer : la requête n’a pas encore été exécutée une seule fois');
-  assert.notEqual(second.replay, true, 'et il ne doit pas non plus rejouer une réponse inexistante');
-});
 
 test('une requête rejouée retrouve sa réponse au lieu de refaire le travail', async () => {
   const key = uniqueKey('replay');
@@ -145,5 +115,4 @@ test('sans en-tête, rien ne change', async () => {
   const req = { ...makeReq('peu-importe'), get: () => undefined };
   const res = makeRes();
   assert.equal((await run(req, res)).err, undefined);
-  assert.equal(req.idempotencyChecked, undefined, 'aucune clé posée, aucun drapeau');
 });

@@ -2,12 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import * as notif from './notifications.service.js';
 import { isSuperadmin } from '../../lib/visibility.js';
 
 export const notificationsRouter = Router();
-notificationsRouter.use(requireAuth);
 
 notificationsRouter.get(
   '/notifications',

@@ -10,10 +10,6 @@ export function initPool(connectionString) {
   // Force UTF-8 on every session — the server locale may default to WIN1252.
   pool = new Pool({ connectionString, max: 10, idleTimeoutMillis: 30_000, client_encoding: 'UTF8' });
   pool.on('error', (err) => logger.error('Idle pg client error', err.message));
-  // Every connection knows which site it is (used by the sync triggers).
-  pool.on('connect', (client) => {
-    client.query("SELECT set_config('app.site', $1, false)", [config.site]).catch(() => {});
-  });
   return pool;
 }
 

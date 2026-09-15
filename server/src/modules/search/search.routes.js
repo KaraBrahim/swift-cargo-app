@@ -5,11 +5,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import { getPool } from '../../db/pool.js';
 
 export const searchRouter = Router();
-searchRouter.use(requireAuth);
 
 const PER_GROUP = 5;
 

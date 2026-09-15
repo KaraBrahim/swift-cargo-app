@@ -181,7 +181,6 @@ export default function OrderDetailPage() {
               subtitle={o.reference}
               a4={() => orderManifestBody(o, qr)}
               ticket={(societe) => orderTicket(o, societe, qr)}
-              direct={`/print/order/${o.id}`}
             />
             <button
               className="btn btn-gold"

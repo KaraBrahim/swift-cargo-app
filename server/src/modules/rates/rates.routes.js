@@ -2,11 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import * as rates from './rates.service.js';
 
 export const ratesRouter = Router();
-ratesRouter.use(requireAuth);
 
 // Decimal-string amount/rate validators (never floats over the wire).
 const decimalString = (max = 8) =>

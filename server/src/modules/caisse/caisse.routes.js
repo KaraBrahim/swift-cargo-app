@@ -2,15 +2,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth, requireSuperadmin } from '../../middleware/auth.js';
+import { requireSuperadmin } from '../../middleware/auth.js';
 import { idempotent } from '../../middleware/idempotent.js';
 import * as caisse from './caisse.service.js';
 
 export const caisseRouter = Router();
-caisseRouter.use(requireAuth);
 // Un réessai après un timeout ne doit pas rejouer l'opération : voir
 // middleware/idempotent.js. Sans l'en-tête, comportement inchangé.
-caisseRouter.use(idempotent);
 
 const id = z.coerce.number().int().positive();
 const code = z.string().trim().toUpperCase().length(3);

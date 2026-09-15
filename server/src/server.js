@@ -4,9 +4,7 @@ import { config } from './config.js';
 import { ensureConnection } from './db/connect.js';
 import { runMigrations } from './db/migrate.js';
 import { runSeed } from './db/seed.js';
-import { applyIdRanges } from './db/nodeSetup.js';
 import { closePool } from './db/pool.js';
-import { startSyncWorker } from './modules/sync/sync.service.js';
 import { createApp } from './app.js';
 import { logger } from './lib/logger.js';
 
@@ -24,16 +22,6 @@ function assertSecrets() {
     err.userFacing = true;
     throw err;
   }
-  if (!config.isProduction) return;
-
-  // Not fatal: with no token the /sync/* routes refuse everything (see
-  // sync.routes.js), so the ledger stays closed — sync is simply off.
-  if (!config.nodeToken) {
-    logger.warn(
-      "NODE_TOKEN non défini : la synchronisation multi-sites est DÉSACTIVÉE — les routes /sync/* " +
-        'refusent toutes les requêtes. Définissez NODE_TOKEN des deux côtés pour l\'activer.'
-    );
-  }
 }
 
 async function main() {
@@ -42,14 +30,7 @@ async function main() {
 
   const conn = await ensureConnection();
   await runMigrations();
-  // Les plages d'identifiants AVANT le seed, et non après : le seed écrit de
-  // vraies lignes. Semées hors plage, elles prenaient les identifiants 1, 2,
-  // 3… sur CHAQUE machine — et deux machines qui poussent leur ligne n° 1 vers
-  // le hub se heurtent sur sa clé primaire. Le cycle entier échouait alors avec
-  // « push failed 409 », sans jamais rien synchroniser.
-  await applyIdRanges();
   await runSeed();
-  startSyncWorker();
 
   if (config.isProduction && !config.cookieSecure) {
     logger.warn(

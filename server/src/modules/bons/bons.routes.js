@@ -2,15 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import { idempotent } from '../../middleware/idempotent.js';
 import * as svc from './bons.service.js';
 
 export const bonsRouter = Router();
-bonsRouter.use(requireAuth);
 // Un réessai après un timeout ne doit pas rejouer l'opération : voir
 // middleware/idempotent.js. Sans l'en-tête, comportement inchangé.
-bonsRouter.use(idempotent);
 
 const id = z.coerce.number().int().positive();
 const num = z.union([z.string(), z.number()]).transform((v) => String(v).trim());

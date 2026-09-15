@@ -72,22 +72,5 @@ export const config = {
     return Number.isFinite(n) ? n : v;
   })(),
 
-  // Multi-site identity for offline sync: 'cloud' | 'china' | 'algeria'.
-  site: process.env.SITE || 'cloud',
-  // Desk nodes sync to this hub; empty on the hub itself.
-  cloudUrl: process.env.CLOUD_URL || '',
-  nodeToken: process.env.NODE_TOKEN || '',
-  // Le rythme quand tout va bien. Court, parce que la synchronisation doit se
-  // faire oublier : ce qu'un bureau saisit doit apparaître à l'autre en
-  // quelques secondes. Une écriture locale, elle, part SANS attendre ce délai —
-  // voir nudgeSync().
-  syncIntervalMs: Number(process.env.SYNC_INTERVAL_MS) || 3000,
-  // Le rythme quand la ligne est coupée. Réessayer toutes les 3 secondes pendant
-  // une panne d'une journée ne rétablit rien : ça remplit le journal et réveille
-  // la machine pour rien. Le délai double à chaque échec jusqu'à ce plafond,
-  // puis repart au rythme court dès que ça repasse.
-  syncMaxBackoffMs: Number(process.env.SYNC_MAX_BACKOFF_MS) || 60000,
 };
 
-// Per-node id ranges so offline nodes never collide on integer PKs.
-export const ID_OFFSETS = { cloud: 1, china: 700_000_000, algeria: 1_400_000_000 };

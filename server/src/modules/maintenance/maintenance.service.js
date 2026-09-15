@@ -11,7 +11,6 @@
 // domaine « activité », et des domaines qui en dépendent (`requires`).
 import { getPool, withTx } from '../../db/pool.js';
 import { runSeed } from '../../db/seed.js';
-import { applyIdRanges } from '../../db/nodeSetup.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { replayChain } from '../caisse/caisse.service.js';
@@ -71,8 +70,6 @@ export async function purge({ admin, domains, confirm, ip }) {
   await withTx(async (c) => {
     const present = await existingTables(c);
     const tables = keys.flatMap((k) => DOMAINS.find((d) => d.key === k).tables).filter((t) => present.has(t));
-    // TRUNCATE ne déclenche pas les triggers ligne à ligne : la capture de
-    // synchronisation n'écrit rien, et c'est voulu — on efface, on ne réplique pas.
     if (tables.length) await c.query(`TRUNCATE ${tables.join(', ')} RESTART IDENTITY CASCADE`);
     if (keys.includes('activite')) {
       await c.query('UPDATE caisse_balances SET balance = 0');
@@ -88,8 +85,6 @@ export async function purge({ admin, domains, confirm, ip }) {
     await getPool().query("DELETE FROM sessions WHERE admin_id IN (SELECT id FROM admins WHERE role <> 'superadmin')");
     await getPool().query("DELETE FROM admins WHERE role <> 'superadmin'");
   }
-  // Les plages d'identifiants propres à ce site, après RESTART IDENTITY.
-  await applyIdRanges();
   return { purged: keys };
 }
 
@@ -121,7 +116,7 @@ export async function revokeSessions({ admin, ip }) {
 
 // Une sauvegarde lisible : toutes les tables, en JSON. Pas les sessions ni les
 // mots de passe — une sauvegarde qui circule ne doit pas ouvrir de porte.
-const BACKUP_SKIP = new Set(['sessions', 'idempotency_keys', 'login_attempts', 'sync_outbox', 'sync_cursor']);
+const BACKUP_SKIP = new Set(['sessions', 'idempotency_keys', 'login_attempts']);
 export async function backup() {
   const db = getPool();
   const present = [...await existingTables(db)].filter((t) => !BACKUP_SKIP.has(t)).sort();

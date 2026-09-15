@@ -169,23 +169,6 @@ test('a partial reconcile leaves loss_total equal to the sum of the lines', asyn
   assert.equal(head, '400.00');   // 3 manquants + 1 manquant, à 100
 });
 
-// ── 5 · Une suppression se réplique ─────────────────────────────────────────
-test('deleting a movement emits a delete event for the other office', async () => {
-  const d = await caisse.deposit({ admin: ctx.admin, caisseId: ctx.caisseId, currency: 'EUR', amount: '77' });
-  const uuid = (await getPool().query('SELECT uuid FROM transactions WHERE id=$1', [d.transactionId])).rows[0].uuid;
-  await caisse.deleteMovement({ admin: ctx.admin, id: d.transactionId });
-  const { rows } = await getPool().query(
-    "SELECT op FROM sync_outbox WHERE entity='transactions' AND entity_uuid=$1 AND op='delete'", [uuid]
-  );
-  assert.equal(rows.length, 1, 'the deletion is in the feed');
-});
-
-test('a charge replicates, like the movement it causes', async () => {
-  const { rows } = await getPool().query(
-    "SELECT COUNT(*)::int n FROM pg_trigger g JOIN pg_class c ON c.oid=g.tgrelid WHERE c.relname='charges' AND NOT g.tgisinternal"
-  );
-  assert.ok(rows[0].n >= 3, 'origin + capture + capture_del');
-});
 
 // ── 6 · Un ordre bouge d'un seul tenant ─────────────────────────────────────
 test('deleting an order rolls back entirely when a child refuses', async () => {
@@ -235,31 +218,21 @@ test('a currency cannot claim a scale the money columns cannot hold', async () =
   );
 });
 
-// ── 9 · Le bureau d'en face applique bien la suppression ────────────────────
-// Le smoke sync monte trois grappes Postgres ; ce test rejoue le même geste sur
-// une seule : l'événement de suppression est appliqué comme un distant, et le
-// solde projeté est reconstruit sans le mouvement disparu.
-test('a delete event applied from the other office removes the row and fixes the balance', async () => {
+// ── 9 · Le solde se reconstruit depuis les écritures ─────────────────
+// Une ligne de mouvement qui disparaît (correction, purge) ne doit pas laisser
+// un solde qui la compte encore : le recalcul repart des écritures.
+test('a removed movement is no longer counted once balances are recomputed', async () => {
   const pool = getPool();
-  const { applyEvents, recomputeProjections } = await import('../src/modules/sync/sync.service.js');
+  const { replayChain } = await import('../src/modules/caisse/caisse.service.js');
+  const { withTx } = await import('../src/db/pool.js');
 
   const d = await caisse.deposit({ admin: ctx.admin, caisseId: ctx.caisseId, currency: 'CNY', amount: '900' });
-  const row = (await pool.query('SELECT * FROM transactions WHERE id=$1', [d.transactionId])).rows[0];
   const balBefore = (await pool.query(
     "SELECT balance FROM caisse_balances WHERE caisse_id=$1 AND currency_code='CNY'", [ctx.caisseId])).rows[0].balance;
 
-  // Tel qu'il arriverait du hub.
-  const { withTx } = await import('../src/db/pool.js');
-  await withTx((c) => applyEvents(c, [{
-    uuid: '00000000-0000-4000-8000-00000000dead',
-    entity: 'transactions', entity_uuid: row.uuid, op: 'delete',
-    snapshot: row, origin_site: 'china', server_seq: 999999,
-  }]));
+  await pool.query('DELETE FROM transactions WHERE id=$1', [d.transactionId]);
+  await withTx((c) => replayChain(c, ctx.caisseId, 'CNY'));
 
-  const gone = await pool.query('SELECT 1 FROM transactions WHERE id=$1', [d.transactionId]);
-  assert.equal(gone.rows.length, 0, 'la ligne a disparu ici aussi');
-
-  await withTx((c) => recomputeProjections(c));
   const balAfter = (await pool.query(
     "SELECT balance FROM caisse_balances WHERE caisse_id=$1 AND currency_code='CNY'", [ctx.caisseId])).rows[0].balance;
   assert.equal(Number(balBefore) - Number(balAfter), 900, 'le solde a suivi');

@@ -2,18 +2,15 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import { idempotent } from '../../middleware/idempotent.js';
 import * as svc from './people.service.js';
 import { getAccount, settleAccount } from '../accounts/accounts.service.js';
 
 export const peopleRouter = Router();
-peopleRouter.use(requireAuth);
 // Ce routeur déplace de l'argent (règlement de compte) et maintenant de la
 // marchandise (remise au comptoir). Un double-clic ou un réessai après un
 // timeout ne doit rejouer ni l'un ni l'autre. Sans l'en-tête, comportement
 // inchangé — voir middleware/idempotent.js.
-peopleRouter.use(idempotent);
 
 const id = z.coerce.number().int().positive();
 

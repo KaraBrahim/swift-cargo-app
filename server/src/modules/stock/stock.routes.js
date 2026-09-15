@@ -2,11 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import * as svc from './stock.service.js';
 
 export const stockRouter = Router();
-stockRouter.use(requireAuth);
 
 const id = z.coerce.number().int().positive();
 const qty = z.union([z.string(), z.number()]).transform((v) => String(v).trim()).optional();

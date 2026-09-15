@@ -351,7 +351,6 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
               subtitle={bon.reference}
               a4={() => bonDocBody(bon, qr)}
               ticket={(societe) => bonTicket(bon, societe, qr)}
-              direct={`/print/bon/${bon.id}`}
             />
             {/* Supprimer definitivement : reserve au super-administrateur. */}
             {isSuper && (

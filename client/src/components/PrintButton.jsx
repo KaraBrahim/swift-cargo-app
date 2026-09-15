@@ -1,19 +1,9 @@
-// One print control, reused by every screen.
+// Un seul contrôle d'impression, pour tous les écrans.
 //
-// Every document in the app can go out in four shapes, and the choice is the
-// user's, not the page's:
-//   * Direct     — straight to the thermal printer wired to this desk's server.
-//                  No window, no dialog: click, paper. This is the everyday one
-//                  once Paramètres → Impression is filled in.
-//   * A4         — the filing / e-mail copy; "Enregistrer au format PDF" in the
-//                  print dialog is the PDF export (no extra dependency).
-//   * 80 / 58 mm — the same roll ticket, but rendered by the browser. The way
-//                  to print from a laptop that is not the machine holding the
-//                  printer, and the fallback when the printer is unreachable.
-//
-// A page supplies the data once, through `a4`, `ticket` and `direct`, and this
-// component handles the format menu, the company header and the failure cases
-// (popup blocked, printer offline) that would otherwise fail silently.
+// Chaque document sort en A4 ou en ticket (80 / 58 mm), imprimé par le
+// navigateur ou enregistré en PDF — sur le poste, avec une vraie boîte
+// d'enregistrement. La page fournit le document une fois (`a4`, `ticket`) ;
+// le menu, l'en-tête de la société et le format mémorisé sont ici.
 import { useState, useRef, useEffect } from 'react';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
@@ -44,7 +34,6 @@ export function PrintButton({
   subtitle,
   a4,             // () => html string (A4 body)
   ticket,         // (societe) => html string (roll body); omit to hide roll options
-  direct,         // '/print/bon/42' — API path that prints on the real printer
   label = 'Imprimer',
   className = 'btn btn-ghost',
   disabled = false,
@@ -54,10 +43,7 @@ export function PrintButton({
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
   const settings = useApi('/settings');
-  // Only asked for when the page actually offers direct printing.
-  const status = useApi(direct ? '/print/status' : null);
   const societe = settings.data?.settings?.societe;
-  const printer = status.data;
 
   useEffect(() => {
     if (!open) return;
@@ -96,27 +82,12 @@ export function PrintButton({
     }
   };
 
-  const runDirect = async () => {
-    setOpen(false);
-    setBusy(true);
-    try {
-      const res = await api(direct, { method: 'POST' });
-      toast.success(res.copies > 1 ? `Imprimé (${res.copies} exemplaires).` : 'Envoyé à l’imprimante.');
-    } catch (err) {
-      // The printer being unplugged is an everyday event, not a bug — point at
-      // the way out instead of just reporting the failure.
-      toast.error(`${errorMessage(err)} Vous pouvez imprimer via le navigateur en attendant.`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const all = ticket ? BROWSER_FORMATS : BROWSER_FORMATS.slice(0, 1);
   const last = lastFormat();
   const formats = [...all].sort((x, y) => (x.key === last ? -1 : y.key === last ? 1 : 0));
 
   // Nothing to choose from: no roll builder and no printer — print A4 directly.
-  if (!direct && formats.length === 1) {
+  if (formats.length === 1) {
     return (
       <button className={className} onClick={() => runBrowser('a4')} disabled={disabled}>
         <IconEl name="print" />{label}
@@ -131,31 +102,6 @@ export function PrintButton({
       </button>
       {open && (
         <div className="pop pop-print" role="menu">
-          {direct && (
-            <div className="pop-section">
-              <div className="pop-section-title">Imprimante</div>
-              <button
-                className="print-opt print-opt-direct"
-                role="menuitem"
-                onClick={runDirect}
-                disabled={!printer?.enabled}
-              >
-                <span className="print-opt-label">
-                  <IconEl name="print" />Imprimer directement
-                  {printer?.enabled && (
-                    <span className={`dot ${printer.ok ? 'dot-ok' : 'dot-warn'}`} title={printer.message} />
-                  )}
-                </span>
-                <span className="print-opt-hint">
-                  {!printer
-                    ? 'Vérification…'
-                    : printer.enabled
-                      ? `${printer.config.largeur} mm — ${printer.config.imprimante || printer.config.hote || printer.config.fichier || 'destination non renseignée'}`
-                      : 'Non configurée — Paramètres → Impression'}
-                </span>
-              </button>
-            </div>
-          )}
           <div className="pop-section">
             <div className="pop-section-title">Imprimer</div>
             {formats.map((f) => (

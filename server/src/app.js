@@ -16,20 +16,19 @@ import { bonsRouter } from './modules/bons/bons.routes.js';
 import { ordersRouter } from './modules/orders/orders.routes.js';
 import { accountsRouter } from './modules/accounts/accounts.routes.js';
 import { adminsRouter } from './modules/admins/admins.routes.js';
-import { syncRouter } from './modules/sync/sync.routes.js';
 import { transfersRouter } from './modules/transfers/transfers.routes.js';
 import { dashboardRouter } from './modules/dashboard/dashboard.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { searchRouter } from './modules/search/search.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
-import { printingRouter } from './modules/printing/printing.routes.js';
 import { scanRouter } from './modules/scan/scan.routes.js';
 import { maintenanceRouter } from './modules/maintenance/maintenance.routes.js';
 import { employeesRouter } from './modules/employees/employees.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { scrubResponses } from './lib/visibility.js';
-import { nudgeSync } from './modules/sync/sync.service.js';
+import { requireAuth } from './middleware/auth.js';
+import { idempotent } from './middleware/idempotent.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // server/src -> swift-cargo-app/client/dist
@@ -92,35 +91,14 @@ export function createApp() {
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'swift-cargo', time: new Date().toISOString() }));
 
-  // Ce que ce poste vient d'écrire part vers le hub SANS attendre le prochain
-  // tour de l'horloge : le temps que la réponse s'affiche, l'évènement est déjà
-  // en route. C'est ce qui rend la synchronisation instantanée à l'usage.
-  //
-  // Après la réponse, jamais avant : la synchronisation ne doit rien ajouter au
-  // temps d'attente de la personne au comptoir. Les routes /sync/ sont exclues —
-  // appliquer ce que le hub nous envoie n'est pas une écriture à lui renvoyer.
-  app.use('/api', (req, res, next) => {
-    if (req.method === 'GET' || req.method === 'HEAD' || req.path.startsWith('/sync')) return next();
-    res.on('finish', () => { if (res.statusCode < 400) nudgeSync(); });
-    next();
-  });
-
   app.use('/api/auth', authRouter);
 
-  // AVANT les autres, et l'ordre est le correctif : dix-sept routeurs sont
-  // montés sur '/api' et appellent `router.use(requireAuth)`. Or `router.use()`
-  // s'exécute pour toute requête qui TRAVERSE le routeur, même sans route
-  // correspondante. Monté plus bas, /api/sync/pull était donc refusé par le
-  // requireAuth de `rates` avant même d'atteindre son propre `requireNode` : le
-  // hub répondait « Authentification requise » à un poste qui présentait
-  // pourtant le bon jeton. Entre deux machines, la synchronisation ne pouvait
-  // pas démarrer du tout — sur une seule, rien ne le montrait.
-  //
-  // syncRouter n'a pas de `router.use()` à lui, donc le monter tôt ne change
-  // rien pour les autres. Ses deux routes destinées à l'interface (/sync/run,
-  // /sync/status) portent `requireAuth` route par route et restent protégées.
-  // test/sync-auth.test.js échoue si on le redescend.
-  app.use('/api', syncRouter);
+  // Une seule garde, posée ICI, pour tout ce qui suit : chaque routeur ci-dessous
+  // est monté sur '/api', et `router.use()` s'exécute pour toute requête qui
+  // traverse le routeur — dix-sept routeurs qui posaient chacun la leur, c'était
+  // la même vérification six fois par requête, et des rustines pour l'éviter.
+  // /api/auth et /api/health, publics, sont montés au-dessus.
+  app.use('/api', requireAuth, idempotent);
 
   app.use('/api', ratesRouter);
   app.use('/api', caisseRouter);
@@ -137,7 +115,6 @@ export function createApp() {
   app.use('/api', searchRouter);
   app.use('/api', reportsRouter);
   app.use('/api', settingsRouter);
-  app.use('/api', printingRouter);
   app.use('/api', scanRouter);
   app.use('/api', maintenanceRouter);
   app.use('/api', employeesRouter);

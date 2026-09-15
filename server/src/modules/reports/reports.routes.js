@@ -2,12 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import { errors } from '../../lib/AppError.js';
 import * as reports from './reports.service.js';
 
 export const reportsRouter = Router();
-reportsRouter.use(requireAuth);
 
 // Une plage de jours civils, pas un préréglage glissant. Absente, le service
 // prend le mois en cours jusqu'à aujourd'hui — la validité du jour lui-même

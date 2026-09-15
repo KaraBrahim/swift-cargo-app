@@ -413,26 +413,6 @@ const notEditableWhy = (t) =>
     : t.ref_transfer_id ? 'Fait partie d’un transfert inter-bureaux'
       : 'Générée par un bon — à corriger depuis le bon';
 
-// A cash receipt is proof of a single movement — printed one at a time from the
-// row itself, straight to the thermal printer.
-function ReceiptButton({ id, disabled }) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const print = async () => {
-    setBusy(true);
-    try {
-      await api(`/print/mouvement/${id}`, { method: 'POST' });
-      toast.success('Reçu envoyé à l’imprimante.');
-    } catch (err) { toast.error(errorMessage(err)); }
-    finally { setBusy(false); }
-  };
-  return (
-    <button className="icon-btn" aria-label="Imprimer le reçu" title="Imprimer le reçu (imprimante thermique)"
-      disabled={disabled || busy} onClick={print}>
-      <IconEl name="print" />
-    </button>
-  );
-}
 
 function LedgerTable({ q, onEdit, onDelete, busy }) {
   const isSuper = useIsSuper();
@@ -460,7 +440,6 @@ function LedgerTable({ q, onEdit, onDelete, busy }) {
                 <td className="right"><Money value={t.balance_after} /></td>
                 <td>{t.admin_name}</td>
                 <td className="right nowrap">
-                  <ReceiptButton id={t.id} disabled={busy} />
                   <button className="icon-btn" aria-label="Corriger" disabled={busy || !editable}
                     title={editable ? 'Corriger le montant' : notEditableWhy(t)} onClick={() => onEdit(t)}>
                     <IconEl name="edit" />

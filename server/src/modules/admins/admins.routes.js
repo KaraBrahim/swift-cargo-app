@@ -2,12 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth, requireSuperadmin } from '../../middleware/auth.js';
+import { requireSuperadmin } from '../../middleware/auth.js';
 import * as admins from './admins.service.js';
 import { isSuperadmin } from '../../lib/visibility.js';
 
 export const adminsRouter = Router();
-adminsRouter.use(requireAuth);
 
 const office = z.enum(['china', 'algeria']).nullish();
 const password = z.string().min(8, 'Au moins 8 caractères.').max(128);

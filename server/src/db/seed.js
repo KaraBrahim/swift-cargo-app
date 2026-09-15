@@ -37,25 +37,10 @@ const CURRENCIES = [
 
 const INITIAL_RATES = { DZD: '1', CNY: '30.00000000', ALP: '30.00000000', USD: '255.00000000', EUR: '270.00000000' };
 
-// Les comptes semés portent le MÊME uuid sur toutes les machines.
-//
-// La migration 026 le faisait déjà — mais par un UPDATE, et sur une base neuve
-// les migrations tournent AVANT le seed (server.js) : la table est vide,
-// l'UPDATE ne touche aucune ligne, et le seed insère ensuite un uuid tiré au
-// hasard (DEFAULT gen_random_uuid, migration 004). Un hub neuf et un poste déjà
-// installé se retrouvaient donc avec DEUX uuid pour le même `username`.
-//
-// Ce que cela donne à la première synchronisation : le hub pousse sa ligne,
-// `sync_apply_row` tente ON CONFLICT (uuid) — qui ne trouve rien — donc un
-// INSERT, qui heurte l'unicité de `username`. La transaction entière échoue.
-// Pas une ligne perdue : TOUT le cycle, et à chaque cycle suivant, pour
-// toujours. C'est précisément l'accident que la 026 voulait éviter, et que
-// l'ordre migrations-puis-seed lui reprenait.
-//
-// On pose donc l'uuid à l'INSERT, et on le ramène sur les lignes déjà créées.
-// Les deux côtés convergent au démarrage suivant, quel que soit leur passé.
+// Les comptes semés portent un uuid fixe : l'identité d'un compte ne doit pas
+// dépendre de la machine qui l'a créé.
 const SEED_UUID = {
-  superadmin: '00000000-0000-4000-8000-000000000001', // identique à la 026
+  superadmin: '00000000-0000-4000-8000-000000000001',
   admin1: '00000000-0000-4000-8000-000000000002',
   admin2: '00000000-0000-4000-8000-000000000003',
   admin3: '00000000-0000-4000-8000-000000000004',
@@ -81,19 +66,8 @@ export async function runSeed() {
     );
   }
 
-  // Les taux d'amorçage ne se répliquent pas.
-  //
-  // Chaque machine crée les siens au premier démarrage : ce sont les mêmes cinq
-  // valeurs partout, et les diffuser n'apprend rien à personne. Les échanger
-  // faisait en revanche du dégât — cinq lignes identiques par machine, et
-  // surtout une collision : `exchange_rates` est une table répliquée, donc le
-  // poste poussait ses taux d'amorçage vers le hub, qui avait déjà les siens.
-  //
-  // Les VRAIS taux, ceux qu'une personne saisit, passent par l'application et
-  // se répliquent normalement. Seul l'amorçage est tu, comme l'est déjà le
-  // super-admin d'un poste.
+  // Les taux de départ, une seule fois : les vrais taux se saisissent dans l'application.
   await withTx(async (client) => {
-    await client.query("SELECT set_config('app.sync_applying', 'on', true)");
     for (const [code, rate] of Object.entries(INITIAL_RATES)) {
       const { rows } = await client.query('SELECT 1 FROM exchange_rates WHERE currency_code = $1 LIMIT 1', [code]);
       if (rows.length === 0) {
@@ -121,23 +95,10 @@ export async function runSeed() {
     const adminHash = await bcrypt.hash(config.seedAdminPassword, config.bcryptRounds);
     SEED_USERS.push(...ADMINS.map((a) => ({ ...a, hash: adminHash })));
   }
-  // Les comptes se répliquent depuis la migration 026. Or CHAQUE machine sème
-  // son propre super-admin au premier démarrage, avec un mot de passe qui lui
-  // est propre : si un poste poussait le sien, il écraserait celui du hub — et
-  // le compte unique redeviendrait trois comptes qui se battent.
-  //
-  // Le hub sème et diffuse ; un poste sème pour lui-même, en silence. C'est à
-  // cela que sert `app.sync_applying` : le déclencheur de capture le lit et
-  // n'enregistre rien. Le poste démarre donc utilisable seul, et adopte le
-  // compte du hub dès la première synchronisation.
   await withTx(async (client) => {
-    if (config.site !== 'cloud') {
-      await client.query("SELECT set_config('app.sync_applying', 'on', true)");
-    }
     for (const a of SEED_USERS) {
       // Le mot de passe n'est posé qu'à la création ; le nom, le bureau, le rôle
-      // et l'uuid (voir SEED_UUID) sont maintenus. Ne pas toucher au mot de
-      // passe est ce qui permet au poste de garder celui qu'il a adopté du hub.
+      // et l'uuid sont maintenus.
       await client.query(
         `INSERT INTO admins (uuid, username, full_name, password_hash, office, role) VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name, office = EXCLUDED.office,

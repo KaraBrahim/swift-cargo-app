@@ -2,12 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import { idempotent } from '../../middleware/idempotent.js';
 import * as svc from './employees.service.js';
 
 export const employeesRouter = Router();
-employeesRouter.use(requireAuth);
 
 const id = z.coerce.number().int().positive();
 const money = z.union([z.string().trim(), z.number()]).transform(String);

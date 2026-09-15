@@ -2,12 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import * as dash from './dashboard.service.js';
 import { isSuperadmin } from '../../lib/visibility.js';
 
 export const dashboardRouter = Router();
-dashboardRouter.use(requireAuth);
 
 const periodQuery = z.object({
   period: z.enum(['jour', 'semaine', 'mois', 'trimestre', 'annee']).default('mois'),

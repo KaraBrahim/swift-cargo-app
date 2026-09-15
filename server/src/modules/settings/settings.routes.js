@@ -1,6 +1,5 @@
 // App settings over the app_settings key/value table. Two keys today:
 //   societe     — company identity stamped onto printed documents
-//   impression  — the thermal printer this desk prints to directly
 // The theme is deliberately NOT here: it is a per-machine preference (a desk in
 // Algérie may want the light theme while Chine keeps the dark one), so it lives in
 // the browser's localStorage, not in shared server state.
@@ -8,15 +7,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/auth.js';
 import { getPool, withTx } from '../../db/pool.js';
 import { writeAudit } from '../../lib/audit.js';
 import { errors } from '../../lib/AppError.js';
-import { PRINT_DEFAULTS } from '../printing/printing.service.js';
 import { TAUX_DEFAULTS, alignAlpToCny } from '../rates/rates.service.js';
 
 export const settingsRouter = Router();
-settingsRouter.use(requireAuth);
 
 // Each key declares its own shape and defaults, so an unknown key is rejected
 // rather than silently stored.
@@ -40,24 +36,6 @@ const SCHEMAS = {
   taux: {
     schema: z.object({ alp_suit_cny: z.boolean() }),
     defaults: TAUX_DEFAULTS,
-  },
-  // Unlike the theme, this IS shared server state — but each desk runs its own
-  // server, so "shared" already means "this desk and its printer".
-  impression: {
-    schema: z.object({
-      mode: z.enum(['navigateur', 'reseau', 'windows', 'fichier']),
-      imprimante: z.string().trim().max(200),
-      hote: z.string().trim().max(120),
-      port: z.coerce.number().int().min(1).max(65535),
-      largeur: z.coerce.number().int().refine((v) => v === 58 || v === 80, 'Largeur 58 ou 80 mm.'),
-      type: z.enum(['epson', 'star', 'tanca', 'daruma', 'brother']),
-      jeu_caracteres: z.string().trim().max(40),
-      copies: z.coerce.number().int().min(1).max(5),
-      couper: z.boolean(),
-      tiroir: z.boolean(),
-      fichier: z.string().trim().max(300),
-    }),
-    defaults: PRINT_DEFAULTS,
   },
 };
 
