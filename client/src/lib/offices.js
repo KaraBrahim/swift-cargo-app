@@ -3,10 +3,10 @@
 // sideline, so those two are shown larger and pre-selected — never forced: the
 // user can always pick another currency.
 export const OFFICE_CURRENCY = { china: 'CNY', algeria: 'DZD' };
+export const OFFICE_LABEL = { china: 'Chine', algeria: 'Algérie' };
 
 export const MAIN_CURRENCIES = ['DZD', 'CNY'];
 
-export const isMainCurrency = (code) => MAIN_CURRENCIES.includes(code);
 
 // The currency a caisse should open on in forms. Falls back to DZD (the base
 // currency) for a caisse that belongs to no office, e.g. a transit wallet.

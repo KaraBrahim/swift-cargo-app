@@ -1,26 +1,21 @@
 # Déployer Swift Cargo
 
-Trois pièces, trois rôles. Elles ne se déploient pas de la même façon et ne
-portent pas les mêmes risques.
+Deux pièces.
 
 | Pièce | Où | Base de données | Sert l'interface |
 |---|---|---|---|
-| **Hub** | un serveur joignable par les deux bureaux | une vraie base, via `DATABASE_URL` | oui (site web) |
-| **Poste Chine** | le PC du bureau de Chine | PostgreSQL local, embarqué | oui (fenêtre Electron) |
-| **Poste Algérie** | le PC du bureau d'Alger | PostgreSQL local, embarqué | oui (fenêtre Electron) |
+| **Serveur** | Render (ou tout hôte Docker) | une seule base, via `DATABASE_URL` (Neon) | oui (site web) |
+| **Poste** | le PC de chaque bureau | aucune — il parle au serveur | oui (fenêtre Electron) |
 
-Chaque poste travaille sur **sa propre base locale**. C'est ce qui le rend
-utilisable quand la connexion tombe : rien ne dépend du hub pour saisir un bon,
-encaisser ou régler. Le hub reçoit et redistribue, il n'est jamais sur le chemin
-critique d'un geste au comptoir.
+Toutes les données vivent sur le serveur. Les postes sont des fenêtres dessus.
 
 ---
 
-## 1 · Le hub
+## 1 · Le serveur
 
 ```bash
-docker build -f deploy/Dockerfile -t swift-cargo-hub .
-docker run -d --name swift-cargo-hub -p 4000:4000 --env-file hub.env swift-cargo-hub
+docker build -f deploy/Dockerfile -t swift-cargo .
+docker run -d --name swift-cargo -p 4000:4000 --env-file server.env swift-cargo
 ```
 
 ### Les variables
@@ -29,7 +24,6 @@ docker run -d --name swift-cargo-hub -p 4000:4000 --env-file hub.env swift-cargo
 |---|---|---|
 | `DATABASE_URL` | **oui** | `postgres://user:pass@host:5432/swiftcargo`. Sans elle le serveur cherche PostgreSQL embarqué, que l'image n'a pas — et refuse de démarrer en le disant. |
 | `SUPERADMIN_PASSWORD` | **oui** | Le serveur refuse de démarrer sans. C'est le SEUL compte créé en production ; les employés sont ensuite créés depuis « Utilisateurs », sous leurs vrais noms, pour que le journal d'audit soit lisible. |
-| `NODE_TOKEN` | **oui, si sync** | Le secret partagé entre le hub et les deux postes. **Sans lui, `/api/sync/*` refuse tout** : la synchronisation est simplement éteinte, et le grand livre reste fermé. Le même jeton doit être posé sur les trois machines. |
 | `SITE` | oui | `cloud` sur le hub. |
 | `NODE_ENV` | oui | `production`. Déjà dans l'image. |
 | `PORT` | non | 4000 par défaut. |
@@ -65,7 +59,6 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:change-moi@db:5432/swiftcargo
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD}
-      NODE_TOKEN: ${NODE_TOKEN}
       SITE: cloud
 volumes: { pgdata: {} }
 ```
@@ -89,12 +82,8 @@ vivent les données, et comment le poste est relié au hub.
 
 ## 3 · L'ordre des opérations, la première fois
 
-1. Le hub d'abord, avec son `SUPERADMIN_PASSWORD` et son `NODE_TOKEN`.
+1. Le serveur, avec son `SUPERADMIN_PASSWORD`.
 2. Ouvrir le site, se connecter en `superadmin`, **changer le mot de passe**,
    créer les comptes des employés.
-3. Installer les deux postes, en leur donnant l'URL du hub et le **même**
-   `NODE_TOKEN`.
-4. Vérifier sur chaque poste que l'indicateur de synchronisation passe au vert
-   (« Synchronisé »), puis couper le réseau d'un poste et vérifier qu'on peut
-   toujours saisir un bon — c'est le comportement qui justifie toute cette
-   architecture.
+3. Installer les postes (`desktop/`, un seul installeur) : ils parlent au
+   serveur et ne gardent rien en local.

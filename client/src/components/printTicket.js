@@ -23,11 +23,6 @@ const money = (v, c) =>
   formatMoney(v ?? 0, c || undefined);
 const dt = (v) => (v ? new Date(v).toLocaleString('fr-FR') : '—');
 
-export const TICKET_WIDTHS = [
-  { key: '80', label: '80 mm (standard)', mm: 80 },
-  { key: '58', label: '58 mm (compact)', mm: 58 },
-];
-
 export const ticketCss = (mm = 80) => `
   @page { size: ${mm}mm auto; margin: 0; }
   * { box-sizing: border-box; }
@@ -60,7 +55,6 @@ export const ticketCss = (mm = 80) => `
   @media print { .no-print { display: none !important; } }
 `;
 
-// Open a roll-sized window and fire the print dialog.
 export function ticketWindowHtml({ title, mm = 80, body }) {
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
     <title>${esc(title)}</title><style>${ticketCss(mm)}</style></head>
@@ -168,27 +162,6 @@ export function orderTicket(order, societe, qr) {
     ${footer(societe)}`;
 }
 
-// ── Caisse receipt — proof for a single cash movement ────────────────
-export function movementTicket({ movement, caisse, societe, qr }) {
-  const m = movement;
-  const isIn = m.direction === 'in';
-  return `
-    ${header(societe, isIn ? 'Reçu d’encaissement' : 'Reçu de paiement', m.id ? `N° ${m.id}` : '')}
-    ${line('Caisse', caisse?.label || '—')}
-    ${line('Date', dt(m.created_at))}
-    ${line('Type', m.type)}
-    ${m.note ? line('Note', m.note) : ''}
-    ${m.admin_name ? line('Agent', m.admin_name) : ''}
-    <hr>
-    <div class="row tot">
-      <span>${isIn ? 'REÇU' : 'PAYÉ'}</span>
-      <span>${esc(money(m.amount, m.currency_code))}</span>
-    </div>
-    ${line('Solde après', money(m.balance_after, m.currency_code))}
-    ${qrTicket(qr, movement.id ? `N° ${movement.id}` : '')}
-    <div class="sign"><div class="line">Signature</div></div>
-    ${footer(societe)}`;
-}
 
 // ── Generic list ticket — makes any table printable on the roll ──────
 export function listTicket({ docLabel, subtitle, columns, rows, totals, societe }) {

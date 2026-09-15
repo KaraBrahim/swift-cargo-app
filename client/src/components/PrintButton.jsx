@@ -5,6 +5,7 @@
 // d'enregistrement. La page fournit le document une fois (`a4`, `ticket`) ;
 // le menu, l'en-tête de la société et le format mémorisé sont ici.
 import { useState, useRef, useEffect } from 'react';
+import { useSticky } from '../lib/useSticky.js';
 import { api } from '../api/client.js';
 import { useApi } from '../api/useApi.js';
 import { IconEl } from './icons.jsx';
@@ -18,9 +19,7 @@ import { ticketWindowHtml } from './printTicket.js';
 const desk = () => (typeof window !== 'undefined' && typeof window.desk?.savePdf === 'function' ? window.desk : null);
 
 // Le dernier format choisi revient en tête : on imprime presque toujours pareil.
-const FORMAT_KEY = 'sc_print_format';
-const lastFormat = () => { try { return localStorage.getItem(FORMAT_KEY); } catch { return null; } };
-const rememberFormat = (k) => { try { localStorage.setItem(FORMAT_KEY, k); } catch { /* mode privé */ } };
+
 
 const BROWSER_FORMATS = [
   { key: 'a4', label: 'A4 / PDF', hint: 'Document classique, pour archive ou e-mail' },
@@ -40,6 +39,7 @@ export function PrintButton({
 }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
+  const [last, rememberFormat] = useSticky('sc_print_format', null);
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
   const settings = useApi('/settings');
@@ -83,7 +83,6 @@ export function PrintButton({
   };
 
   const all = ticket ? BROWSER_FORMATS : BROWSER_FORMATS.slice(0, 1);
-  const last = lastFormat();
   const formats = [...all].sort((x, y) => (x.key === last ? -1 : y.key === last ? 1 : 0));
 
   // Nothing to choose from: no roll builder and no printer — print A4 directly.

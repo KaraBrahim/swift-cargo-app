@@ -1,4 +1,8 @@
 
+// Branché par useApi.js, qui possède le cache — client.js ne doit pas connaître ses clés.
+let clearCache = null;
+export const onClearCache = (fn) => { clearCache = fn; };
+
 const TOKEN_KEY = 'sc_token';
 const LAST_USER_KEY = 'sc_last_user';
 
@@ -9,7 +13,7 @@ export const setToken = (t) => {
     localStorage.removeItem(TOKEN_KEY);
     // Plus de session : plus de copie des données non plus. Le poste suivant
     // qui ouvre l'application ne doit rien voir de l'utilisateur d'avant.
-    try { localStorage.removeItem('sc_cache_v1'); } catch { /* ignore */ }
+    clearCache?.();
   }
 };
 

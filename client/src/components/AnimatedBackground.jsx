@@ -78,10 +78,12 @@ export function AnimatedBackground() {
     return {
       fullScreen: { enable: true, zIndex: 0 },
       background: { color: 'transparent' },
-      fpsLimit: 60,
-      detectRetina: true,
+      // Un décor, pas un jeu : 30 images par seconde et pas de rendu Retina
+      // suffisent à l'œil, et coûtent le quart du processeur.
+      fpsLimit: 30,
+      detectRetina: false,
       particles: {
-        number: { value: 160, density: { enable: true } },
+        number: { value: 70, density: { enable: true } },
         color: { value: colors },
         shape: { type: 'triangle' },
         // Face the direction of travel — this is what makes them aircraft.
@@ -101,7 +103,7 @@ export function AnimatedBackground() {
       interactivity: {
         // Hover only: a click-to-spawn mode would keep adding particles for the
         // whole working day, since this layer now lives under every screen.
-        events: { onHover: { enable: true, mode: 'grab' }, resize: { enable: true } },
+        events: { onHover: { enable: false }, resize: { enable: true } },
         modes: { grab: { distance: 180, links: { opacity: 0.6 } } },
       },
     };

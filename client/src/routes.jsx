@@ -1,31 +1,35 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext.jsx';
-import { EmptyState } from './components/ui.jsx';
+import { EmptyState, Spinner } from './components/ui.jsx';
 import Dashboard from './pages/Dashboard.jsx';
-import CaissesPage from './pages/CaissesPage.jsx';
-import CaisseDetailPage from './pages/CaisseDetailPage.jsx';
-import RatesPage from './pages/RatesPage.jsx';
-import AuditPage from './pages/AuditPage.jsx';
-import BonsPage from './pages/BonsPage.jsx';
-import BonDetailPage from './pages/BonDetailPage.jsx';
-import FournisseursPage from './pages/FournisseursPage.jsx';
-import PassagersPage from './pages/PassagersPage.jsx';
-import StockPage from './pages/StockPage.jsx';
-import ArticlesPage from './pages/ArticlesPage.jsx';
-import ArticleDetailPage from './pages/ArticleDetailPage.jsx';
-import CategoriesPage from './pages/CategoriesPage.jsx';
-import ChargesPage from './pages/ChargesPage.jsx';
-import OrdersPage from './pages/OrdersPage.jsx';
-import OrderDetailPage from './pages/OrderDetailPage.jsx';
-import OrderGoodsPage from './pages/OrderGoodsPage.jsx';
-import NewOrderPage from './pages/NewOrderPage.jsx';
-import NewBonPage from './pages/NewBonPage.jsx';
-import ProfilePage from './pages/ProfilePage.jsx';
-import RapportsPage from './pages/RapportsPage.jsx';
-import ImpressionsPage from './pages/ImpressionsPage.jsx';
-import UtilisateursPage from './pages/UtilisateursPage.jsx';
-import MaintenancePage from './pages/MaintenancePage.jsx';
-import ParametresPage from './pages/ParametresPage.jsx';
+// Chaque page arrive quand on l'ouvre, pas toutes au premier écran : le serveur
+// est loin, et un seul fichier d'un mégaoctet retardait le tableau de bord de
+// tout ce qu'on n'y utilise pas (graphiques des taux, calendrier, QR…).
+const CaissesPage = lazy(() => import('./pages/CaissesPage.jsx'));
+const CaisseDetailPage = lazy(() => import('./pages/CaisseDetailPage.jsx'));
+const RatesPage = lazy(() => import('./pages/RatesPage.jsx'));
+const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
+const BonsPage = lazy(() => import('./pages/BonsPage.jsx'));
+const BonDetailPage = lazy(() => import('./pages/BonDetailPage.jsx'));
+const FournisseursPage = lazy(() => import('./pages/FournisseursPage.jsx'));
+const PassagersPage = lazy(() => import('./pages/PassagersPage.jsx'));
+const StockPage = lazy(() => import('./pages/StockPage.jsx'));
+const ArticlesPage = lazy(() => import('./pages/ArticlesPage.jsx'));
+const ArticleDetailPage = lazy(() => import('./pages/ArticleDetailPage.jsx'));
+const CategoriesPage = lazy(() => import('./pages/CategoriesPage.jsx'));
+const ChargesPage = lazy(() => import('./pages/ChargesPage.jsx'));
+const OrdersPage = lazy(() => import('./pages/OrdersPage.jsx'));
+const OrderDetailPage = lazy(() => import('./pages/OrderDetailPage.jsx'));
+const OrderGoodsPage = lazy(() => import('./pages/OrderGoodsPage.jsx'));
+const NewOrderPage = lazy(() => import('./pages/NewOrderPage.jsx'));
+const NewBonPage = lazy(() => import('./pages/NewBonPage.jsx'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
+const RapportsPage = lazy(() => import('./pages/RapportsPage.jsx'));
+const ImpressionsPage = lazy(() => import('./pages/ImpressionsPage.jsx'));
+const UtilisateursPage = lazy(() => import('./pages/UtilisateursPage.jsx'));
+const MaintenancePage = lazy(() => import('./pages/MaintenancePage.jsx'));
+const ParametresPage = lazy(() => import('./pages/ParametresPage.jsx'));
 
 // Les pages de l'application, rendues pour UNE adresse donnée.
 //
@@ -62,6 +66,7 @@ function SuperAdminOnly({ children }) {
 
 export function AppPages({ path }) {
   return (
+    <Suspense fallback={<Spinner />}>
     <Routes location={path}>
       <Route path="/" element={<Dashboard />} />
       <Route path="/caisses" element={<CaissesPage />} />
@@ -92,5 +97,6 @@ export function AppPages({ path }) {
       <Route path="/audit" element={<AuditPage />} />
       <Route path="*" element={<UnknownPage />} />
     </Routes>
+    </Suspense>
   );
 }

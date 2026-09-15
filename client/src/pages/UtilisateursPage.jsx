@@ -5,9 +5,9 @@ import { Spinner, errorMessage, useToast, PageHeader, EmptyState } from '../comp
 import { IconEl, initialsOf } from '../components/icons.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { relativeTime } from '../lib/format.js';
+import { OFFICE_LABEL } from '../lib/offices.js';
 
 const EMPTY = { username: '', full_name: '', office: '', email: '', phone: '', password: '' };
-const OFFICE_LABEL = { china: 'Chine', algeria: 'Algérie' };
 const ACCENT = 'var(--c-people)';
 
 export default function UtilisateursPage() {

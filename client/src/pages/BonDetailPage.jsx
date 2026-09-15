@@ -17,7 +17,7 @@ import { IconEl } from '../components/icons.jsx';
 import { DetailHead, Kpis, Kpi, Section, Footnote, ScanBanner, StepFlow } from '../components/DetailKit.jsx';
 import { EntityPicker, OptionChips } from '../components/EntityPicker.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
-import { bonDocBody } from '../components/printDocument.js';
+import { bonDocBody, measureOf, measureQty, measureUnit, declaredOf } from '../components/printDocument.js';
 import { bonTicket } from '../components/printTicket.js';
 import { LineEditor, emptyLine, lineValid, lineTotal } from '../components/LineEditor.jsx';
 import { GoodsPicker, pickedValid, pickedTotal, pickedToLine } from '../components/GoodsPicker.jsx';
@@ -31,7 +31,6 @@ import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const NEXT_LABEL = { cree: 'Marquer « En transit »', en_transit: 'Marquer « Arrivé »' };
 const NEXT_ICON = { cree: 'plane', en_transit: 'check' };
-const q3 = (v) => formatQty(v);
 
 // Convert a stored bon line back into the editable line shape. A bon passager
 // line keeps its link to the bon fournisseur line it draws from.
@@ -48,15 +47,10 @@ const toEditLine = (l) => {
   return { ...base, itemId: l.item_id || null, createItem: false, categoryId: '' };
 };
 
-const measureOf = (l) => l.measure || (Number(l.weight_kg) > 0 ? 'poids' : Number(l.cbm) > 0 ? 'cbm' : 'quantite');
-const qtyNum = (l) => Number(measureOf(l) === 'poids' ? l.weight_kg : measureOf(l) === 'cbm' ? l.cbm : l.quantity);
-const unitLabel = (l) => (measureOf(l) === 'poids' ? 'kg' : measureOf(l) === 'cbm' ? 'm³' : l.unit || 'u');
-const declared = (l) => {
-  const m = measureOf(l);
-  if (m === 'poids') return `${q3(l.weight_kg)} kg`;
-  if (m === 'cbm') return `${q3(l.cbm)} m³`;
-  return `${q3(l.quantity)} ${l.unit || ''}`.trim();
-};
+// Les aides de mesure (measureOf, measureQty, measureUnit, declaredOf) viennent de printDocument.js.
+const qtyNum = measureQty;
+const unitLabel = measureUnit;
+const declared = declaredOf;
 
 // `bonId` : ouvert depuis la section des bons FOURNISSEURS, pour éditer les
 // marchandises d'un ordre. En base, ces marchandises sont portées par une ligne
@@ -543,7 +537,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                         )}
                       </td>
                       <td className={`right ${miss > 0 ? 'neg' : 'muted'}`}>
-                        {miss > 0 ? `${q3(miss)} ${unitLabel(l)}` : '—'}
+                        {miss > 0 ? `${formatQty(miss)} ${unitLabel(l)}` : '—'}
                       </td>
                       <td className="right gold">{formatMoney(arrived * up, cur)}</td>
                       {/* Demander un responsable sur une ligne complète, c'est le
@@ -567,7 +561,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                       <td className="right">{formatMoney(l.missing_unit_price, cur)} <span className="muted">/ {unitLabel(l)}</span></td>
                     )}
                     <td className="right">{declared(l)}</td>
-                    <td className={`right ${missDone > 0 ? 'neg' : 'muted'}`}>{missDone > 0 ? `${q3(missDone)} ${unitLabel(l)}` : '—'}</td>
+                    <td className={`right ${missDone > 0 ? 'neg' : 'muted'}`}>{missDone > 0 ? `${formatQty(missDone)} ${unitLabel(l)}` : '—'}</td>
                     <td className="right">{formatMoney(up * (l.received_quantity != null ? Number(l.received_quantity) : q), cur)}</td>
                   </tr>
                 );

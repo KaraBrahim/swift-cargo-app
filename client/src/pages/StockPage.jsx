@@ -15,7 +15,6 @@ const ACCENT = 'var(--c-stock)';
 // Deux bureaux, et l'entre-deux : parti de Chine, pas encore arrivé en Algérie.
 const OFFICES = [{ key: 'china', label: 'Chine' }, { key: 'algeria', label: 'Algérie' }];
 const TRANSIT = 'transit';
-const q3 = (v) => formatQty(v);
 const held = (it) => Number(it.quantity) > 0 || Number(it.weight_kg) > 0 || Number(it.cbm) > 0;
 
 export default function StockPage() {
@@ -158,9 +157,9 @@ export default function StockPage() {
                   <tr key={it.id}>
                     <td>{it.name}</td>
                     <td>{it.category_name || '—'}</td>
-                    <td className="right">{q3(it.quantity)}</td>
-                    <td className="right">{q3(it.weight_kg)}</td>
-                    <td className="right">{q3(it.cbm)}</td>
+                    <td className="right">{formatQty(it.quantity)}</td>
+                    <td className="right">{formatQty(it.weight_kg)}</td>
+                    <td className="right">{formatQty(it.cbm)}</td>
                     <td className="right nowrap">
                       {transit ? it.bons : (
                         <button className="icon-btn" title="Ajuster la quantité" aria-label="Ajuster"

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, onMutation } from './client.js';
+import { api, onMutation, onClearCache } from './client.js';
 import { errorMessage } from '../components/ui.jsx';
 
 // ── Le cache ─────────────────────────────────────────────────────────
@@ -33,7 +33,8 @@ function persist() {
   }, 300);
 }
 const remember = (path, data) => { memory.delete(path); memory.set(path, data); persist(); };
-export function clearApiCache() { memory.clear(); try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ } }
+function clearApiCache() { memory.clear(); try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ } }
+onClearCache(clearApiCache);
 
 // Les hooks montés, pour les rafraîchir après une écriture.
 const live = new Set();

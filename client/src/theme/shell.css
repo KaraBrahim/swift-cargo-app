@@ -150,13 +150,6 @@
   .search-trigger span { @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap; }
   kbd { @apply whitespace-nowrap rounded-md px-1.5 py-0.5 text-[0.66rem] font-semibold; background: var(--surface-3); border: 1px solid var(--border); color: var(--muted); font-family: var(--font-sans); }
 
-  .icon-btn {
-    @apply relative inline-flex h-9 w-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-soft)]
-           transition-all duration-150;
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
-  }
-  .icon-btn:hover, .icon-btn.active { background: var(--surface-3); color: var(--brand-text); border-color: var(--brand-deep); }
-  .icon-btn svg { @apply h-[17px] w-[17px]; }
   .badge-count {
     @apply absolute grid h-4 min-w-4 place-items-center rounded-full px-1 text-[0.6rem] font-bold tabular-nums;
     top: -4px; right: -4px; background: var(--c-alert); color: #fff; border: 2px solid var(--bg);

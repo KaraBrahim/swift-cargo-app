@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { useApi } from '../api/useApi.js';
 import { Spinner, formatMoney, PageHeader } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
+import { BON_STATUS_FR } from '../components/printDocument.js';
 // Une seule liste de libellés pour toute l'application : le journal, la cloche
 // et le fil du tableau de bord disaient la même chose de trois façons, et une
 // nouvelle action n'était traduite que dans celle qu'on avait pensé à mettre à
 // jour — c'est ainsi que « person.create » a fini affiché tel quel.
 import { activityLine } from '../components/activityLabels.js';
+import { OFFICE_LABEL } from '../lib/offices.js';
 
 const ACCENT = 'var(--c-audit)';
 
@@ -26,8 +28,6 @@ const CATEGORIES = [
   { key: 'systeme', label: 'Système', domains: ['settings', 'print'] },
 ];
 
-const STATUS = { cree: 'Créé', en_transit: 'En transit', arrive: 'Arrivé', regle: 'Réglé' };
-const OFFICE = { china: 'Chine', algeria: 'Algérie' };
 
 // Anything that removes or fails is worth spotting at a glance in a log that is
 // mostly routine.
@@ -52,11 +52,11 @@ function describe(e) {
 
   // A change of state reads as "before → after", whatever it is.
   if (d.from != null && d.to != null) {
-    const f = STATUS[d.from] ?? (isNaN(d.from) ? d.from : formatMoney(d.from));
-    const t = STATUS[d.to] ?? (isNaN(d.to) ? d.to : formatMoney(d.to));
+    const f = BON_STATUS_FR[d.from] ?? (isNaN(d.from) ? d.from : formatMoney(d.from));
+    const t = BON_STATUS_FR[d.to] ?? (isNaN(d.to) ? d.to : formatMoney(d.to));
     bits.push(`${f} → ${t}`);
-  } else if (d.to != null && STATUS[d.to]) {
-    bits.push(`vers ${STATUS[d.to]}`);
+  } else if (d.to != null && BON_STATUS_FR[d.to]) {
+    bits.push(`vers ${BON_STATUS_FR[d.to]}`);
   }
 
   const amt = money(d);
@@ -65,7 +65,7 @@ function describe(e) {
   if (d.passager_payment != null) bits.push(`payé ${formatMoney(d.passager_payment)}`);
   if (d.loss_total != null && Number(d.loss_total) > 0) bits.push(`manquants ${formatMoney(d.loss_total)}`);
 
-  if (d.office) bits.push(OFFICE[d.office] || d.office);
+  if (d.office) bits.push(OFFICE_LABEL[d.office] || d.office);
   if (d.category) bits.push(d.category);
   if (d.type && !d.amount) bits.push(d.type);
   if (d.bons) bits.push(`${d.bons} bon${d.bons > 1 ? 's' : ''}`);

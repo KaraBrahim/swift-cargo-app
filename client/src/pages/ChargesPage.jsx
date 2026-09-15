@@ -13,6 +13,7 @@ import AmountInput from '../components/AmountInput.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 import { SalairesPanel } from '../components/SalairesPanel.jsx';
+import { useSticky } from '../lib/useSticky.js';
 
 const ACCENT = 'var(--c-caisse)';
 const CATEGORIES = [
@@ -29,8 +30,7 @@ export default function ChargesPage() {
   const isSuper = useIsSuper();
   const [filter, setFilter] = useState('');
   // Deux onglets : les charges, et les salariés que l'entreprise paie.
-  const [tab, setTab] = useState(() => { try { return localStorage.getItem('sc_charges_tab') || 'charges'; } catch { return 'charges'; } });
-  const pickTab = (t) => { setTab(t); try { localStorage.setItem('sc_charges_tab', t); } catch { /* ignore */ } };
+  const [tab, pickTab] = useSticky('sc_charges_tab', 'charges');
   const charges = useApi(`/charges${filter ? `?category=${filter}` : ''}`);
   const caisses = useApi('/caisses');
   const currencies = useApi('/currencies');

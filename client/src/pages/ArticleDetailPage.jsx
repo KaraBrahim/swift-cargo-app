@@ -12,9 +12,9 @@ import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { formatQty } from '../lib/format.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
+import { OFFICE_LABEL } from '../lib/offices.js';
 
 const ACCENT = 'var(--c-stock)';
-const OFFICE = { china: 'Chine', algeria: 'Algérie' };
 const REASON = {
   reception: 'Réception fournisseur', depart: 'Départ vers l’Algérie',
   arrivee: 'Arrivée en Algérie', livraison: 'Remise au fournisseur',
@@ -22,8 +22,7 @@ const REASON = {
 };
 // Only hand-made corrections may be undone here; the rest belong to a bon.
 const MANUAL = ['inventaire', 'ajustement'];
-const q3 = (v) => formatQty(v);
-const signed = (v) => (Number(v) > 0 ? `+${q3(v)}` : q3(v));
+const signed = (v) => (Number(v) > 0 ? `+${formatQty(v)}` : formatQty(v));
 
 export default function ArticleDetailPage() {
   const { id } = useParams();
@@ -139,10 +138,10 @@ export default function ArticleDetailPage() {
             <div key={office} className="kpi-card kpi-static">
               <div className="kpi-ico"><IconEl name="stock" /></div>
               <div>
-                <div className={`kpi-val ${Number(lvl.quantity) < 0 ? 'neg' : ''}`}>{q3(lvl.quantity)}</div>
-                <div className="kpi-label">Bureau {OFFICE[office]}</div>
+                <div className={`kpi-val ${Number(lvl.quantity) < 0 ? 'neg' : ''}`}>{formatQty(lvl.quantity)}</div>
+                <div className="kpi-label">Bureau {OFFICE_LABEL[office]}</div>
                 <div className="kpi-sub">
-                  {empty ? 'Rien à cet emplacement' : `${q3(lvl.weight_kg)} kg · ${q3(lvl.cbm)} m³`}
+                  {empty ? 'Rien à cet emplacement' : `${formatQty(lvl.weight_kg)} kg · ${formatQty(lvl.cbm)} m³`}
                 </div>
               </div>
             </div>
@@ -178,7 +177,7 @@ export default function ArticleDetailPage() {
                     <td>{b.order_id ? b.fournisseur_name : (b.passager_name || '—')}</td>
                     <td><span className={`status-badge ${BON_STATUS[b.status]?.cls || ''}`}>{BON_STATUS[b.status]?.label || b.status}</span></td>
                     <td className="right">
-                      {q3(b.measure === 'poids' ? b.weight_kg : b.measure === 'cbm' ? b.cbm : b.quantity)}{' '}
+                      {formatQty(b.measure === 'poids' ? b.weight_kg : b.measure === 'cbm' ? b.cbm : b.quantity)}{' '}
                       {b.measure === 'poids' ? 'kg' : b.measure === 'cbm' ? 'm³' : b.unit}
                     </td>
                     <td className="right">{formatMoney(b.unit_price)}</td>
@@ -203,7 +202,7 @@ export default function ArticleDetailPage() {
                   <tr key={m.id}>
                     <td>{new Date(m.created_at).toLocaleString('fr-FR')}</td>
                     <td>{REASON[m.reason] || m.reason}</td>
-                    <td>{OFFICE[m.office]}</td>
+                    <td>{OFFICE_LABEL[m.office]}</td>
                     <td className={`right ${Number(m.quantity_delta) < 0 ? 'neg' : 'pos'}`}>{signed(m.quantity_delta)}</td>
                     <td className="right">{signed(m.weight_delta)}</td>
                     <td className="right">{signed(m.cbm_delta)}</td>

@@ -1,11 +1,12 @@
 // Shared printing for every document in the app.
 //
-// Deliberately client-side: it produces the same black-on-white page a server
-// PDF would, works with no network (the desks run offline), and adds no
-// dependency. The browser's own "Imprimer → Enregistrer au format PDF" is the
-// PDF export.
+// Client-side on purpose: the same black-on-white page a server PDF would
+// give, with no dependency. Printing goes through a hidden iframe; the desk
+// app saves PDFs itself (desktop/main.js).
 import { formatMoney } from './ui.jsx';
 import { formatQty } from '../lib/format.js';
+import { BON_STATUS } from './bonStatus.js';
+import { ORDER_STATUS } from './orderStatus.js';
 
 // Imprimer un document HTML complet SANS ouvrir de fenêtre.
 //
@@ -166,9 +167,7 @@ export function personStatementBody(d, qr) {
     <div class="sign"><div>Signature</div><div>Cachet société</div></div>`;
 }
 
-export const ORDER_STATUS_FR = {
-  ouverte: 'Ouverte', en_transit: 'En transit', arrivee: 'Arrivée', livree: 'Livrée', cloturee: 'Clôturée',
-};
+const ORDER_STATUS_FR = Object.fromEntries(Object.entries(ORDER_STATUS).map(([k, v]) => [k, v.label]));
 
 // Le bon fournisseur, complet : c'est la pièce que le fournisseur garde et sur
 // laquelle on discute. Chaque marchandise y suit ses quatre états — reçue,
@@ -283,7 +282,8 @@ export function tableDocBody({ columns, rows: data, meta = [], totals = [] }) {
 const fournisseursOf = (bon) =>
   (bon.fournisseurs || []).map((f) => f.name).join(', ') || bon.fournisseur_name || '—';
 
-export const BON_STATUS_FR = { cree: 'Créé', en_transit: 'En transit', arrive: 'Arrivé', regle: 'Réglé' };
+// Les libellés vivent avec leurs statuts (bonStatus.js / orderStatus.js).
+export const BON_STATUS_FR = Object.fromEntries(Object.entries(BON_STATUS).map(([k, v]) => [k, v.label]));
 export const measureOf = (l) =>
   l.measure || (Number(l.weight_kg) > 0 ? 'poids' : Number(l.cbm) > 0 ? 'cbm' : 'quantite');
 export const measureQty = (l) => {

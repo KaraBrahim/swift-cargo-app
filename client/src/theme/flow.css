@@ -337,7 +337,6 @@
 
 /* Les sens d'argent portent maintenant une flèche : la couleur seule ne se lit
    pas quand on ne connaît pas encore le code de la maison. */
-.money-dir { display: inline-flex; align-items: center; gap: 4px; }
 .money-dir svg { width: 12px; height: 12px; }
 
 /* ── Téléphone ─────────────────────────────────────────────────────── */

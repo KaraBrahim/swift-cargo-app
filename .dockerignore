@@ -2,10 +2,10 @@
 # node_modules, les bases de donnees locales et le .git au demon.
 **/node_modules
 **/dist
-**/.pgdata
-**/.test-pgdata
-**/.smoke-pgdata
 .git
 .claude
 desktop/release
 **/.env
+**/.pgdata
+**/.*-pgdata
+**/.sync-*

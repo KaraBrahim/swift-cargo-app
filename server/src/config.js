@@ -12,7 +12,6 @@ export const config = {
 
   // If DATABASE_URL is set we use it; otherwise fall back to embedded Postgres.
   databaseUrl: process.env.DATABASE_URL || '',
-  useEmbeddedPg: bool(process.env.USE_EMBEDDED_PG, !process.env.DATABASE_URL),
   embeddedPgPort: Number(process.env.EMBEDDED_PG_PORT) || 55432,
 
   sessionTtlHours: Number(process.env.SESSION_TTL_HOURS) || 12,

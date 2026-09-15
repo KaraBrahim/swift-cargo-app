@@ -24,7 +24,7 @@ export const lotKey = (l) => String(l.line_id);
 export const pickedTotal = (l) => Number(l.value || 0) * Number(l.unitPrice || 0);
 export const pickedMargin = (l) => Number(l.value || 0) * (Number(l.salePrice || 0) - Number(l.unitPrice || 0));
 // Ce que le passager devrait si tout le lot se perdait — la mesure de son risque.
-export const pickedRisk = (l) => Number(l.value || 0) * Number(l.missingPrice || 0);
+const pickedRisk = (l) => Number(l.value || 0) * Number(l.missingPrice || 0);
 
 // Complet : une quantité positive qui tient dans ce qui reste, un prix de
 // transport, et une valeur du manquant renseignée (zéro compris : un lot sans

@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { useApi } from '../api/useApi.js';
 import { Spinner, formatMoney, formatQty, PageHeader, EmptyState } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
+import { BON_STATUS_FR } from '../components/printDocument.js';
 import { printDocument } from '../components/printDocument.js';
 import DateRangePicker, { defaultRange } from '../components/DateRangePicker.jsx';
 import { formatRangeFr } from '../lib/format.js';
 import { exportCsv } from '../lib/csv.js';
 import { useDraft } from '../lib/draft.js';
+import { OFFICE_LABEL } from '../lib/offices.js';
 
 const ACCENT = 'var(--c-order)';
 const CUR = 'DZD';
@@ -37,12 +39,10 @@ const TX_TYPE = {
   adjustment: 'Ajustement', order_fee: 'Frais encaissés', passager_payment: 'Paiement passager',
   charge: 'Charge',
 };
-const STATUS = { cree: 'Créé', en_transit: 'En transit', arrive: 'Arrivé', regle: 'Réglé' };
 const REASON = {
   reception: 'Réception', depart: 'Départ', arrivee: 'Arrivée',
   livraison: 'Livraison', inventaire: 'Inventaire', ajustement: 'Ajustement',
 };
-const OFFICE = { china: 'Chine', algeria: 'Algérie' };
 
 function Kpi({ label, value, unit, tone }) {
   return (
@@ -229,7 +229,7 @@ export default function RapportsPage() {
                   empty={!data.caisses.length && 'Aucune caisse.'}>
                   {data.caisses.map((c) => (
                     <tr key={c.id}>
-                      <td>{c.label} {c.office && <span className="muted">· {OFFICE[c.office]}</span>}</td>
+                      <td>{c.label} {c.office && <span className="muted">· {OFFICE_LABEL[c.office]}</span>}</td>
                       <td className="right">{formatMoney(c.ouverture)}</td>
                       <td className="right pos">{formatMoney(c.entrees)}</td>
                       <td className="right neg">{formatMoney(c.sorties)}</td>
@@ -279,8 +279,8 @@ export default function RapportsPage() {
                   {data.transferts.map((t) => (
                     <tr key={t.id}>
                       <td className="gold">{t.reference}</td>
-                      <td>{OFFICE[t.from_office] ?? t.from_office}</td>
-                      <td>{OFFICE[t.to_office] ?? t.to_office}</td>
+                      <td>{OFFICE_LABEL[t.from_office] ?? t.from_office}</td>
+                      <td>{OFFICE_LABEL[t.to_office] ?? t.to_office}</td>
                       <td className="right">{formatMoney(t.amount, t.currency_code)}</td>
                       <td>
                         <span className={`status-badge ${t.status === 'recu' ? 'st-regle' : 'st-transit'}`}>
@@ -368,7 +368,7 @@ export default function RapportsPage() {
                   empty={!data.parStatut.length && 'Aucun bon sur cette période.'}>
                   {data.parStatut.map((s, i) => (
                     <tr key={i}>
-                      <td>{STATUS[s.status] ?? s.status}</td>
+                      <td>{BON_STATUS_FR[s.status] ?? s.status}</td>
                       <td>{s.est_passager ? 'Bon passager' : 'Bon fournisseur'}</td>
                       <td className="right">{s.n}</td>
                     </tr>
@@ -399,7 +399,7 @@ export default function RapportsPage() {
                   empty={!data.mouvements.length && 'Aucun mouvement de stock sur cette période.'}>
                   {data.mouvements.map((m, i) => (
                     <tr key={i}>
-                      <td>{OFFICE[m.office] ?? m.office}</td>
+                      <td>{OFFICE_LABEL[m.office] ?? m.office}</td>
                       <td>{REASON[m.reason] ?? m.reason}</td>
                       <td className="right">{m.n}</td>
                       <td className={`right ${Number(m.quantite) < 0 ? 'neg' : 'pos'}`}>{formatQty(m.quantite)}</td>

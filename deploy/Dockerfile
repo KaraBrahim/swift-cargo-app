@@ -1,20 +1,8 @@
-# Swift Cargo — le HUB (serveur central).
+# Swift Cargo — le serveur.
 #
-# Ce qu'il est : l'API et rien d'autre. La source de vérité de la topologie en
-# étoile — les deux postes, Chine et Algérie, poussent leurs évènements ici et
-# tirent ceux de l'autre.
-#
-# Il ne sert PAS l'interface. Celle-ci vit dans les postes de travail, qui la
-# servent depuis leur propre machine. Ouvrir l'URL du hub dans un navigateur
-# répondra donc « 404 » — c'est normal ; le point de contrôle est /api/health.
-# (Pour servir l'interface ici aussi, il suffirait de construire client/dist et
-# de le copier dans l'image : app.js le sert dès qu'il le trouve.)
-#
-# Ce qu'il n'est PAS non plus : un poste de travail. Il n'embarque donc PAS PostgreSQL.
-# Le hub parle à une vraie base par DATABASE_URL — celle du fournisseur, ou un
-# conteneur postgres à côté. C'est pourquoi les dépendances optionnelles sont
-# exclues : `embedded-postgres` traîne un binaire de ~100 Mo dont ce conteneur
-# n'a aucun usage.
+# L'API, et l'interface construite s'il la trouve (client/dist). Une seule base
+# PostgreSQL, par DATABASE_URL : le conteneur n'embarque pas de PostgreSQL —
+# c'est pourquoi les dépendances optionnelles sont exclues.
 #
 # Construire depuis la RACINE du dépôt :
 #     docker build -f deploy/Dockerfile -t swift-cargo-hub .

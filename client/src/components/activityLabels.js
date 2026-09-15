@@ -7,6 +7,7 @@
 // montrée telle quelle : une nouvelle action ajoutée côté serveur reste lisible
 // le jour où elle apparaît, avant même qu'on ait pensé à l'écrire ici.
 import { formatMoney } from './ui.jsx';
+import { OFFICE_LABEL } from '../lib/offices.js';
 
 // [phrase, icône]
 const ACTION_LABEL = {
@@ -133,7 +134,6 @@ function fallbackLine(action) {
   return [`${subject} ${verb}`.trim(), icon];
 }
 
-const OFFICE = { china: 'Chine', algeria: 'Algérie' };
 const ROLE_FR = { fournisseur: 'fournisseur', passager: 'passager' };
 
 // La deuxième ligne : de QUI ou de QUOI il s'agit. Sans elle, dix « Fiche
@@ -154,7 +154,7 @@ function detailsOf(entry) {
   // Dans quel sens.
   if (d.from && d.to) bits.push(`${d.from} → ${d.to}`);
   if (d.direction) bits.push(d.direction === 'in' ? 'entrée' : 'sortie');
-  if (d.office) bits.push(OFFICE[d.office] ?? d.office);
+  if (d.office) bits.push(OFFICE_LABEL[d.office] ?? d.office);
   // Le reste, seulement quand il dit quelque chose.
   if (Array.isArray(d.roles) && d.roles.length) bits.push(d.roles.map((r) => ROLE_FR[r] ?? r).join(', '));
   if (d.category) bits.push(d.category);
