@@ -41,3 +41,20 @@ test('la sauvegarde ne contient aucun mot de passe', async () => {
   assert.ok(b.tables.admins.every((a) => !('password_hash' in a)));
   assert.ok(!('sessions' in b.tables));
 });
+
+test('la remise à zéro passe même quand un compte supprimé est encore référencé', async () => {
+  // Le cas vécu : un administrateur a modifié les paramètres et possède une
+  // caisse personnelle. Ces tables survivent à la purge — la suppression de
+  // son compte heurtait leurs clés étrangères, et l'écran disait « erreur interne ».
+  const { rows: [a] } = await getPool().query(
+    "INSERT INTO admins (username, full_name, password_hash, role, office) VALUES ('temp', 'Temp', 'x', 'admin', 'algeria') RETURNING id"
+  );
+  await getPool().query("INSERT INTO app_settings (key, value, updated_by) VALUES ('societe', '{}', $1) ON CONFLICT (key) DO UPDATE SET updated_by = $1", [a.id]);
+  await getPool().query("INSERT INTO caisses (kind, label, owner_admin_id) VALUES ('admin', 'Caisse Temp', $1)", [a.id]);
+
+  await m.reset({ admin, confirm: 'SUPPRIMER', ip: '::1' });
+
+  assert.equal(await count('admins'), 1);
+  const { rows: [c] } = await getPool().query("SELECT owner_admin_id FROM caisses WHERE label = 'Caisse Temp'");
+  assert.equal(c.owner_admin_id, null, 'la caisse reste, sans propriétaire');
+});

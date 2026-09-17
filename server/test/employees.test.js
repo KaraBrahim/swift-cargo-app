@@ -9,7 +9,15 @@ import { deposit } from '../src/modules/caisse/caisse.service.js';
 let db, admin, caisseId, e;
 before(async () => {
   db = await setupTestDb();
-  ({ admin, caisseId } = await firstAdminAndCaisse());
+  ({ admin } = await firstAdminAndCaisse());
+  // Une caisse à ce fichier : les fichiers de test tournent en parallèle sur la
+  // même base, et un dépôt dans la caisse de bureau partagée fausse les soldes
+  // que caisse.test.js vérifie au même moment.
+  const { rows: [c] } = await getPool().query(
+    "INSERT INTO caisses (kind, office, label) VALUES ('office', NULL, 'Caisse salaires (test)') RETURNING id"
+  );
+  caisseId = c.id;
+  await getPool().query('INSERT INTO caisse_balances (caisse_id, currency_code) SELECT $1, code FROM currencies ON CONFLICT DO NOTHING', [caisseId]);
   await deposit({ admin, caisseId, currency: 'DZD', amount: '100000', note: 'test', ip: '::1' });
   e = await emp.createEmployee({ admin, name: 'Karim Test', poste: 'Comptoir', salary: '30000', currency: 'DZD', caisseId, ip: '::1' });
 });

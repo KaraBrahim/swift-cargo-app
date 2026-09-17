@@ -81,11 +81,39 @@ export async function purge({ admin, domains, confirm, ip }) {
   // aussi des comptes de démonstration. Les comptes se suppriment donc APRÈS,
   // pour qu'il ne reste que le super-admin, partout pareil.
   if (keys.includes('rates')) await runSeed();
-  if (keys.includes('users')) {
-    await getPool().query("DELETE FROM sessions WHERE admin_id IN (SELECT id FROM admins WHERE role <> 'superadmin')");
-    await getPool().query("DELETE FROM admins WHERE role <> 'superadmin'");
-  }
+  if (keys.includes('users')) await deleteOtherAdmins(admin);
   return { purged: keys };
+}
+
+// Supprimer les comptes sauf le super-admin.
+//
+// Des tables qui survivent à la purge pointent encore vers ces comptes : qui a
+// modifié les paramètres, qui possède une caisse personnelle, qui a créé une
+// fiche. Les supprimer tels quels, c'est une violation de clé étrangère — et
+// une « erreur interne » au comptoir. On réattribue d'abord : la paternité au
+// super-admin, la propriété d'une caisse à personne. La liste des colonnes
+// vient du catalogue, pas d'ici : une table ajoutée demain est couverte.
+async function deleteOtherAdmins(admin) {
+  await withTx(async (c) => {
+    const { rows: gone } = await c.query("SELECT id FROM admins WHERE role <> 'superadmin'");
+    if (!gone.length) return;
+    const ids = gone.map((r) => r.id);
+    const { rows: [su] } = await c.query("SELECT id FROM admins WHERE role = 'superadmin' ORDER BY id LIMIT 1");
+    const { rows: fks } = await c.query(`
+      SELECT tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+         AND ccu.table_name = 'admins' AND tc.table_name NOT IN ('sessions', 'admins')`);
+    for (const { table_name: t, column_name: col } of fks) {
+      const owner = t === 'caisses' && col === 'owner_admin_id';
+      await c.query(`UPDATE ${t} SET ${col} = ${owner ? 'NULL' : '$2'} WHERE ${col} = ANY($1)`, owner ? [ids] : [ids, su.id]);
+    }
+    await c.query('DELETE FROM sessions WHERE admin_id = ANY($1)', [ids]);
+    await c.query('DELETE FROM admins WHERE id = ANY($1)', [ids]);
+    await writeAudit(c, { adminId: admin.id, action: 'maintenance.delete_admins', entity: 'database', entityId: 0, details: { deleted: ids.length }, ip: null });
+  });
 }
 
 // Tout, puis la base telle qu'au premier démarrage.
