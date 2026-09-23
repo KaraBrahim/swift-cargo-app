@@ -26,29 +26,47 @@ after(async () => { await db.stop(); });
 const me = async () => (await emp.listEmployees()).employees.find((x) => x.id === e.id);
 
 test('la proposition part du salaire configuré', async () => {
-  assert.equal((await me()).suggested, '30000.00');
+  const m = await me();
+  assert.equal(m.base, '30000.00');
+  assert.equal(m.remaining, '30000.00');
 });
 
-test('un acompte sort de la caisse et se déduit du mois proposé', async () => {
+// Un versement partiel EST l'acompte : plus de mode à choisir, juste un montant.
+test('un versement sort de la caisse et diminue ce qui reste', async () => {
   const before = Number(await balanceOf(caisseId, 'DZD'));
-  await emp.payEmployee({ admin, id: e.id, amount: '5000', kind: 'acompte', ip: '::1' });
+  await emp.payEmployee({ admin, id: e.id, amount: '5000', caisseId, ip: '::1' });
+
   assert.equal(Number(await balanceOf(caisseId, 'DZD')), before - 5000);
   const m = await me();
-  assert.equal(m.advances_this_month, '5000.00');
-  assert.equal(m.suggested, '25000.00');
+  assert.equal(m.paid_this_month, '5000.00');
+  assert.equal(m.remaining, '25000.00');
 });
 
-test('le mois se paie une fois, et devient la base du mois suivant', async () => {
-  await emp.payEmployee({ admin, id: e.id, amount: '25000', kind: 'mensuel', ip: '::1' });
-  const m = await me();
-  assert.equal(m.month_paid, true);
+test('solder le mois met le reste à zéro, et verser plus reste permis', async () => {
+  await emp.payEmployee({ admin, id: e.id, amount: '25000', caisseId, ip: '::1' });
+  let m = await me();
   assert.equal(m.paid_this_month, '30000.00');
-  assert.equal(m.suggested_base, '25000.00', 'le dernier mensuel versé devient la proposition');
-  await assert.rejects(emp.payEmployee({ admin, id: e.id, amount: '1', kind: 'mensuel', ip: '::1' }), /déjà payé/);
+  assert.equal(m.remaining, '0.00', 'le mois est à jour');
+
+  // Une prime : de l'argent réellement sorti, jamais refusé.
+  await emp.payEmployee({ admin, id: e.id, amount: '2000', caisseId, note: 'prime', ip: '::1' });
+  m = await me();
+  assert.equal(m.paid_this_month, '32000.00');
+  assert.equal(m.remaining, '0.00');
 });
 
-test('la paie est une charge « salaire » rattachée au salarié', async () => {
-  const { rows } = await getPool().query("SELECT category, kind, employee_id FROM charges WHERE employee_id = $1", [e.id]);
-  assert.equal(rows.length, 2);
+// La demande d'origine : le mois suivant propose ce qu'on a réellement versé.
+test('le mois suivant propose ce qui a été versé le mois précédent', async () => {
+  const next = new Date(); next.setUTCMonth(next.getUTCMonth() + 1);
+  const period = next.toISOString().slice(0, 7);
+  const { employees } = await emp.listEmployees({ period });
+  const m = employees.find((x) => x.id === e.id);
+  assert.equal(m.base, '32000.00', 'le versé du mois dernier fait la proposition');
+  assert.equal(m.remaining, '32000.00');
+});
+
+test('chaque versement est une charge « salaire » rattachée au salarié', async () => {
+  const { rows } = await getPool().query("SELECT category, employee_id FROM charges WHERE employee_id = $1", [e.id]);
+  assert.equal(rows.length, 3);
   assert.ok(rows.every((r) => r.category === 'salaire' && r.employee_id === e.id));
 });

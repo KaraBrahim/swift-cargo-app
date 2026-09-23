@@ -1,47 +1,48 @@
-// Les salariés et leurs paies.
+// Les salariés et ce qu'on leur verse.
 //
-// Une paie est une charge « salaire » rattachée à un salarié, avec un type :
-//   mensuel — le salaire du mois ; le montant proposé est le dernier salaire
-//             mensuel versé (le salaire configuré la première fois) ;
-//   acompte — une partie prise avant la fin du mois ; elle se déduit de la
-//             proposition du mois, pour ne pas payer deux fois ;
-//   libre   — n'importe quel montant, sans rien changer aux propositions.
+// Un salarié a un salaire mensuel. Chaque mois on lui doit ce montant, et on le
+// paie en une ou plusieurs fois. C'est tout le modèle — il n'y a pas trois
+// sortes de versements à choisir avant de pouvoir taper un chiffre : un
+// « acompte » n'est qu'un versement partiel du mois, et le distinguer obligeait
+// la personne au comptoir à classer ce qu'elle faisait avant de le faire.
+//
+// Ce qui est proposé pour le mois : ce qui a été versé le mois DERNIER (le
+// salaire suit donc les augmentations sans qu'on y pense), à défaut le salaire
+// configuré — moins ce qui a déjà été versé ce mois-ci.
 import { getPool, withTx } from '../../db/pool.js';
 import { Decimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { createCharge } from '../accounts/accounts.service.js';
 
-const thisMonth = () => new Date().toISOString().slice(0, 7);
+const monthOf = (d = new Date()) => d.toISOString().slice(0, 7);
+const previousMonth = (period) => {
+  const [y, m] = period.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1));
+  return d.toISOString().slice(0, 7);
+};
 
-export async function listEmployees({ includeInactive = false } = {}) {
-  const period = thisMonth();
+export async function listEmployees({ includeInactive = false, period } = {}) {
+  const month = period || monthOf();
   const { rows } = await getPool().query(
     `SELECT e.*, c.label AS caisse_label,
-            -- Le dernier salaire mensuel versé : c'est lui qu'on propose.
-            (SELECT amount FROM charges WHERE employee_id = e.id AND kind = 'mensuel' ORDER BY created_at DESC LIMIT 1) AS last_monthly,
-            (SELECT created_at FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_at,
-            (SELECT amount FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_amount,
-            (SELECT kind FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_kind,
             COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id AND period = $1), 0)::text AS paid_this_month,
-            COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id AND period = $1 AND kind = 'acompte'), 0)::text AS advances_this_month,
-            EXISTS (SELECT 1 FROM charges WHERE employee_id = e.id AND period = $1 AND kind = 'mensuel') AS month_paid
+            COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id AND period = $2), 0)::text AS paid_last_month,
+            (SELECT amount     FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_amount,
+            (SELECT created_at FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_at
        FROM employees e LEFT JOIN caisses c ON c.id = e.caisse_id
-      WHERE ($2 OR e.active)
+      WHERE ($3 OR e.active)
       ORDER BY e.active DESC, e.name`,
-    [period, includeInactive]
+    [month, previousMonth(month), includeInactive]
   );
   return {
-    period,
+    period: month,
     employees: rows.map((e) => {
-      const base = new Decimal(e.last_monthly ?? e.salary);
-      return {
-        ...e,
-        // Ce qu'on proposera pour « payer le mois » : le dernier mensuel, moins
-        // les acomptes déjà pris ce mois-ci.
-        suggested: Decimal.max(base.minus(e.advances_this_month), 0).toFixed(2),
-        suggested_base: base.toFixed(2),
-      };
+      // Le mois dernier fait foi : ce qu'on a réellement versé vaut mieux
+      // qu'un salaire noté une fois et jamais remis à jour.
+      const base = new Decimal(Number(e.paid_last_month) > 0 ? e.paid_last_month : e.salary);
+      const remaining = Decimal.max(base.minus(e.paid_this_month), 0);
+      return { ...e, base: base.toFixed(2), remaining: remaining.toFixed(2) };
     }),
   };
 }
@@ -67,38 +68,31 @@ export async function updateEmployee({ admin, id, ip, ...data }) {
   return rows[0];
 }
 
-// Payer : une charge « salaire » qui sort de la caisse choisie, rattachée au
-// salarié, datée du mois. Le mois ne se paie qu'une fois — un second versement
-// pour le même mois est un acompte ou un montant libre, et doit le dire.
-export async function payEmployee({ admin, id, amount, kind, caisseId, period, note, ip }) {
+// Un versement : une charge « salaire » qui sort de la caisse choisie, datée du
+// mois. Rien d'autre à décider. Verser plus que prévu est permis — une prime,
+// un rattrapage : c'est de l'argent réellement sorti, on l'enregistre.
+export async function payEmployee({ admin, id, amount, caisseId, period, note, ip }) {
   const { rows } = await getPool().query('SELECT * FROM employees WHERE id = $1', [id]);
   const e = rows[0];
   if (!e) throw errors.notFound('Salarié introuvable.');
   if (!e.active) throw errors.conflict('Ce salarié n’est plus actif.');
-  const month = period || thisMonth();
+  const month = period || monthOf();
   const caisse = caisseId ?? e.caisse_id;
   if (!caisse) throw errors.validation([{ field: 'caisseId', message: 'Choisissez la caisse qui paie.' }]);
 
-  if (kind === 'mensuel') {
-    const { rows: dup } = await getPool().query(
-      "SELECT 1 FROM charges WHERE employee_id = $1 AND period = $2 AND kind = 'mensuel'", [id, month]
-    );
-    if (dup.length) throw errors.conflict(`Le mois ${month} de ${e.name} est déjà payé. Pour verser plus, choisissez « montant libre ».`);
-  }
-  const labels = { mensuel: `Salaire ${month}`, acompte: `Acompte ${month}`, libre: `Versement ${month}` };
   return withTx(async (c) => {
     const charge = await createCharge({
-      admin, category: 'salaire', label: `${labels[kind]} — ${e.name}`, amount, currency: e.currency_code,
-      caisseId: caisse, period: month, recurring: kind === 'mensuel', note, ip,
+      admin, category: 'salaire', label: `Salaire ${month} — ${e.name}`, amount, currency: e.currency_code,
+      caisseId: caisse, period: month, recurring: true, note, ip,
     }, c);
-    await c.query('UPDATE charges SET employee_id = $2, kind = $3 WHERE id = $1', [charge.id, id, kind]);
-    return { ...charge, employee_id: id, kind };
+    await c.query('UPDATE charges SET employee_id = $2 WHERE id = $1', [charge.id, id]);
+    return { ...charge, employee_id: id };
   });
 }
 
 export async function listPayments(id, limit = 50) {
   const { rows } = await getPool().query(
-    `SELECT ch.id, ch.amount, ch.currency_code, ch.kind, ch.period, ch.note, ch.created_at, ch.label,
+    `SELECT ch.id, ch.amount, ch.currency_code, ch.period, ch.note, ch.created_at, ch.label,
             c.label AS caisse_label, a.full_name AS admin_name
        FROM charges ch LEFT JOIN caisses c ON c.id = ch.caisse_id LEFT JOIN admins a ON a.id = ch.admin_id
       WHERE ch.employee_id = $1 ORDER BY ch.created_at DESC LIMIT $2`,

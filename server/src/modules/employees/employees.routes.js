@@ -12,7 +12,7 @@ const money = z.union([z.string().trim(), z.number()]).transform(String);
 
 employeesRouter.get(
   '/employees',
-  validate({ query: z.object({ includeInactive: z.coerce.boolean().optional() }) }),
+  validate({ query: z.object({ includeInactive: z.coerce.boolean().optional(), period: z.string().trim().regex(/^\d{4}-\d{2}$/).optional() }) }),
   asyncHandler(async (req, res) => res.json(await svc.listEmployees(req.validatedQuery)))
 );
 
@@ -46,8 +46,8 @@ employeesRouter.post(
   '/employees/:id/pay',
   idempotent,
   validate({ params: z.object({ id }), body: z.object({
-    amount: money, kind: z.enum(['mensuel', 'acompte', 'libre']),
-    caisseId: id.optional(), period: z.string().trim().regex(/^\d{4}-\d{2}$/).optional(),
+    amount: money, caisseId: id.optional(),
+    period: z.string().trim().regex(/^\d{4}-\d{2}$/).optional(),
     note: z.string().trim().max(300).optional(),
   }) }),
   asyncHandler(async (req, res) => res.status(201).json({ payment: await svc.payEmployee({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))
