@@ -334,6 +334,22 @@ const isManual = async (client, from, to) => {
   return rows.length > 0;
 };
 
+// Le premier taux connu valait déjà avant qu'on le note.
+//
+// `asOf` cherche un taux enregistré AVANT le début de la période. Quand il n'y
+// en a pas — une base neuve, un historique qui commence après la date
+// demandée — la période s'ouvrait sur rien, et la moyenne ne portait que sur
+// les heures écoulées depuis le premier enregistrement. Demander « du 10 au
+// 23 » avec un taux à 30 noté le 22 et corrigé à 31 aujourd'hui répondait
+// 30,9 : les treize jours à 30 ne pesaient pas.
+//
+// Le taux le plus ancien qu'on connaisse est la meilleure preuve de ce qui
+// valait avant lui : on le fait donc remonter au début de la fenêtre.
+const openAtStart = (points, start) =>
+  (points.length && new Date(points[0].at) > new Date(start)
+    ? [{ ...points[0], at: start }, ...points.slice(1)]
+    : points);
+
 // Every moment the rate changed inside the window, as {at, rate} — starting
 // with whatever was already in force when the window opened.
 async function series(client, from, to, start, end) {
@@ -348,7 +364,9 @@ async function series(client, from, to, start, end) {
       [from, to, start, end]
     );
     const points = rows.map((r) => ({ at: r.at, rate: String(r.rate) }));
-    return opening != null ? [{ at: start, rate: String(opening) }, ...points] : points;
+    return opening != null
+      ? [{ at: start, rate: String(opening) }, ...points]
+      : openAtStart(points, start);
   }
 
   // Derived: the cross moves whenever EITHER leg moves.
@@ -370,7 +388,7 @@ async function series(client, from, to, start, end) {
     live[r.currency_code] = r.dzd_per_unit;
     push(r.at);
   }
-  return points;
+  return openAtStart(points, start);
 }
 
 // Weighted by how long each rate stood: a rate that held for twenty days counts

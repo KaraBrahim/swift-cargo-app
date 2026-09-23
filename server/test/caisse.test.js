@@ -191,6 +191,24 @@ test('the average over a period is weighted by how long each rate stood', async 
   assert.ok(Number(r.average) > 200 && Number(r.average) < 203, `moyenne inattendue : ${r.average}`);
 });
 
+// Le cas vécu : après une remise à zéro, le taux de départ porte la date du
+// jour où la base a été semée. Demander une période qui commence AVANT ne
+// laissait que quelques heures d'historique, et la moyenne se réduisait au
+// dernier taux saisi.
+test('une période ouverte avant le premier taux connu part quand même de ce taux', async () => {
+  await getPool().query("DELETE FROM exchange_rates WHERE currency_code = 'USD'");
+  await getPool().query(
+    `INSERT INTO exchange_rates (currency_code, dzd_per_unit, created_at) VALUES
+       ('USD', 30, '2026-08-21T00:00:00Z'),
+       ('USD', 31, '2026-08-22T00:00:00Z')`
+  );
+  // Du 9 au 22 : rien avant le 21, mais 30 valait déjà — treize jours à 30,
+  // puis le dernier instant à 31. La moyenne doit rester tout près de 30.
+  const r = await rates.lookup({ from: 'USD', to: 'DZD', start: '2026-08-09', end: '2026-08-22' });
+  assert.equal(r.first, '30');
+  assert.ok(Number(r.average) < 30.1, `moyenne inattendue : ${r.average}`);
+});
+
 test('a date before any recorded rate returns nothing, not zero', async () => {
   const r = await rates.lookup({ from: 'USD', to: 'DZD', date: '2020-01-01' });
   assert.equal(r.rate, null);
