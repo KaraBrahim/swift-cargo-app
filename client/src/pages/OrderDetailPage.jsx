@@ -17,6 +17,8 @@ import { DetailHead, Kpis, Kpi, Bar, Section, Footnote, ScanBanner, StepFlow } f
 import { Who } from '../components/cells.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import AmountInput from '../components/AmountInput.jsx';
+import { EntityPicker } from '../components/EntityPicker.jsx';
+import { useIdempotent } from '../lib/useIdempotent.js';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { orderManifestBody } from '../components/printDocument.js';
 import { orderTicket } from '../components/printTicket.js';
@@ -40,6 +42,12 @@ export default function OrderDetailPage() {
   // de `data` avant les retours anticipés au-dessus.
   const [deliver, setDeliver] = useState(null);
   const [confirmUndoDeliver, setConfirmUndoDeliver] = useState(false);
+  // L'encaissement du fournisseur, sur SA fiche : c'est là qu'on lit ce qu'il
+  // doit, donc c'est là qu'on le reçoit. Il vivait sur le bon interne des
+  // marchandises, que personne n'a de raison d'ouvrir.
+  const [cash, setCash] = useState({ caisseId: '', amount: '' });
+  const caisses = useApi('/caisses');
+  const idem = useIdempotent();
   const qr = useQr('order', data?.order?.uuid);
   const scanHit = useScanHit('order', id);
   useTabTitle(data?.order?.reference);
@@ -49,6 +57,11 @@ export default function OrderDetailPage() {
 
   const o = data.order;
   const cur = o.bons?.[0]?.transport_currency || 'DZD';
+  const goodsBonId = o.bons?.[0]?.id;
+  const offices = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
+  const caisseSub = (c) => `${formatMoney(c.balances?.[cur] ?? 0, cur)} disponible`;
+  const due = Number(o.totals?.due ?? 0);
+  const collected = Number(o.totals?.collected ?? 0);
   const lines = o.lines ?? [];
   // « Confié » se compte en lots, pas en unités : additionner des kilos et des
   // cartons ne voudrait rien dire.
@@ -89,6 +102,20 @@ export default function OrderDetailPage() {
     }
     return step;
   });
+
+  const collectFee = async () => {
+    setBusy(true);
+    try {
+      await idem((key) => api(`/bons/${goodsBonId}/collect-fee`, {
+        method: 'POST', idem: key,
+        body: { caisseId: Number(cash.caisseId), amount: cash.amount || undefined },
+      }));
+      toast.success('Encaissé.');
+      setCash({ caisseId: '', amount: '' });
+      reload();
+    } catch (err) { toast.error(errorMessage(err)); }
+    finally { setBusy(false); }
+  };
 
   // Le statut d'un bon fournisseur DÉCOULE des faits : un passager emporte,
   // arrive, la marchandise est remise, les frais sont encaissés. Cliquer une
@@ -299,6 +326,44 @@ export default function OrderDetailPage() {
           </table>
         </div>
       </Section>
+
+      {/* L'argent du fournisseur. Partiel permis : il paie ce qu'il veut, quand
+          il veut — le reste dû suit. Rien n'oblige la marchandise à être
+          entièrement livrée pour encaisser. */}
+      {goodsBonId && (
+        <Section icon="coins" title="Argent" right={<span className="muted">Facturé {formatMoney(o.totals?.billed, cur)} · encaissé {formatMoney(collected, cur)}</span>}>
+          {due > 0 ? (
+            <div className="money-block">
+              <div className="money-head">
+                <span className="money-dir in"><IconEl name="arrowIn" />Entrée</span>
+                <span><strong>{o.fournisseur_name}</strong> doit encore <strong className="gold">{formatMoney(due, cur)}</strong>.</span>
+              </div>
+              <div className="wz-money">
+                <div className="field field-grow"><span>Caisse qui reçoit</span>
+                  <EntityPicker
+                    icon="caisse"
+                    value={cash.caisseId}
+                    onChange={(v) => setCash({ ...cash, caisseId: v })}
+                    options={offices}
+                    labelOf={(c) => c.label}
+                    subOf={caisseSub}
+                    searchOf={(c) => c.label}
+                    placeholder="Choisir la caisse"
+                    emptyText="Aucune caisse de bureau."
+                  /></div>
+                <label className="field wz-amount"><span>Montant reçu ({cur})</span>
+                  <AmountInput value={cash.amount} onChange={(v) => setCash({ ...cash, amount: v })} placeholder={String(due.toFixed(2))} /></label>
+                <button className="btn btn-gold" disabled={busy || !cash.caisseId || !(Number(cash.amount) > 0)} onClick={collectFee}>
+                  <IconEl name="arrowIn" />Encaisser
+                </button>
+              </div>
+              <Footnote>Laissez le montant vide pour encaisser tout le reste dû. Un versement partiel est accepté.</Footnote>
+            </div>
+          ) : (
+            <Footnote>Tout est encaissé : {formatMoney(collected, cur)} reçus sur {formatMoney(o.totals?.billed, cur)}.</Footnote>
+          )}
+        </Section>
+      )}
 
       <Section icon="passager" title="Transporté par" count={o.carriers?.length ?? 0}>
         {o.carriers?.length ? (

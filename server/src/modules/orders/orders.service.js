@@ -268,6 +268,14 @@ export async function getOrderDetail(id, client = getPool()) {
     [id]
   );
 
+  // Ce que le fournisseur a déjà versé sur cet ordre. Sans ce chiffre, la fiche
+  // ne peut ni proposer le reste dû ni dire que tout est encaissé.
+  const { rows: [cash] } = await client.query(
+    `SELECT COALESCE(SUM(ABS(amount)), 0) AS total FROM person_ledger
+      WHERE ref_order_id = $1 AND type = 'fee_payment'`,
+    [id]
+  );
+
   // Exact decimals, not doubles: these three numbers are what the recap prints
   // and what the fournisseur is asked to pay.
   const sum = (field) => bons.reduce((acc, b) => acc.plus(b[field] ?? 0), new Decimal(0));
@@ -301,6 +309,8 @@ export async function getOrderDetail(id, client = getPool()) {
       commission,
       goods: feeTotal.minus(commissionTotal).toFixed(2),
       billed: Decimal.max(feeTotal.minus(discountTotal), 0).toFixed(2),
+      collected: new Decimal(cash.total).toFixed(2),
+      due: Decimal.max(feeTotal.minus(discountTotal).minus(cash.total), 0).toFixed(2),
       // What is still sitting in China waiting for a passager.
       unallocated: withRemaining
         .reduce((acc, l) => acc.plus(Decimal.max(l.remaining, 0)), new Decimal(0)).toFixed(3),
