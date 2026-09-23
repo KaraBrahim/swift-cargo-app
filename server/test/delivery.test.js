@@ -12,10 +12,11 @@
 // l'ordonnancement.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupTestDb, firstAdminAndCaisse } from './helpers/testdb.js';
+import { setupTestDb, firstAdminAndCaisse, balanceOf } from './helpers/testdb.js';
 import * as bons from '../src/modules/bons/bons.service.js';
 import * as orders from '../src/modules/orders/orders.service.js';
 import * as accounts from '../src/modules/accounts/accounts.service.js';
+import * as caisse from '../src/modules/caisse/caisse.service.js';
 import * as people from '../src/modules/people/people.service.js';
 import { getPool } from '../src/db/pool.js';
 
@@ -146,6 +147,33 @@ test('livrer plus que ce qui est au bureau est refusé, et ne bouge rien', async
   );
   assert.equal(await levelOf(s.itemId, 'algeria'), '40.000', 'le stock est intact');
   assert.equal(await statusOf(s.order.id), 'arrivee');
+});
+
+// « Régler et verser » au comptoir : on règle le bon et on donne ce qu'on a en
+// caisse, pas forcément tout. Le reste se paie plus tard depuis « Argent ».
+test("le règlement peut ne verser qu'une partie du dû au passager", async () => {
+  const s = await shipment();
+  const { rows: [bon] } = await getPool().query('SELECT transport_fee FROM bons WHERE id=$1', [s.bonId]);
+  const due = Number(bon.transport_fee);
+
+  // De quoi payer : la caisse de ce fichier ne sert qu'à lui.
+  await caisse.deposit({ admin, caisseId, currency: 'DZD', amount: String(due + 1000), note: 'test' });
+  const before = Number(await balanceOf(caisseId, 'DZD'));
+  await bons.settle({ admin, id: s.bonId, caisseId, paidNow: '1000' });
+
+  assert.equal(Number(await balanceOf(caisseId, 'DZD')), before - 1000, "la caisse ne sort que ce qu'on a versé");
+  const { rows: [paid] } = await getPool().query(
+    "SELECT COALESCE(SUM(ABS(amount)), 0) AS t FROM person_ledger WHERE ref_bon_id=$1 AND type='passager_payment'", [s.bonId]
+  );
+  assert.equal(Number(paid.t), 1000);
+
+  // Le reste reste payable, et pas un dinar de plus.
+  await bons.payPassager({ admin, id: s.bonId, caisseId });
+  const { rows: [after] } = await getPool().query(
+    "SELECT COALESCE(SUM(ABS(amount)), 0) AS t FROM person_ledger WHERE ref_bon_id=$1 AND type='passager_payment'", [s.bonId]
+  );
+  assert.equal(Number(after.t), due, 'le total versé est exactement le dû');
+  await assert.rejects(bons.payPassager({ admin, id: s.bonId, caisseId }), /déjà payé/);
 });
 
 test('la clôture demande la livraison, le règlement des passagers ET les frais encaissés', async () => {

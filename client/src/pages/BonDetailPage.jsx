@@ -87,6 +87,10 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   const [payForm, setPayForm] = useState({ caisseId: '', amount: '' });
   // La caisse qui paie au règlement. Vide = régler sans payer tout de suite.
   const [settleCaisse, setSettleCaisse] = useState('');
+  // Ce qu'on donne au passager TOUT DE SUITE. Peut être moins que ce qu'on lui
+  // doit : on règle le bon, on verse ce qu'on a en caisse, le reste se paie
+  // depuis « Argent ». Vide = tout le dû.
+  const [settlePaid, setSettlePaid] = useState('');
   const [edit, setEdit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPayment, setConfirmPayment] = useState(null);
@@ -203,7 +207,11 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   const settle = () =>
     act(() => idem((key) => api(`/bons/${id}/settle`, {
       method: 'POST', idem: key,
-      body: { passagerPayment: payment || undefined, caisseId: settleCaisse ? Number(settleCaisse) : undefined },
+      body: {
+        passagerPayment: payment || undefined,
+        caisseId: settleCaisse ? Number(settleCaisse) : undefined,
+        paidNow: settleCaisse && settlePaid ? settlePaid : undefined,
+      },
     })), settleCaisse ? 'Bon réglé et passager payé.' : 'Bon réglé — passager à payer.');
   const collectFee = () =>
     act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount } })), 'Frais encaissés.');
@@ -623,7 +631,12 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                   <EntityPicker
                     icon="caisse"
                     value={settleCaisse}
-                    onChange={setSettleCaisse}
+                    onChange={(v) => {
+                      setSettleCaisse(v);
+                      // Le cas ordinaire est de tout verser : le champ s'ouvre
+                      // sur le dû, pas sur un vide à remplir.
+                      if (v && !settlePaid) setSettlePaid(String((payMode === 'manual' && payment !== '' ? Number(payment || 0) : recDeliveredTotal).toFixed(2)));
+                    }}
                     options={offices}
                     labelOf={(c) => c.label}
                     subOf={caisseSub}
@@ -631,10 +644,16 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                     placeholder="Payer plus tard (choisir une caisse pour payer maintenant)"
                     emptyText="Aucune caisse de bureau."
                   /></div>
+                {settleCaisse && (
+                  <label className="field wz-amount"><span>Versé maintenant ({cur})</span>
+                    <AmountInput value={settlePaid} onChange={setSettlePaid} /></label>
+                )}
               </div>
               <div className="dt-actions">
                 <button className="btn btn-gold" disabled={busy || (payMode === 'manual' && !(Number(payment) >= 0))} onClick={settle}>
-                  <IconEl name="check" />{settleCaisse ? 'Régler et payer le passager' : 'Régler (payer plus tard)'}
+                  <IconEl name="check" />{settleCaisse
+                    ? `Régler et verser ${formatMoney(Number(settlePaid || 0), cur)}`
+                    : 'Régler (payer plus tard)'}
                 </button>
               </div>
             </div>

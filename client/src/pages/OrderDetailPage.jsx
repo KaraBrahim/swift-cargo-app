@@ -343,21 +343,29 @@ export default function OrderDetailPage() {
                   <EntityPicker
                     icon="caisse"
                     value={cash.caisseId}
-                    onChange={(v) => setCash({ ...cash, caisseId: v })}
+                    onChange={(v) => setCash((f) => ({
+                      ...f, caisseId: v,
+                      // Le cas ordinaire est d'encaisser tout le reste dû : le
+                      // champ s'ouvre dessus au lieu d'un zéro à corriger.
+                      amount: f.amount || (v ? due.toFixed(2) : ''),
+                    }))}
                     options={offices}
                     labelOf={(c) => c.label}
                     subOf={caisseSub}
                     searchOf={(c) => c.label}
-                    placeholder="Choisir la caisse"
+                    placeholder="Encaisser plus tard (choisir une caisse pour encaisser maintenant)"
                     emptyText="Aucune caisse de bureau."
                   /></div>
                 <label className="field wz-amount"><span>Montant reçu ({cur})</span>
-                  <AmountInput value={cash.amount} onChange={(v) => setCash({ ...cash, amount: v })} placeholder={String(due.toFixed(2))} /></label>
+                  <AmountInput value={cash.amount} onChange={(v) => setCash({ ...cash, amount: v })} /></label>
                 <button className="btn btn-gold" disabled={busy || !cash.caisseId || !(Number(cash.amount) > 0)} onClick={collectFee}>
-                  <IconEl name="arrowIn" />Encaisser
+                  <IconEl name="arrowIn" />Encaisser {formatMoney(Number(cash.amount || 0), cur)}
                 </button>
               </div>
-              <Footnote>Laissez le montant vide pour encaisser tout le reste dû. Un versement partiel est accepté.</Footnote>
+              <Footnote>
+                Un versement partiel est accepté : corrigez le montant, le reste dû suivra.
+                Tant qu'aucune caisse n'est choisie, rien n'est encaissé — le fournisseur paiera plus tard.
+              </Footnote>
             </div>
           ) : (
             <Footnote>Tout est encaissé : {formatMoney(collected, cur)} reçus sur {formatMoney(o.totals?.billed, cur)}.</Footnote>

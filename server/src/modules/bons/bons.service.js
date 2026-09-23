@@ -955,7 +955,7 @@ async function reverseShip(c, bon, leg, adminId) {
   }
 }
 
-export async function settle({ admin, id, passagerPayment, caisseId, note, ip }) {
+export async function settle({ admin, id, passagerPayment, caisseId, paidNow, note, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
     const bon = rows[0];
@@ -973,10 +973,12 @@ export async function settle({ admin, id, passagerPayment, caisseId, note, ip })
     await bookSettlement(c, bon, admin, payment, note, owed);
     await recomputeAffectedOrders(c, bon);
     await writeAudit(c, { adminId: admin.id, action: 'bon.settle', entity: 'bon', entityId: id, details: { passager_payment: payment, loss_total: bon.loss_total, caisse_id: caisseId ?? null }, ip });
-    // « Régler et payer » : la caisse choisie verse le dû tout de suite. Sans
-    // caisse, le bon est réglé et le passager reste à payer depuis « Argent ».
+    // « Régler et payer » : la caisse choisie verse tout de suite. Le montant
+    // versé peut être PARTIEL — on règle le bon, on donne ce qu'on a, et le
+    // reste se paie plus tard depuis « Argent ». Sans caisse, rien ne sort.
     if (caisseId && bon.passager_id && new Decimal(payment).gt(0)) {
-      await payPassagerTx(c, { ...bon, status: 'regle', passager_payment: payment }, { admin, caisseId, note, ip });
+      await payPassagerTx(c, { ...bon, status: 'regle', passager_payment: payment },
+        { admin, caisseId, amount: paidNow, note, ip });
     }
     return getBonDetail(id, c);
   });
