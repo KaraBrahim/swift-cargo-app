@@ -315,6 +315,19 @@ export async function updateBon({ admin, id, data, ip }) {
     if (!bon) throw errors.notFound('Bon introuvable.');
     if (bon.status !== 'cree') throw errors.conflict('Seul un bon au statut « Créé » peut être modifié.');
 
+    // Le bon interne d'un ordre reste « créé » toute sa vie : c'est le casier
+    // où la marchandise attend un passager, pas une pièce qui voyage. Son
+    // statut ne dit donc rien de l'ordre — et un ordre livré ou clôturé se
+    // laissait réécrire : changer les prix d'une marchandise déjà remise et
+    // déjà facturée, c'est réécrire une facture payée.
+    if (bon.order_id != null) {
+      const { rows: [o] } = await c.query('SELECT status, reference FROM orders WHERE id=$1', [bon.order_id]);
+      const LOCKED = { livree: 'livré', cloturee: 'clôturé' };
+      if (o && LOCKED[o.status]) {
+        throw errors.conflict(`${o.reference} est ${LOCKED[o.status]} : ses marchandises ne se modifient plus.`);
+      }
+    }
+
     const newCur = (data.transportCurrency || bon.transport_currency).toUpperCase();
     const cur = await c.query('SELECT 1 FROM currencies WHERE code=$1 AND active=TRUE', [newCur]);
     if (!cur.rows.length) throw errors.notFound('Devise de transport inconnue.');

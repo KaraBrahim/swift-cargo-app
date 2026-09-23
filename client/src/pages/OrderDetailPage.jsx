@@ -60,6 +60,7 @@ export default function OrderDetailPage() {
   const goodsBonId = o.bons?.[0]?.id;
   const offices = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
   const caisseSub = (c) => `${formatMoney(c.balances?.[cur] ?? 0, cur)} disponible`;
+  const locked = o.status === 'livree' || o.status === 'cloturee';
   const due = Number(o.totals?.due ?? 0);
   const collected = Number(o.totals?.collected ?? 0);
   const lines = o.lines ?? [];
@@ -229,7 +230,9 @@ export default function OrderDetailPage() {
                 <IconEl name="arrowIn" />
               </button>
             )}
-            {o.bons[0] && (
+            {/* Livré ou clôturé, la marchandise a été remise et facturée : la
+                réécrire, c'est réécrire une facture payée. */}
+            {o.bons[0] && !locked && (
               <Link to={`/bons-fournisseur/${o.id}/marchandises`} className="btn" title="Modifier les marchandises">
                 <IconEl name="edit" />Modifier
               </Link>

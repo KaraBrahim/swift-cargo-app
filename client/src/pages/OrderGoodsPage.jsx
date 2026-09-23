@@ -38,5 +38,19 @@ export default function OrderGoodsPage() {
       </EmptyState>
     );
   }
+  // Un ordre livré ou clôturé ne se réécrit plus : on le dit ici plutôt que de
+  // laisser le formulaire s'ouvrir sur un refus du serveur.
+  const locked = order.status === 'livree' || order.status === 'cloturee';
+  if (locked) {
+    return (
+      <EmptyState icon="alert" title={`${order.reference} ne se modifie plus`}
+        sub="La marchandise a été remise et facturée. Modifier ses lignes réécrirait une facture déjà payée.">
+        <Link to={`/bons-fournisseur/${id}`} className="btn">
+          <IconEl name="order" />Revenir à {order.reference}
+        </Link>
+      </EmptyState>
+    );
+  }
+
   return <BonDetailPage bonId={bonId} autoEdit />;
 }

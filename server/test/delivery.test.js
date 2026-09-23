@@ -176,6 +176,28 @@ test("le règlement peut ne verser qu'une partie du dû au passager", async () =
   await assert.rejects(bons.payPassager({ admin, id: s.bonId, caisseId }), /déjà payé/);
 });
 
+// Ce qui est remis et facturé ne se réécrit plus : les prix d'une marchandise
+// déjà livrée sont ceux d'une facture déjà émise.
+test('un ordre livré ou clôturé refuse la modification de ses marchandises', async () => {
+  const s = await shipment();
+  await bons.settle({ admin, id: s.bonId });
+  await orders.deliverOrder({ admin, id: s.order.id, lines: [{ lineId: s.lineId, quantity: '40' }] });
+  assert.equal(await statusOf(s.order.id), 'livree');
+
+  await assert.rejects(
+    bons.updateBon({ admin, id: s.orderBonId, data: { lines: [{ designation: 'Autre', quantity: '1', unitPrice: '1' }] } }),
+    (e) => e.code === 'CONFLICT' && /livré/.test(e.message)
+  );
+
+  // Et une fois clôturé, toujours pas.
+  await bons.collectFee({ admin, id: s.orderBonId, caisseId });
+  assert.equal(await statusOf(s.order.id), 'cloturee');
+  await assert.rejects(
+    bons.updateBon({ admin, id: s.orderBonId, data: { lines: [{ designation: 'Autre', quantity: '1', unitPrice: '1' }] } }),
+    (e) => e.code === 'CONFLICT' && /clôturé/.test(e.message)
+  );
+});
+
 test('la clôture demande la livraison, le règlement des passagers ET les frais encaissés', async () => {
   const s = await shipment();
 
