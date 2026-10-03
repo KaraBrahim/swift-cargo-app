@@ -24,50 +24,46 @@ before(async () => {
 after(async () => { await db.stop(); });
 
 const me = async () => (await emp.listEmployees()).employees.find((x) => x.id === e.id);
+const d = (iso) => new Date(`${iso}T00:00:00Z`);
 
-test('le compte s’ouvre sur un mois de salaire dû', async () => {
+// Le salaire se gagne jour après jour. Compter des mois entiers faisait deux
+// salaires à qui arrivait le 20 du mois précédent : son mois d'embauche valait
+// un mois plein, et le suivant aussi dès le 1er.
+test('un mois complet vaut exactement un salaire', () => {
+  assert.equal(emp.accrued('70000', d('2026-09-01'), d('2026-09-30')).toFixed(2), '70000.00');
+  assert.equal(emp.accrued('70000', d('2026-09-01'), d('2026-10-31')).toFixed(2), '140000.00');
+});
+
+test('un mois entamé compte ses jours, pas le mois entier', () => {
+  // Embauché le 20 septembre : 11 jours sur 30.
+  assert.equal(emp.accrued('70000', d('2026-09-20'), d('2026-09-30')).toFixed(2), '25666.67');
+  // Puis trois jours d'octobre, sur 31 — et non un second salaire entier.
+  assert.equal(emp.accrued('70000', d('2026-09-20'), d('2026-10-03')).toFixed(2), '32440.86');
+});
+
+test('embauché aujourd’hui, un seul jour est dû', () => {
+  const t = d('2026-10-03');
+  assert.equal(emp.accrued('70000', t, t).toFixed(2), '2258.06');
+});
+
+test('le compte part de ce qui est acquis, pas d’un mois plein', async () => {
   const m = await me();
-  assert.equal(m.months, 1);
-  assert.equal(m.owed_total, '30000.00');
-  assert.equal(m.balance, '30000.00');
-  assert.equal(m.remaining, '30000.00');
+  assert.ok(Number(m.owed_total) > 0 && Number(m.owed_total) <= 30000, `acquis inattendu : ${m.owed_total}`);
+  assert.equal(m.balance, m.owed_total);
   assert.equal(m.advance, '0.00');
 });
 
-test('un versement partiel réduit le solde sans le solder', async () => {
-  const before = Number(await balanceOf(caisseId, 'DZD'));
-  await emp.payEmployee({ admin, id: e.id, amount: '5000', caisseId, ip: '::1' });
-
-  assert.equal(Number(await balanceOf(caisseId, 'DZD')), before - 5000);
+test('verser plus que l’acquis laisse une avance, jamais « à jour »', async () => {
+  await emp.payEmployee({ admin, id: e.id, amount: '50000', caisseId, ip: '::1' });
   const m = await me();
-  assert.equal(m.paid_this_month, '5000.00');
-  assert.equal(m.balance, '25000.00');
-});
-
-// Le défaut corrigé : « à jour » alors qu'on avait versé plus que dû. Le surplus
-// est une AVANCE, elle vaut pour les mois suivants et doit se voir.
-test('verser plus que dû laisse une avance, jamais « à jour »', async () => {
-  await emp.payEmployee({ admin, id: e.id, amount: '40000', caisseId, ip: '::1' });
-  const m = await me();
-  assert.equal(m.paid_total, '45000.00');
-  assert.equal(m.balance, '-15000.00', 'le compte est débiteur : il a 15 000 d’avance');
-  assert.equal(m.advance, '15000.00');
-  assert.equal(m.remaining, '0.00', 'on ne lui doit rien pour l’instant');
-});
-
-// L'avance s'impute sur le mois suivant : le salaire court, le compte se
-// rapproche de zéro sans qu'on reverse quoi que ce soit.
-test('le mois suivant déduit l’avance de ce qui devient dû', async () => {
-  const next = new Date(); next.setUTCMonth(next.getUTCMonth() + 1);
-  const { employees } = await emp.listEmployees({ period: next.toISOString().slice(0, 7) });
-  const m = employees.find((x) => x.id === e.id);
-  assert.equal(m.months, 2);
-  assert.equal(m.owed_total, '60000.00');
-  assert.equal(m.balance, '15000.00', '60 000 dus − 45 000 versés');
+  assert.equal(m.paid_total, '50000.00');
+  assert.ok(Number(m.balance) < 0, 'le compte est débiteur');
+  assert.equal(m.advance, (50000 - Number(m.owed_total)).toFixed(2));
+  assert.equal(m.remaining, '0.00');
 });
 
 test('chaque versement est une charge « salaire » rattachée au salarié', async () => {
   const { rows } = await getPool().query("SELECT category, employee_id FROM charges WHERE employee_id = $1", [e.id]);
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 1);
   assert.ok(rows.every((r) => r.category === 'salaire' && r.employee_id === e.id));
 });

@@ -153,7 +153,7 @@ export function SalairesPanel({ offices, currencies }) {
                   return (
                     <tr key={e.id}>
                       <td><strong>{e.name}</strong>
-                        <div className="muted" style={{ fontSize: '0.72rem' }}>{e.months} mois · dû {formatMoney(e.owed_total, e.currency_code)}</div></td>
+                        <div className="muted" style={{ fontSize: '0.72rem' }}>{e.days} jour(s) · acquis {formatMoney(e.owed_total, e.currency_code)}</div></td>
                       <td className="right">{formatMoney(e.salary, e.currency_code)}</td>
                       <td className="right">{formatMoney(e.paid_this_month, e.currency_code)}</td>
                       <td className="right">{formatMoney(e.paid_total, e.currency_code)}</td>
