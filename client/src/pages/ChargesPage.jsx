@@ -62,7 +62,7 @@ export default function ChargesPage() {
     <div style={{ '--accent': ACCENT }}>
       <PageHeader
         icon="wallet" accent={ACCENT} title="Charges & abonnements"
-        subtitle={tab === 'salaires' ? 'Les personnes que l’entreprise paie : le mois, un acompte, ou un montant libre.' : 'Dépenses de l’entreprise elle-même : internet, électricité, loyer…'}
+        subtitle={tab === 'salaires' ? 'Les personnes que l’entreprise paie. Versez ce que vous voulez, quand vous voulez — le reste du mois suit.' : 'Dépenses de l’entreprise elle-même : internet, électricité, loyer…'}
       >
         <div className="seg">
           <button type="button" className={tab === 'charges' ? 'active' : ''} onClick={() => pickTab('charges')}><IconEl name="wallet" />Charges</button>

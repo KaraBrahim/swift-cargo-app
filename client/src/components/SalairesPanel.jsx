@@ -45,7 +45,7 @@ export function SalairesPanel({ offices, currencies }) {
   const caisseSub = (c, cur) => `${formatMoney(c.balances?.[cur] ?? 0, cur)} disponible`;
 
   const openPay = (e) => setPay({
-    id: e.id, name: e.name, currency: e.currency_code,
+    id: e.id, name: e.name, currency: e.currency_code, remaining: e.remaining,
     // Le cas ordinaire : solder le mois. Tout le reste est une correction du
     // chiffre, pas un autre mode à choisir.
     amount: Number(e.remaining) > 0 ? e.remaining : e.base,
@@ -55,7 +55,7 @@ export function SalairesPanel({ offices, currencies }) {
   const saveEmployee = (ev) => {
     ev.preventDefault();
     const body = {
-      name: form.name.trim(), poste: form.poste || undefined, salary: form.salary || '0',
+      name: form.name.trim(), salary: form.salary || '0',
       currency: form.currency, caisseId: form.caisseId ? Number(form.caisseId) : undefined, note: form.note || undefined,
     };
     run(() => (form.id ? api(`/employees/${form.id}`, { method: 'PATCH', body }) : api('/employees', { method: 'POST', body })),
@@ -77,7 +77,7 @@ export function SalairesPanel({ offices, currencies }) {
           {monthLabel(period)} · {employees.length} salarié(s) · versé {formatMoney(totalPaid, cur0)}
           {totalLeft > 0 && <> · reste <strong className="gold">{formatMoney(totalLeft, cur0)}</strong></>}
         </span>
-        <button className="btn btn-gold" onClick={() => { setPay(null); setForm(form ? null : { name: '', poste: '', salary: '', currency: defaultCurrencyFor(offices[0]?.office), caisseId: offices[0]?.id ?? '', note: '' }); }}>
+        <button className="btn btn-gold" onClick={() => { setPay(null); setForm(form ? null : { name: '', salary: '', currency: defaultCurrencyFor(offices[0]?.office), caisseId: offices[0]?.id ?? '', note: '' }); }}>
           <IconEl name={form ? 'close' : 'plus'} />{form ? 'Fermer' : 'Nouveau salarié'}
         </button>
       </div>
@@ -86,8 +86,6 @@ export function SalairesPanel({ offices, currencies }) {
         <form className="panel panel-accent op-form" onSubmit={saveEmployee}>
           <label className="field field-grow"><span>Nom</span>
             <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label className="field"><span>Poste</span>
-            <input value={form.poste || ''} onChange={(e) => setForm({ ...form, poste: e.target.value })} /></label>
           <label className="field"><span>Salaire mensuel</span>
             <AmountInput value={form.salary} onChange={(v) => setForm({ ...form, salary: v })} /></label>
           <label className="field"><span>Devise</span>
@@ -114,7 +112,11 @@ export function SalairesPanel({ offices, currencies }) {
       {pay && (
         <form className="panel panel-accent op-form" onSubmit={submitPay}>
           <div className="field field-grow"><span>Verser à {pay.name}</span>
-            <span className="muted">Le montant s’ouvre sur ce qui reste ce mois-ci. Corrigez-le pour verser moins, ou plus.</span></div>
+            <span className="muted">
+              {Number(pay.remaining) > 0
+                ? `Reste ${formatMoney(pay.remaining, pay.currency)} sur ${monthLabel(period)}. Versez ce que vous voulez, quand vous voulez.`
+                : `${monthLabel(period)} est à jour. Ce versement s’ajoutera (prime, avance).`}
+            </span></div>
           <label className="field"><span>Montant ({pay.currency})</span>
             <AmountInput autoFocus value={pay.amount} onChange={(v) => setPay({ ...pay, amount: v })} /></label>
           <div className="field field-grow"><span>Caisse qui paie</span>
@@ -145,7 +147,7 @@ export function SalairesPanel({ offices, currencies }) {
                   const left = Number(e.remaining);
                   return (
                     <tr key={e.id}>
-                      <td><strong>{e.name}</strong>{e.poste && <div className="muted" style={{ fontSize: '0.74rem' }}>{e.poste}</div>}</td>
+                      <td><strong>{e.name}</strong></td>
                       <td className="right">{formatMoney(e.base, e.currency_code)}</td>
                       <td className="right">{formatMoney(e.paid_this_month, e.currency_code)}</td>
                       <td className={`right ${left > 0 ? 'gold' : 'muted'}`}>
@@ -162,7 +164,7 @@ export function SalairesPanel({ offices, currencies }) {
                           <IconEl name="audit" />
                         </button>
                         <button className="icon-btn" title="Modifier"
-                          onClick={() => { setPay(null); setForm({ id: e.id, name: e.name, poste: e.poste || '', salary: e.salary, currency: e.currency_code, caisseId: e.caisse_id || '', note: e.note || '' }); }}>
+                          onClick={() => { setPay(null); setForm({ id: e.id, name: e.name, salary: e.salary, currency: e.currency_code, caisseId: e.caisse_id || '', note: e.note || '' }); }}>
                           <IconEl name="edit" />
                         </button>
                       </td>

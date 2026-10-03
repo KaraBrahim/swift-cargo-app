@@ -47,17 +47,17 @@ export async function listEmployees({ includeInactive = false, period } = {}) {
   };
 }
 
-export async function createEmployee({ admin, name, poste, salary, currency, caisseId, note, ip }) {
+export async function createEmployee({ admin, name, salary, currency, caisseId, note, ip }) {
   const { rows } = await getPool().query(
-    `INSERT INTO employees (name, poste, salary, currency_code, caisse_id, note) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [name, poste ?? null, new Decimal(salary ?? 0).toFixed(2), currency, caisseId ?? null, note ?? null]
+    `INSERT INTO employees (name, salary, currency_code, caisse_id, note) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [name, new Decimal(salary ?? 0).toFixed(2), currency, caisseId ?? null, note ?? null]
   );
   await writeAudit(getPool(), { adminId: admin.id, action: 'employee.create', entity: 'employee', entityId: rows[0].id, details: { name, salary }, ip });
   return rows[0];
 }
 
 export async function updateEmployee({ admin, id, ip, ...data }) {
-  const fields = { name: data.name, poste: data.poste, salary: data.salary != null ? new Decimal(data.salary).toFixed(2) : undefined,
+  const fields = { name: data.name, salary: data.salary != null ? new Decimal(data.salary).toFixed(2) : undefined,
     currency_code: data.currency, caisse_id: data.caisseId, active: data.active, note: data.note };
   const sets = [], params = [id];
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) { params.push(v); sets.push(`${k} = $${params.length}`); }

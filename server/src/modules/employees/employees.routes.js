@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
-import { idempotent } from '../../middleware/idempotent.js';
 import * as svc from './employees.service.js';
 
 export const employeesRouter = Router();
@@ -19,7 +18,7 @@ employeesRouter.get(
 employeesRouter.post(
   '/employees',
   validate({ body: z.object({
-    name: z.string().trim().min(1).max(120), poste: z.string().trim().max(120).optional(),
+    name: z.string().trim().min(1).max(120),
     salary: money, currency: z.string().trim().toUpperCase().length(3).default('DZD'),
     caisseId: id.optional(), note: z.string().trim().max(300).optional(),
   }) }),
@@ -29,7 +28,7 @@ employeesRouter.post(
 employeesRouter.patch(
   '/employees/:id',
   validate({ params: z.object({ id }), body: z.object({
-    name: z.string().trim().min(1).max(120).optional(), poste: z.string().trim().max(120).nullable().optional(),
+    name: z.string().trim().min(1).max(120).optional(),
     salary: money.optional(), currency: z.string().trim().toUpperCase().length(3).optional(),
     caisseId: id.nullable().optional(), active: z.boolean().optional(), note: z.string().trim().max(300).nullable().optional(),
   }) }),
@@ -44,7 +43,6 @@ employeesRouter.get(
 
 employeesRouter.post(
   '/employees/:id/pay',
-  idempotent,
   validate({ params: z.object({ id }), body: z.object({
     amount: money, caisseId: id.optional(),
     period: z.string().trim().regex(/^\d{4}-\d{2}$/).optional(),
