@@ -31,10 +31,24 @@ employeesRouter.patch(
   validate({ params: z.object({ id }), body: z.object({
     name: z.string().trim().min(1).max(120).optional(),
     firstDueOn: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    salary: money.optional(), currency: z.string().trim().toUpperCase().length(3).optional(),
+    currency: z.string().trim().toUpperCase().length(3).optional(),
     caisseId: id.nullable().optional(), active: z.boolean().optional(), note: z.string().trim().max(300).nullable().optional(),
   }) }),
   asyncHandler(async (req, res) => res.json({ employee: await svc.updateEmployee({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))
+);
+
+employeesRouter.post(
+  '/employees/:id/salary',
+  validate({ params: z.object({ id }), body: z.object({
+    amount: money, effectiveFrom: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), note: z.string().trim().max(300).optional(),
+  }) }),
+  asyncHandler(async (req, res) => res.status(201).json({ employee: await svc.changeSalary({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))
+);
+
+employeesRouter.get(
+  '/employees/:id/salaries',
+  validate({ params: z.object({ id }) }),
+  asyncHandler(async (req, res) => res.json({ salaries: await svc.listSalaries(req.params.id) }))
 );
 
 employeesRouter.get(

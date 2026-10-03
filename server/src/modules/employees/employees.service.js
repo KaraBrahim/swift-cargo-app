@@ -36,6 +36,32 @@ const utc = (y, m, d) => Date.UTC(y, m, d);
 const daysInMonth = (y, m) => (utc(y, m + 1, 1) - utc(y, m, 1)) / DAY;
 const dueDayIn = (y, m, day) => Math.min(day, daysInMonth(y, m));
 
+// Les jours où un salaire est tombé, du premier au dernier.
+export function dueDates(firstDueOn, asOf) {
+  const first = new Date(firstDueOn), to = new Date(asOf);
+  const day = first.getUTCDate();
+  const out = [];
+  let y = first.getUTCFullYear(), m = first.getUTCMonth();
+  for (;;) {
+    const when = utc(y, m, dueDayIn(y, m, day));
+    if (when > to.getTime()) break;
+    out.push(new Date(when));
+    m += 1; if (m > 11) { m = 0; y += 1; }
+  }
+  return out;
+}
+
+// Le montant en vigueur à une date : le dernier fixé avant elle, à défaut le
+// plus ancien connu (un salaire relevé après coup vaut aussi pour avant).
+export function salaryAt(history, when) {
+  const t = new Date(when).getTime();
+  let best = null;
+  for (const h of history) {
+    if (new Date(h.effective_from).getTime() <= t) best = h;
+  }
+  return new Decimal((best ?? history[0])?.amount ?? 0);
+}
+
 export function salariesDue(firstDueOn, asOf) {
   const first = new Date(firstDueOn), to = new Date(asOf);
   const day = first.getUTCDate();
@@ -60,6 +86,15 @@ export async function listEmployees({ includeInactive = false, period } = {}) {
   const [py, pm] = month.split('-').map(Number);
   const asOf = new Date(Math.min(utc(py, pm, 0), Date.now()));
 
+  const { rows: hist } = await getPool().query(
+    'SELECT employee_id, amount, effective_from FROM employee_salaries ORDER BY employee_id, effective_from, id'
+  );
+  const byEmployee = new Map();
+  for (const h of hist) {
+    if (!byEmployee.has(h.employee_id)) byEmployee.set(h.employee_id, []);
+    byEmployee.get(h.employee_id).push(h);
+  }
+
   const { rows } = await getPool().query(
     `SELECT e.*, c.label AS caisse_label,
             COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id AND period = $1), 0)::text AS paid_this_month,
@@ -75,12 +110,17 @@ export async function listEmployees({ includeInactive = false, period } = {}) {
     period: month,
     asOf: asOf.toISOString().slice(0, 10),
     employees: rows.map((e) => {
-      const months = salariesDue(e.first_due_on, asOf);
-      const owed = new Decimal(e.salary).mul(months);
+      // Chaque salaire tombé vaut le montant en vigueur CE JOUR-LÀ : une
+      // augmentation ne réécrit pas les mois déjà dus.
+      const history = byEmployee.get(e.id) ?? [{ amount: e.salary, effective_from: e.first_due_on }];
+      const dates = dueDates(e.first_due_on, asOf);
+      const months = dates.length;
+      const owed = dates.reduce((acc, d) => acc.plus(salaryAt(history, d)), new Decimal(0));
       const balance = owed.minus(e.paid_total);
       return {
         ...e,
         first_due_on: new Date(e.first_due_on).toISOString().slice(0, 10),
+        salary_changes: history.length - 1,
         months,
         next_due_on: nextDueOn(e.first_due_on, asOf).toISOString().slice(0, 10),
         owed_total: owed.toFixed(2),
@@ -98,12 +138,17 @@ export async function createEmployee({ admin, name, salary, currency, caisseId, 
      VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6) RETURNING *`,
     [name, new Decimal(salary ?? 0).toFixed(2), currency, caisseId ?? null, firstDueOn ?? null, note ?? null]
   );
+  await getPool().query(
+    'INSERT INTO employee_salaries (employee_id, amount, effective_from, admin_id) VALUES ($1,$2,$3,$4)',
+    [rows[0].id, rows[0].salary, rows[0].first_due_on, admin.id]
+  );
   await writeAudit(getPool(), { adminId: admin.id, action: 'employee.create', entity: 'employee', entityId: rows[0].id, details: { name, salary }, ip });
   return rows[0];
 }
 
 export async function updateEmployee({ admin, id, ip, ...data }) {
-  const fields = { name: data.name, salary: data.salary != null ? new Decimal(data.salary).toFixed(2) : undefined,
+  // Pas de `salary` ici : un salaire change À PARTIR D'UNE DATE (changeSalary).
+  const fields = { name: data.name,
     currency_code: data.currency, caisse_id: data.caisseId, active: data.active,
     first_due_on: data.firstDueOn, note: data.note };
   const sets = [], params = [id];
@@ -135,6 +180,42 @@ export async function payEmployee({ admin, id, amount, caisseId, period, note, i
     await c.query('UPDATE charges SET employee_id = $2 WHERE id = $1', [charge.id, id]);
     return { ...charge, employee_id: id };
   });
+}
+
+// Changer le salaire, à partir d'un jour. Ce qui est déjà tombé garde son
+// montant : une augmentation ne réécrit pas les mois passés.
+export async function changeSalary({ admin, id, amount, effectiveFrom, note, ip }) {
+  const amt = new Decimal(amount);
+  if (amt.lt(0)) throw errors.invalidAmount('Un salaire ne peut pas être négatif.');
+  return withTx(async (c) => {
+    const { rows } = await c.query('SELECT * FROM employees WHERE id=$1 FOR UPDATE', [id]);
+    const e = rows[0];
+    if (!e) throw errors.notFound('Salarié introuvable.');
+    const from = effectiveFrom || new Date().toISOString().slice(0, 10);
+    await c.query(
+      'INSERT INTO employee_salaries (employee_id, amount, effective_from, note, admin_id) VALUES ($1,$2,$3,$4,$5)',
+      [id, amt.toFixed(2), from, note ?? null, admin.id]
+    );
+    // `employees.salary` reste le salaire EN COURS : celui en vigueur
+    // aujourd'hui, pas forcément celui qu'on vient d'inscrire pour plus tard.
+    const { rows: [cur] } = await c.query(
+      `SELECT amount FROM employee_salaries
+        WHERE employee_id = $1 AND effective_from <= CURRENT_DATE
+        ORDER BY effective_from DESC, id DESC LIMIT 1`, [id]
+    );
+    if (cur) await c.query('UPDATE employees SET salary = $2 WHERE id = $1', [id, cur.amount]);
+    await writeAudit(c, { adminId: admin.id, action: 'employee.salary', entity: 'employee', entityId: id, details: { amount: amt.toFixed(2), from }, ip });
+    return (await c.query('SELECT * FROM employees WHERE id=$1', [id])).rows[0];
+  });
+}
+
+export async function listSalaries(id) {
+  const { rows } = await getPool().query(
+    `SELECT s.id, s.amount, s.effective_from, s.note, s.created_at, a.full_name AS admin_name
+       FROM employee_salaries s LEFT JOIN admins a ON a.id = s.admin_id
+      WHERE s.employee_id = $1 ORDER BY s.effective_from DESC, s.id DESC`, [id]
+  );
+  return rows;
 }
 
 export async function listPayments(id, limit = 50) {

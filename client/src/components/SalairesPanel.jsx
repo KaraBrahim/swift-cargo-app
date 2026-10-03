@@ -28,12 +28,16 @@ export function SalairesPanel({ offices, currencies }) {
   const [form, setForm] = useState(null);   // fiche salarié (nouveau / modification)
   const [pay, setPay] = useState(null);     // versement en cours
   const [history, setHistory] = useState(null);
+  // Changer le salaire est un geste à part : il vaut à partir d'un jour, et ce
+  // qui est déjà tombé garde son montant.
+  const [raise, setRaise] = useState(null);
+  const salaries = useApi(history ? `/employees/${history}/salaries` : null);
   const payments = useApi(history ? `/employees/${history}/payments` : null);
   const [busy, setBusy] = useState(false);
 
   const run = async (fn, ok) => {
     setBusy(true);
-    try { await fn(); toast.success(ok); setForm(null); setPay(null); list.reload(); if (history) payments.reload(); }
+    try { await fn(); toast.success(ok); setForm(null); setPay(null); setRaise(null); list.reload(); if (history) { payments.reload(); salaries.reload(); } }
     catch (err) { toast.error(errorMessage(err)); }
     finally { setBusy(false); }
   };
@@ -57,11 +61,13 @@ export function SalairesPanel({ offices, currencies }) {
   const saveEmployee = (ev) => {
     ev.preventDefault();
     const body = {
-      name: form.name.trim(), salary: form.salary || '0', firstDueOn: form.firstDueOn || today(),
+      name: form.name.trim(), firstDueOn: form.firstDueOn || today(),
       currency: form.currency, caisseId: form.caisseId ? Number(form.caisseId) : undefined, note: form.note || undefined,
     };
-    run(() => (form.id ? api(`/employees/${form.id}`, { method: 'PATCH', body }) : api('/employees', { method: 'POST', body })),
-      form.id ? 'Salarié modifié.' : 'Salarié ajouté.');
+    run(() => (form.id
+      ? api(`/employees/${form.id}`, { method: 'PATCH', body })
+      : api('/employees', { method: 'POST', body: { ...body, salary: form.salary || '0' } })),
+    form.id ? 'Salarié modifié.' : 'Salarié ajouté.');
   };
 
   const submitPay = (ev) => {
@@ -89,10 +95,12 @@ export function SalairesPanel({ offices, currencies }) {
         <form className="panel panel-accent op-form" onSubmit={saveEmployee}>
           <label className="field field-grow"><span>Nom</span>
             <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label className="field"><span>Salaire mensuel</span>
-            <AmountInput value={form.salary} onChange={(v) => setForm({ ...form, salary: v })} /></label>
           {/* Le jour du mois où le salaire tombe. Chaque mois, au même
               quantième, un salaire de plus est dû. */}
+          {!form.id && (
+            <label className="field"><span>Salaire mensuel</span>
+              <AmountInput value={form.salary} onChange={(v) => setForm({ ...form, salary: v })} /></label>
+          )}
           <label className="field"><span>Premier salaire dû le</span>
             <input type="date" value={form.firstDueOn || today()}
               onChange={(e) => setForm({ ...form, firstDueOn: e.target.value })} /></label>
@@ -144,6 +152,30 @@ export function SalairesPanel({ offices, currencies }) {
         </form>
       )}
 
+      {raise && (
+        <form className="panel panel-accent op-form" onSubmit={(ev) => {
+          ev.preventDefault();
+          run(() => api(`/employees/${raise.id}/salary`, {
+            method: 'POST',
+            body: { amount: raise.amount, effectiveFrom: raise.from, note: raise.note || undefined },
+          }), `Salaire de ${raise.name} : ${formatMoney(raise.amount, raise.currency)} à partir du ${dt(raise.from)}.`);
+        }}>
+          <div className="field field-grow"><span>Salaire de {raise.name}</span>
+            <span className="muted">
+              Aujourd’hui {formatMoney(raise.current, raise.currency)}. Le nouveau montant vaut à partir de la date
+              choisie — les salaires déjà tombés gardent le leur.
+            </span></div>
+          <label className="field"><span>Nouveau salaire ({raise.currency})</span>
+            <AmountInput autoFocus value={raise.amount} onChange={(v) => setRaise({ ...raise, amount: v })} /></label>
+          <label className="field"><span>À partir du</span>
+            <input type="date" value={raise.from} onChange={(e) => setRaise({ ...raise, from: e.target.value })} /></label>
+          <label className="field field-grow"><span>Note</span>
+            <input value={raise.note} onChange={(e) => setRaise({ ...raise, note: e.target.value })} placeholder="augmentation, révision…" /></label>
+          <button className="btn btn-gold" disabled={busy || !(Number(raise.amount) >= 0) || !raise.from}>Enregistrer</button>
+          <button type="button" className="btn btn-ghost" onClick={() => setRaise(null)}>Annuler</button>
+        </form>
+      )}
+
       {employees.length ? (
         <div className="panel">
           <div className="table-wrap">
@@ -161,6 +193,7 @@ export function SalairesPanel({ offices, currencies }) {
                       <td><strong>{e.name}</strong>
                         <div className="muted" style={{ fontSize: '0.72rem' }}>
                           {e.months} salaire(s) dû(s) · prochain le {dt(e.next_due_on)}
+                          {e.salary_changes > 0 && ` · ${e.salary_changes} changement(s) de salaire`}
                         </div></td>
                       <td className="right">{formatMoney(e.salary, e.currency_code)}</td>
                       <td className="right">{formatMoney(e.paid_this_month, e.currency_code)}</td>
@@ -179,6 +212,10 @@ export function SalairesPanel({ offices, currencies }) {
                         <button className="btn btn-sm btn-gold" onClick={() => { setForm(null); openPay(e); }}>
                           <IconEl name="arrowOut" />Payer
                         </button>{' '}
+                        <button className="icon-btn" title="Changer le salaire"
+                          onClick={() => { setForm(null); setPay(null); setRaise({ id: e.id, name: e.name, currency: e.currency_code, current: e.salary, amount: e.salary, from: today(), note: '' }); }}>
+                          <IconEl name="coins" />
+                        </button>
                         <button className="icon-btn" title="Versements" onClick={() => setHistory(history === e.id ? null : e.id)}>
                           <IconEl name="audit" />
                         </button>
@@ -213,6 +250,20 @@ export function SalairesPanel({ offices, currencies }) {
               ))}</tbody>
             </table></div>
           ) : <p className="muted">Aucun versement.</p>}
+
+          <h2 className="panel-title" style={{ marginTop: 18 }}>Salaires successifs</h2>
+          {(salaries.data?.salaries ?? []).length ? (
+            <div className="table-wrap"><table className="table">
+              <thead><tr><th>À partir du</th><th>Note</th><th>Par</th><th className="right">Montant</th></tr></thead>
+              <tbody>{salaries.data.salaries.map((x) => (
+                <tr key={x.id}>
+                  <td>{dt(x.effective_from)}</td><td className="muted">{x.note || '—'}</td>
+                  <td>{x.admin_name || '—'}</td>
+                  <td className="right">{formatMoney(x.amount, employees.find((e) => e.id === history)?.currency_code)}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          ) : <p className="muted">Aucun montant enregistré.</p>}
         </div>
       )}
     </>

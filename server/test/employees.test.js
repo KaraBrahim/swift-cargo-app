@@ -76,6 +76,27 @@ test('l’avance fond au salaire suivant', async () => {
   assert.equal(Number(r.salary) * 2 - 50000, 10000);
 });
 
+// Une augmentation vaut à partir d'un jour : ce qui est déjà tombé garde son
+// montant. Sinon, augmenter quelqu'un lui devrait rétroactivement la
+// différence sur chaque mois déjà payé.
+test('changer le salaire ne réécrit pas les salaires déjà tombés', async () => {
+  const { rows: [r] } = await getPool().query('SELECT first_due_on FROM employees WHERE id=$1', [e.id]);
+  const before = await me();
+  assert.equal(before.owed_total, '30000.00', 'un salaire tombé à 30 000');
+
+  // Augmentation à partir de demain : rien ne change aujourd'hui.
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  await emp.changeSalary({ admin, id: e.id, amount: '45000', effectiveFrom: tomorrow, ip: '::1' });
+  const after = await me();
+  assert.equal(after.owed_total, '30000.00', 'le salaire déjà tombé garde son montant');
+
+  // Le prochain, lui, tombera à 45 000.
+  const hist = await emp.listSalaries(e.id);
+  assert.equal(hist.length, 2);
+  const next = emp.dueDates(r.first_due_on, new Date(Date.now() + 40 * 86400000));
+  assert.equal(emp.salaryAt(hist.slice().reverse(), next[next.length - 1]).toFixed(2), '45000.00');
+});
+
 test('chaque versement est une charge « salaire » rattachée au salarié', async () => {
   const { rows } = await getPool().query("SELECT category, employee_id FROM charges WHERE employee_id = $1", [e.id]);
   assert.equal(rows.length, 1);
