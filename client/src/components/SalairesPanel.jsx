@@ -19,6 +19,7 @@ import { defaultCurrencyFor } from '../lib/offices.js';
 
 const monthLabel = (p) => new Date(`${p}-01T00:00:00`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 const dt = (v) => (v ? new Date(v).toLocaleDateString('fr-FR') : '—');
+const today = () => new Date().toISOString().slice(0, 10);
 
 export function SalairesPanel({ offices, currencies }) {
   const toast = useToast();
@@ -56,7 +57,7 @@ export function SalairesPanel({ offices, currencies }) {
   const saveEmployee = (ev) => {
     ev.preventDefault();
     const body = {
-      name: form.name.trim(), salary: form.salary || '0',
+      name: form.name.trim(), salary: form.salary || '0', firstDueOn: form.firstDueOn || today(),
       currency: form.currency, caisseId: form.caisseId ? Number(form.caisseId) : undefined, note: form.note || undefined,
     };
     run(() => (form.id ? api(`/employees/${form.id}`, { method: 'PATCH', body }) : api('/employees', { method: 'POST', body })),
@@ -79,7 +80,7 @@ export function SalairesPanel({ offices, currencies }) {
           {totalLeft > 0 && <> · dû <strong className="gold">{formatMoney(totalLeft, cur0)}</strong></>}
           {totalAdvance > 0 && <> · avances <strong className="neg">{formatMoney(totalAdvance, cur0)}</strong></>}
         </span>
-        <button className="btn btn-gold" onClick={() => { setPay(null); setForm(form ? null : { name: '', salary: '', currency: defaultCurrencyFor(offices[0]?.office), caisseId: offices[0]?.id ?? '', note: '' }); }}>
+        <button className="btn btn-gold" onClick={() => { setPay(null); setForm(form ? null : { name: '', salary: '', firstDueOn: today(), currency: defaultCurrencyFor(offices[0]?.office), caisseId: offices[0]?.id ?? '', note: '' }); }}>
           <IconEl name={form ? 'close' : 'plus'} />{form ? 'Fermer' : 'Nouveau salarié'}
         </button>
       </div>
@@ -90,6 +91,11 @@ export function SalairesPanel({ offices, currencies }) {
             <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label className="field"><span>Salaire mensuel</span>
             <AmountInput value={form.salary} onChange={(v) => setForm({ ...form, salary: v })} /></label>
+          {/* Le jour du mois où le salaire tombe. Chaque mois, au même
+              quantième, un salaire de plus est dû. */}
+          <label className="field"><span>Premier salaire dû le</span>
+            <input type="date" value={form.firstDueOn || today()}
+              onChange={(e) => setForm({ ...form, firstDueOn: e.target.value })} /></label>
           <label className="field"><span>Devise</span>
             <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
               {(currencies ?? []).map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
@@ -153,7 +159,9 @@ export function SalairesPanel({ offices, currencies }) {
                   return (
                     <tr key={e.id}>
                       <td><strong>{e.name}</strong>
-                        <div className="muted" style={{ fontSize: '0.72rem' }}>{e.days} jour(s) · acquis {formatMoney(e.owed_total, e.currency_code)}</div></td>
+                        <div className="muted" style={{ fontSize: '0.72rem' }}>
+                          {e.months} salaire(s) dû(s) · prochain le {dt(e.next_due_on)}
+                        </div></td>
                       <td className="right">{formatMoney(e.salary, e.currency_code)}</td>
                       <td className="right">{formatMoney(e.paid_this_month, e.currency_code)}</td>
                       <td className="right">{formatMoney(e.paid_total, e.currency_code)}</td>
@@ -175,7 +183,7 @@ export function SalairesPanel({ offices, currencies }) {
                           <IconEl name="audit" />
                         </button>
                         <button className="icon-btn" title="Modifier"
-                          onClick={() => { setPay(null); setForm({ id: e.id, name: e.name, salary: e.salary, currency: e.currency_code, caisseId: e.caisse_id || '', note: e.note || '' }); }}>
+                          onClick={() => { setPay(null); setForm({ id: e.id, name: e.name, salary: e.salary, firstDueOn: e.first_due_on, currency: e.currency_code, caisseId: e.caisse_id || '', note: e.note || '' }); }}>
                           <IconEl name="edit" />
                         </button>
                       </td>

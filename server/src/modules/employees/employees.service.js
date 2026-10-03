@@ -4,7 +4,7 @@
 // l'entreprise lui doit son salaire chaque mois ; chaque versement réduit ce
 // qu'elle doit.
 //
-//     solde = salaire au prorata des jours travaillés − tout ce qui a été versé
+//     solde = salaire × salaires tombés − tout ce qui a été versé
 //
 // Positif, on lui doit. Négatif, il a été payé d'avance et cela vaut pour les
 // mois à venir. Rien n'est ramené à zéro : une avance qui disparaît de l'écran
@@ -24,40 +24,41 @@ import { createCharge } from '../accounts/accounts.service.js';
 
 const monthOf = (d = new Date()) => d.toISOString().slice(0, 7);
 
-// Ce que l'entreprise doit entre deux dates, au prorata des JOURS travaillés.
+// Combien de salaires sont tombés, et quand tombe le prochain.
 //
-// Compter des mois entiers faisait deux salaires à qui était arrivé le 20 du
-// mois précédent : son mois d'embauche comptait pour un mois plein, et le
-// suivant aussi dès le 1er. Un salaire se gagne jour après jour — chaque jour
-// vaut donc le salaire divisé par le nombre de jours de SON mois (28, 30 ou 31,
-// pour qu'un mois complet vaille exactement un salaire).
+// Un salaire est dû EN ENTIER au jour convenu, pas au prorata des jours
+// travaillés : au 3 du mois on ne doit pas trois jours de salaire, on doit ce
+// qui est tombé le mois dernier. `first_due_on` porte ce jour ; chaque mois, au
+// même quantième, un salaire de plus tombe. Un mois trop court (le 31 en
+// février) tombe le dernier jour.
 const DAY = 86_400_000;
 const utc = (y, m, d) => Date.UTC(y, m, d);
 const daysInMonth = (y, m) => (utc(y, m + 1, 1) - utc(y, m, 1)) / DAY;
+const dueDayIn = (y, m, day) => Math.min(day, daysInMonth(y, m));
 
-export function accrued(salary, hiredAt, asOf) {
-  const from = new Date(hiredAt), to = new Date(asOf);
-  if (to < from) return new Decimal(0);
-  let total = new Decimal(0);
-  let y = from.getUTCFullYear(), m = from.getUTCMonth();
-  while (utc(y, m, 1) <= utc(to.getUTCFullYear(), to.getUTCMonth(), 1)) {
-    const monthStart = utc(y, m, 1), monthEnd = utc(y, m + 1, 1);
-    // Le premier jour compte : être embauché le 3 et payé le 3, c'est un jour.
-    const start = Math.max(monthStart, utc(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-    const end = Math.min(monthEnd, utc(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()) + DAY);
-    const days = Math.max(0, (end - start) / DAY);
-    total = total.plus(new Decimal(salary).mul(days).div(daysInMonth(y, m)));
-    m += 1; if (m > 11) { m = 0; y += 1; }
-  }
-  return total;
+export function salariesDue(firstDueOn, asOf) {
+  const first = new Date(firstDueOn), to = new Date(asOf);
+  const day = first.getUTCDate();
+  let n = (to.getUTCFullYear() - first.getUTCFullYear()) * 12 + (to.getUTCMonth() - first.getUTCMonth());
+  // Le salaire du mois en cours n'est tombé que si son jour est passé.
+  if (to.getUTCDate() >= dueDayIn(to.getUTCFullYear(), to.getUTCMonth(), day)) n += 1;
+  return Math.max(n, 0);
+}
+
+export function nextDueOn(firstDueOn, asOf) {
+  const first = new Date(firstDueOn), to = new Date(asOf);
+  const day = first.getUTCDate();
+  let y = to.getUTCFullYear(), m = to.getUTCMonth();
+  if (to < first) return new Date(utc(first.getUTCFullYear(), first.getUTCMonth(), day));
+  if (to.getUTCDate() >= dueDayIn(y, m, day)) { m += 1; if (m > 11) { m = 0; y += 1; } }
+  return new Date(utc(y, m, dueDayIn(y, m, day)));
 }
 
 export async function listEmployees({ includeInactive = false, period } = {}) {
   const month = period || monthOf();
   // Un mois passé se lit à sa fin ; le mois en cours s'arrête aujourd'hui.
   const [py, pm] = month.split('-').map(Number);
-  const endOfPeriod = new Date(utc(py, pm, 0));
-  const asOf = new Date(Math.min(endOfPeriod.getTime(), Date.now()));
+  const asOf = new Date(Math.min(utc(py, pm, 0), Date.now()));
 
   const { rows } = await getPool().query(
     `SELECT e.*, c.label AS caisse_label,
@@ -74,12 +75,14 @@ export async function listEmployees({ includeInactive = false, period } = {}) {
     period: month,
     asOf: asOf.toISOString().slice(0, 10),
     employees: rows.map((e) => {
-      const owed = accrued(e.salary, e.created_at, asOf);
+      const months = salariesDue(e.first_due_on, asOf);
+      const owed = new Decimal(e.salary).mul(months);
       const balance = owed.minus(e.paid_total);
-      const days = Math.max(0, Math.floor((asOf - new Date(e.created_at)) / DAY) + 1);
       return {
         ...e,
-        days,
+        first_due_on: new Date(e.first_due_on).toISOString().slice(0, 10),
+        months,
+        next_due_on: nextDueOn(e.first_due_on, asOf).toISOString().slice(0, 10),
         owed_total: owed.toFixed(2),
         balance: balance.toFixed(2),
         remaining: Decimal.max(balance, 0).toFixed(2),
@@ -89,10 +92,11 @@ export async function listEmployees({ includeInactive = false, period } = {}) {
   };
 }
 
-export async function createEmployee({ admin, name, salary, currency, caisseId, note, ip }) {
+export async function createEmployee({ admin, name, salary, currency, caisseId, firstDueOn, note, ip }) {
   const { rows } = await getPool().query(
-    `INSERT INTO employees (name, salary, currency_code, caisse_id, note) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [name, new Decimal(salary ?? 0).toFixed(2), currency, caisseId ?? null, note ?? null]
+    `INSERT INTO employees (name, salary, currency_code, caisse_id, first_due_on, note)
+     VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6) RETURNING *`,
+    [name, new Decimal(salary ?? 0).toFixed(2), currency, caisseId ?? null, firstDueOn ?? null, note ?? null]
   );
   await writeAudit(getPool(), { adminId: admin.id, action: 'employee.create', entity: 'employee', entityId: rows[0].id, details: { name, salary }, ip });
   return rows[0];
@@ -100,7 +104,8 @@ export async function createEmployee({ admin, name, salary, currency, caisseId, 
 
 export async function updateEmployee({ admin, id, ip, ...data }) {
   const fields = { name: data.name, salary: data.salary != null ? new Decimal(data.salary).toFixed(2) : undefined,
-    currency_code: data.currency, caisse_id: data.caisseId, active: data.active, note: data.note };
+    currency_code: data.currency, caisse_id: data.caisseId, active: data.active,
+    first_due_on: data.firstDueOn, note: data.note };
   const sets = [], params = [id];
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) { params.push(v); sets.push(`${k} = $${params.length}`); }
   if (!sets.length) throw errors.validation([{ field: 'body', message: 'Rien à modifier.' }]);

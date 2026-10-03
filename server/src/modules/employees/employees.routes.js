@@ -19,6 +19,7 @@ employeesRouter.post(
   '/employees',
   validate({ body: z.object({
     name: z.string().trim().min(1).max(120),
+    firstDueOn: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     salary: money, currency: z.string().trim().toUpperCase().length(3).default('DZD'),
     caisseId: id.optional(), note: z.string().trim().max(300).optional(),
   }) }),
@@ -29,6 +30,7 @@ employeesRouter.patch(
   '/employees/:id',
   validate({ params: z.object({ id }), body: z.object({
     name: z.string().trim().min(1).max(120).optional(),
+    firstDueOn: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     salary: money.optional(), currency: z.string().trim().toUpperCase().length(3).optional(),
     caisseId: id.nullable().optional(), active: z.boolean().optional(), note: z.string().trim().max(300).nullable().optional(),
   }) }),

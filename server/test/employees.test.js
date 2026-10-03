@@ -26,40 +26,54 @@ after(async () => { await db.stop(); });
 const me = async () => (await emp.listEmployees()).employees.find((x) => x.id === e.id);
 const d = (iso) => new Date(`${iso}T00:00:00Z`);
 
-// Le salaire se gagne jour après jour. Compter des mois entiers faisait deux
-// salaires à qui arrivait le 20 du mois précédent : son mois d'embauche valait
-// un mois plein, et le suivant aussi dès le 1er.
-test('un mois complet vaut exactement un salaire', () => {
-  assert.equal(emp.accrued('70000', d('2026-09-01'), d('2026-09-30')).toFixed(2), '70000.00');
-  assert.equal(emp.accrued('70000', d('2026-09-01'), d('2026-10-31')).toFixed(2), '140000.00');
+// Un salaire est dû EN ENTIER au jour convenu : au 3 du mois on ne doit pas
+// trois jours de salaire, on doit ce qui est tombé le mois dernier.
+test('un salaire tombe au jour convenu, puis chaque mois au même quantième', () => {
+  assert.equal(emp.salariesDue(d('2026-10-05'), d('2026-10-03')), 0, 'le jour n’est pas encore passé');
+  assert.equal(emp.salariesDue(d('2026-10-05'), d('2026-10-05')), 1, 'le jour même');
+  assert.equal(emp.salariesDue(d('2026-09-05'), d('2026-10-03')), 1, 'un seul salaire tombé');
+  assert.equal(emp.salariesDue(d('2026-09-05'), d('2026-10-06')), 2);
 });
 
-test('un mois entamé compte ses jours, pas le mois entier', () => {
-  // Embauché le 20 septembre : 11 jours sur 30.
-  assert.equal(emp.accrued('70000', d('2026-09-20'), d('2026-09-30')).toFixed(2), '25666.67');
-  // Puis trois jours d'octobre, sur 31 — et non un second salaire entier.
-  assert.equal(emp.accrued('70000', d('2026-09-20'), d('2026-10-03')).toFixed(2), '32440.86');
+test('un mois trop court fait tomber le salaire son dernier jour', () => {
+  // Le 31 janvier : février n'a pas de 31, le salaire tombe le 28.
+  assert.equal(emp.salariesDue(d('2026-01-31'), d('2026-02-27')), 1);
+  assert.equal(emp.salariesDue(d('2026-01-31'), d('2026-02-28')), 2);
+  assert.equal(emp.nextDueOn(d('2026-01-31'), d('2026-02-28')).toISOString().slice(0, 10), '2026-03-31');
 });
 
-test('embauché aujourd’hui, un seul jour est dû', () => {
-  const t = d('2026-10-03');
-  assert.equal(emp.accrued('70000', t, t).toFixed(2), '2258.06');
-});
-
-test('le compte part de ce qui est acquis, pas d’un mois plein', async () => {
+test('le compte montre ce qu’on doit, salaire par salaire', async () => {
   const m = await me();
-  assert.ok(Number(m.owed_total) > 0 && Number(m.owed_total) <= 30000, `acquis inattendu : ${m.owed_total}`);
-  assert.equal(m.balance, m.owed_total);
-  assert.equal(m.advance, '0.00');
+  assert.equal(m.months, 1, 'un salaire est tombé le jour de l’embauche');
+  assert.equal(m.owed_total, '30000.00');
+  assert.equal(m.balance, '30000.00');
 });
 
-test('verser plus que l’acquis laisse une avance, jamais « à jour »', async () => {
+test('verser plus que dû laisse une avance, jamais « à jour »', async () => {
   await emp.payEmployee({ admin, id: e.id, amount: '50000', caisseId, ip: '::1' });
   const m = await me();
   assert.equal(m.paid_total, '50000.00');
-  assert.ok(Number(m.balance) < 0, 'le compte est débiteur');
-  assert.equal(m.advance, (50000 - Number(m.owed_total)).toFixed(2));
+  assert.equal(m.balance, '-20000.00');
+  assert.equal(m.advance, '20000.00');
   assert.equal(m.remaining, '0.00');
+});
+
+// Le temps ne s'avance pas en changeant de mois à l'écran : un salaire qui
+// n'est pas tombé n'est pas dû. L'avance fond quand le jour arrive, pas avant.
+test('regarder un mois à venir n’invente pas de salaire', async () => {
+  const next = new Date(); next.setUTCMonth(next.getUTCMonth() + 2);
+  const { employees } = await emp.listEmployees({ period: next.toISOString().slice(0, 7) });
+  const m = employees.find((x) => x.id === e.id);
+  assert.equal(m.months, 1, 'toujours un seul salaire tombé');
+  assert.equal(m.advance, '20000.00', 'l’avance est intacte');
+});
+
+test('l’avance fond au salaire suivant', async () => {
+  const { rows: [r] } = await getPool().query('SELECT first_due_on, salary FROM employees WHERE id=$1', [e.id]);
+  const inTwoMonths = new Date(r.first_due_on); inTwoMonths.setUTCMonth(inTwoMonths.getUTCMonth() + 1);
+  assert.equal(emp.salariesDue(r.first_due_on, inTwoMonths), 2, 'le second salaire est tombé');
+  // 2 × 30 000 dus − 50 000 versés = 10 000 encore dus.
+  assert.equal(Number(r.salary) * 2 - 50000, 10000);
 });
 
 test('chaque versement est une charge « salaire » rattachée au salarié', async () => {
