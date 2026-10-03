@@ -25,48 +25,49 @@ after(async () => { await db.stop(); });
 
 const me = async () => (await emp.listEmployees()).employees.find((x) => x.id === e.id);
 
-test('la proposition part du salaire configuré', async () => {
+test('le compte s’ouvre sur un mois de salaire dû', async () => {
   const m = await me();
-  assert.equal(m.base, '30000.00');
+  assert.equal(m.months, 1);
+  assert.equal(m.owed_total, '30000.00');
+  assert.equal(m.balance, '30000.00');
   assert.equal(m.remaining, '30000.00');
+  assert.equal(m.advance, '0.00');
 });
 
-// Un versement partiel EST l'acompte : plus de mode à choisir, juste un montant.
-test('un versement sort de la caisse et diminue ce qui reste', async () => {
+test('un versement partiel réduit le solde sans le solder', async () => {
   const before = Number(await balanceOf(caisseId, 'DZD'));
   await emp.payEmployee({ admin, id: e.id, amount: '5000', caisseId, ip: '::1' });
 
   assert.equal(Number(await balanceOf(caisseId, 'DZD')), before - 5000);
   const m = await me();
   assert.equal(m.paid_this_month, '5000.00');
-  assert.equal(m.remaining, '25000.00');
+  assert.equal(m.balance, '25000.00');
 });
 
-test('solder le mois met le reste à zéro, et verser plus reste permis', async () => {
-  await emp.payEmployee({ admin, id: e.id, amount: '25000', caisseId, ip: '::1' });
-  let m = await me();
-  assert.equal(m.paid_this_month, '30000.00');
-  assert.equal(m.remaining, '0.00', 'le mois est à jour');
-
-  // Une prime : de l'argent réellement sorti, jamais refusé.
-  await emp.payEmployee({ admin, id: e.id, amount: '2000', caisseId, note: 'prime', ip: '::1' });
-  m = await me();
-  assert.equal(m.paid_this_month, '32000.00');
-  assert.equal(m.remaining, '0.00');
+// Le défaut corrigé : « à jour » alors qu'on avait versé plus que dû. Le surplus
+// est une AVANCE, elle vaut pour les mois suivants et doit se voir.
+test('verser plus que dû laisse une avance, jamais « à jour »', async () => {
+  await emp.payEmployee({ admin, id: e.id, amount: '40000', caisseId, ip: '::1' });
+  const m = await me();
+  assert.equal(m.paid_total, '45000.00');
+  assert.equal(m.balance, '-15000.00', 'le compte est débiteur : il a 15 000 d’avance');
+  assert.equal(m.advance, '15000.00');
+  assert.equal(m.remaining, '0.00', 'on ne lui doit rien pour l’instant');
 });
 
-// La demande d'origine : le mois suivant propose ce qu'on a réellement versé.
-test('le mois suivant propose ce qui a été versé le mois précédent', async () => {
+// L'avance s'impute sur le mois suivant : le salaire court, le compte se
+// rapproche de zéro sans qu'on reverse quoi que ce soit.
+test('le mois suivant déduit l’avance de ce qui devient dû', async () => {
   const next = new Date(); next.setUTCMonth(next.getUTCMonth() + 1);
-  const period = next.toISOString().slice(0, 7);
-  const { employees } = await emp.listEmployees({ period });
+  const { employees } = await emp.listEmployees({ period: next.toISOString().slice(0, 7) });
   const m = employees.find((x) => x.id === e.id);
-  assert.equal(m.base, '32000.00', 'le versé du mois dernier fait la proposition');
-  assert.equal(m.remaining, '32000.00');
+  assert.equal(m.months, 2);
+  assert.equal(m.owed_total, '60000.00');
+  assert.equal(m.balance, '15000.00', '60 000 dus − 45 000 versés');
 });
 
 test('chaque versement est une charge « salaire » rattachée au salarié', async () => {
   const { rows } = await getPool().query("SELECT category, employee_id FROM charges WHERE employee_id = $1", [e.id]);
-  assert.equal(rows.length, 3);
+  assert.equal(rows.length, 2);
   assert.ok(rows.every((r) => r.category === 'salaire' && r.employee_id === e.id));
 });

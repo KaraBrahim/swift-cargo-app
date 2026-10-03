@@ -1,14 +1,21 @@
 // Les salariés et ce qu'on leur verse.
 //
-// Un salarié a un salaire mensuel. Chaque mois on lui doit ce montant, et on le
-// paie en une ou plusieurs fois. C'est tout le modèle — il n'y a pas trois
-// sortes de versements à choisir avant de pouvoir taper un chiffre : un
-// « acompte » n'est qu'un versement partiel du mois, et le distinguer obligeait
-// la personne au comptoir à classer ce qu'elle faisait avant de le faire.
+// Un compte courant, comme celui d'un fournisseur : depuis son embauche,
+// l'entreprise lui doit son salaire chaque mois ; chaque versement réduit ce
+// qu'elle doit.
 //
-// Ce qui est proposé pour le mois : ce qui a été versé le mois DERNIER (le
-// salaire suit donc les augmentations sans qu'on y pense), à défaut le salaire
-// configuré — moins ce qui a déjà été versé ce mois-ci.
+//     solde = salaire × mois écoulés − tout ce qui a été versé
+//
+// Positif, on lui doit. Négatif, il a été payé d'avance et cela vaut pour les
+// mois à venir. Rien n'est ramené à zéro : une avance qui disparaît de l'écran
+// est une avance qu'on paiera une seconde fois.
+//
+// Il n'y a donc pas de « sorte » de versement à choisir — acompte, mois,
+// prime, avance sont le même geste : on donne de l'argent, le solde suit.
+//
+// Le salaire configuré fait foi pour tous les mois écoulés : le changer
+// recalcule le passé. C'est voulu — une personne qui corrige un salaire mal
+// noté veut que son compte dise la vérité, pas qu'il garde l'erreur.
 import { getPool, withTx } from '../../db/pool.js';
 import { Decimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
@@ -16,33 +23,43 @@ import { writeAudit } from '../../lib/audit.js';
 import { createCharge } from '../accounts/accounts.service.js';
 
 const monthOf = (d = new Date()) => d.toISOString().slice(0, 7);
-const previousMonth = (period) => {
-  const [y, m] = period.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 2, 1));
-  return d.toISOString().slice(0, 7);
-};
 
 export async function listEmployees({ includeInactive = false, period } = {}) {
   const month = period || monthOf();
   const { rows } = await getPool().query(
     `SELECT e.*, c.label AS caisse_label,
+            -- Les mois écoulés depuis l'embauche, celui-ci compris : autant de
+            -- fois le salaire que l'entreprise lui a dû.
+            GREATEST(
+              (DATE_PART('year', ($1 || '-01')::date) - DATE_PART('year', e.created_at)) * 12
+            + (DATE_PART('month', ($1 || '-01')::date) - DATE_PART('month', e.created_at)) + 1, 0)::int AS months,
             COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id AND period = $1), 0)::text AS paid_this_month,
-            COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id AND period = $2), 0)::text AS paid_last_month,
+            COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id), 0)::text AS paid_total,
             (SELECT amount     FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_amount,
             (SELECT created_at FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_at
        FROM employees e LEFT JOIN caisses c ON c.id = e.caisse_id
-      WHERE ($3 OR e.active)
+      WHERE ($2 OR e.active)
       ORDER BY e.active DESC, e.name`,
-    [month, previousMonth(month), includeInactive]
+    [month, includeInactive]
   );
   return {
     period: month,
     employees: rows.map((e) => {
-      // Le mois dernier fait foi : ce qu'on a réellement versé vaut mieux
-      // qu'un salaire noté une fois et jamais remis à jour.
-      const base = new Decimal(Number(e.paid_last_month) > 0 ? e.paid_last_month : e.salary);
-      const remaining = Decimal.max(base.minus(e.paid_this_month), 0);
-      return { ...e, base: base.toFixed(2), remaining: remaining.toFixed(2) };
+      // Un compte, comme celui d'un fournisseur : ce qu'on lui a dû depuis son
+      // embauche, moins tout ce qu'on lui a versé. Positif, on lui doit ;
+      // négatif, il a été payé d'avance et cela vaut pour les mois suivants.
+      // Rien n'est écrasé à zéro — une avance qui disparaît de l'écran est une
+      // avance qu'on paiera deux fois.
+      const owed = new Decimal(e.salary).mul(e.months);
+      const balance = owed.minus(e.paid_total);
+      return {
+        ...e,
+        owed_total: owed.toFixed(2),
+        balance: balance.toFixed(2),
+        // Ce que le bouton proposera : ce qui est réellement dû aujourd'hui.
+        remaining: Decimal.max(balance, 0).toFixed(2),
+        advance: Decimal.max(balance.negated(), 0).toFixed(2),
+      };
     }),
   };
 }

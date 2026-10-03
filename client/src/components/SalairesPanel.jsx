@@ -41,14 +41,15 @@ export function SalairesPanel({ offices, currencies }) {
   const { employees = [], period } = list.data ?? {};
   const totalPaid = employees.reduce((s, e) => s + Number(e.paid_this_month), 0);
   const totalLeft = employees.reduce((s, e) => s + Number(e.remaining), 0);
+  const totalAdvance = employees.reduce((s, e) => s + Number(e.advance), 0);
   const cur0 = employees[0]?.currency_code || 'DZD';
   const caisseSub = (c, cur) => `${formatMoney(c.balances?.[cur] ?? 0, cur)} disponible`;
 
   const openPay = (e) => setPay({
-    id: e.id, name: e.name, currency: e.currency_code, remaining: e.remaining,
+    id: e.id, name: e.name, currency: e.currency_code, remaining: e.remaining, advance: e.advance,
     // Le cas ordinaire : solder le mois. Tout le reste est une correction du
     // chiffre, pas un autre mode à choisir.
-    amount: Number(e.remaining) > 0 ? e.remaining : e.base,
+    amount: Number(e.remaining) > 0 ? e.remaining : e.salary,
     caisseId: e.caisse_id || offices[0]?.id || '', note: '',
   });
 
@@ -75,7 +76,8 @@ export function SalairesPanel({ offices, currencies }) {
       <div className="filter-bar" style={{ justifyContent: 'space-between' }}>
         <span className="muted">
           {monthLabel(period)} · {employees.length} salarié(s) · versé {formatMoney(totalPaid, cur0)}
-          {totalLeft > 0 && <> · reste <strong className="gold">{formatMoney(totalLeft, cur0)}</strong></>}
+          {totalLeft > 0 && <> · dû <strong className="gold">{formatMoney(totalLeft, cur0)}</strong></>}
+          {totalAdvance > 0 && <> · avances <strong className="neg">{formatMoney(totalAdvance, cur0)}</strong></>}
         </span>
         <button className="btn btn-gold" onClick={() => { setPay(null); setForm(form ? null : { name: '', salary: '', currency: defaultCurrencyFor(offices[0]?.office), caisseId: offices[0]?.id ?? '', note: '' }); }}>
           <IconEl name={form ? 'close' : 'plus'} />{form ? 'Fermer' : 'Nouveau salarié'}
@@ -114,8 +116,10 @@ export function SalairesPanel({ offices, currencies }) {
           <div className="field field-grow"><span>Verser à {pay.name}</span>
             <span className="muted">
               {Number(pay.remaining) > 0
-                ? `Reste ${formatMoney(pay.remaining, pay.currency)} sur ${monthLabel(period)}. Versez ce que vous voulez, quand vous voulez.`
-                : `${monthLabel(period)} est à jour. Ce versement s’ajoutera (prime, avance).`}
+                ? `On lui doit ${formatMoney(pay.remaining, pay.currency)}. Versez ce que vous voulez, quand vous voulez — le solde suit.`
+                : Number(pay.advance) > 0
+                  ? `Il a déjà ${formatMoney(pay.advance, pay.currency)} d’avance. Ce versement l’augmentera.`
+                  : 'Son compte est à jour. Ce versement deviendra une avance sur les mois suivants.'}
             </span></div>
           <label className="field"><span>Montant ({pay.currency})</span>
             <AmountInput autoFocus value={pay.amount} onChange={(v) => setPay({ ...pay, amount: v })} /></label>
@@ -140,18 +144,25 @@ export function SalairesPanel({ offices, currencies }) {
             <table className="table">
               <thead><tr>
                 <th>Salarié</th><th className="right">Salaire</th><th className="right">Versé ce mois</th>
-                <th className="right">Reste</th><th>Dernier versement</th><th className="right">Actions</th>
+                <th className="right">Versé en tout</th><th className="right">Solde</th>
+                <th>Dernier versement</th><th className="right">Actions</th>
               </tr></thead>
               <tbody>
                 {employees.map((e) => {
-                  const left = Number(e.remaining);
+                  const bal = Number(e.balance);
                   return (
                     <tr key={e.id}>
-                      <td><strong>{e.name}</strong></td>
-                      <td className="right">{formatMoney(e.base, e.currency_code)}</td>
+                      <td><strong>{e.name}</strong>
+                        <div className="muted" style={{ fontSize: '0.72rem' }}>{e.months} mois · dû {formatMoney(e.owed_total, e.currency_code)}</div></td>
+                      <td className="right">{formatMoney(e.salary, e.currency_code)}</td>
                       <td className="right">{formatMoney(e.paid_this_month, e.currency_code)}</td>
-                      <td className={`right ${left > 0 ? 'gold' : 'muted'}`}>
-                        {left > 0 ? formatMoney(left, e.currency_code) : 'à jour'}
+                      <td className="right">{formatMoney(e.paid_total, e.currency_code)}</td>
+                      {/* Un solde négatif est une AVANCE : elle vaut pour les mois
+                          suivants, elle ne s'efface pas. */}
+                      <td className={`right ${bal > 0 ? 'gold' : bal < 0 ? 'neg' : 'muted'}`}>
+                        {bal > 0 ? formatMoney(bal, e.currency_code)
+                          : bal < 0 ? `avance ${formatMoney(-bal, e.currency_code)}`
+                            : 'à jour'}
                       </td>
                       <td>{e.last_paid_at
                         ? <>{formatMoney(e.last_paid_amount, e.currency_code)} <span className="muted">· {dt(e.last_paid_at)}</span></>
