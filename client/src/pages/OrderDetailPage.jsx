@@ -206,6 +206,7 @@ export default function OrderDetailPage() {
             <PrintButton
               title={o.reference}
               docTitle="Bon fournisseur — manifeste"
+              paper="a5"
               subtitle={o.reference}
               a4={() => orderManifestBody(o, qr)}
               ticket={(societe) => orderTicket(o, societe, qr)}

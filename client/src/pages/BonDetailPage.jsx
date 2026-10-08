@@ -350,6 +350,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
             <PrintButton
               title={bon.reference}
               docTitle="Bon passager"
+              paper="a5"
               subtitle={bon.reference}
               a4={() => bonDocBody(bon, qr)}
               ticket={(societe) => bonTicket(bon, societe, qr)}

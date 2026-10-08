@@ -21,6 +21,8 @@ const FORMATS = [
   { key: '58', label: 'Ticket 58 mm' },
 ];
 
+const A5 = { key: 'a5', label: 'A5 / PDF' };
+
 const dt = (v) => (v ? new Date(v).toLocaleString('fr-FR') : '');
 const d10 = (v) => (v ? new Date(v).toLocaleDateString('fr-FR') : '');
 
@@ -39,6 +41,7 @@ const DOCS = {
     title: (b) => b.reference,
     docTitle: 'Bon passager',
     scan: (b) => ['bon', b.uuid],
+    paper: 'a5',
     a4: bonDocBody,
     ticket: bonTicket,
   },
@@ -51,6 +54,7 @@ const DOCS = {
     title: (o) => o.reference,
     docTitle: 'Bon fournisseur — manifeste',
     scan: (o) => ['order', o.uuid],
+    paper: 'a5',
     a4: orderManifestBody,
     ticket: orderTicket,
   },
@@ -202,6 +206,10 @@ export default function ImpressionsPage() {
 
   const spec = DOCS[doc];
   const listSpec = LISTS[doc];
+  // Les bons sortent en A5, en tête de liste ; le reste garde ses formats.
+  const formats = spec?.paper === 'a5' ? [A5, ...FORMATS] : FORMATS;
+  const fmt = formats.some((f) => f.key === format) ? format : formats[0].key;
+  const onPaper = fmt === 'a4' || fmt === 'a5';
   const listUrl = spec ? (typeof spec.list === 'function' ? spec.list(personType) : spec.list) : null;
   const chooser = useApi(listUrl);
 
@@ -218,24 +226,24 @@ export default function ImpressionsPage() {
         // Le code scannable, produit avant le document : les constructeurs sont
         // synchrones et reçoivent l'image toute faite.
         const qr = spec.scan ? await qrDataUrl(...spec.scan(data)) : null;
-        ok = format === 'a4'
+        ok = onPaper
           ? openPrintWindow({
               title: spec.title(data), societe, docTitle: spec.docTitle,
-              subtitle: spec.title(data), body: spec.a4(data, qr),
+              subtitle: spec.title(data), body: spec.a4(data, qr), paper: fmt,
             })
-          : openTicketWindow({ title: spec.title(data), mm: Number(format), body: spec.ticket(data, societe, qr) });
+          : openTicketWindow({ title: spec.title(data), mm: Number(fmt), body: spec.ticket(data, societe, qr) });
       } else {
         const payload = await api(listSpec.endpoint);
         const rows = listSpec.pick(payload);
         const totals = listSpec.totals ? listSpec.totals(rows) : [];
-        ok = format === 'a4'
+        ok = onPaper
           ? openPrintWindow({
               title: listSpec.label, societe, docTitle: listSpec.label,
               subtitle: `${rows.length} ligne(s)`,
               body: tableDocBody({ columns: listSpec.columns, rows, totals }),
             })
           : openTicketWindow({
-              title: listSpec.label, mm: Number(format),
+              title: listSpec.label, mm: Number(fmt),
               body: listTicket({
                 societe, docLabel: listSpec.label, subtitle: `${rows.length} ligne(s)`,
                 // The roll is narrow: print the first few columns, formatted.
@@ -265,7 +273,7 @@ export default function ImpressionsPage() {
     <div style={{ '--accent': ACCENT }}>
       <PageHeader
         icon="print" accent={ACCENT} title="Impressions"
-        subtitle="Tout document en A4 (« Enregistrer au format PDF ») ou sur rouleau thermique 80 / 58 mm."
+        subtitle="Les bons en A5, les autres documents en A4 (« Enregistrer au format PDF »), ou sur rouleau thermique 80 / 58 mm."
       />
 
       <div className="panel">
@@ -331,8 +339,8 @@ export default function ImpressionsPage() {
           )}
 
           <label className="field"><span>Format</span>
-            <select value={format} onChange={(e) => setFormat(e.target.value)}>
-              {FORMATS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+            <select value={fmt} onChange={(e) => setFormat(e.target.value)}>
+              {formats.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
             </select></label>
 
           <button className="btn btn-gold" onClick={generate} disabled={busy || (needsTarget && !target)}>

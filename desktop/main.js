@@ -312,7 +312,7 @@ function buildMenu() {
 // n'a pas de hauteur fixe : on mesure le document rendu et on fabrique une
 // page de cette hauteur, à la largeur du rouleau.
 const MICRONS_PER_MM = 1000;
-ipcMain.handle('desk:save-pdf', async (_e, { html, title, widthMm }) => {
+ipcMain.handle('desk:save-pdf', async (_e, { html, title, widthMm, paper }) => {
   const { filePath, canceled } = await dialog.showSaveDialog(win, {
     title: 'Enregistrer en PDF',
     defaultPath: join(app.getPath('documents'), `${String(title || 'document').replace(/[\\/:*?"<>|]+/g, '-')}.pdf`),
@@ -323,7 +323,7 @@ ipcMain.handle('desk:save-pdf', async (_e, { html, title, widthMm }) => {
   const page = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
   try {
     await page.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    let pageSize = 'A4';
+    let pageSize = paper === 'a5' ? 'A5' : 'A4';
     if (widthMm) {
       const heightPx = await page.webContents.executeJavaScript('document.documentElement.scrollHeight');
       // 96 px par pouce, 25,4 mm par pouce ; une marge de sécurité pour la fin.

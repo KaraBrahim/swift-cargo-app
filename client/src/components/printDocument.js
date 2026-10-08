@@ -70,16 +70,41 @@ export const PRINT_CSS = `
     html, body { overflow:visible !important; height:auto !important; } }
 `;
 
+// A5 : le format des bons. Même famille que l'A4, resserrée pour tenir sur une
+// demi-feuille — marges de la page, police et tableaux plus petits.
+const A5_CSS = `
+  @page { size: A5 portrait; margin: 9mm; }
+  @media print { body.paper-a5 { margin: 0; } }
+  .paper-a5 { margin: 0; }
+  .paper-a5 .head { padding-bottom: 8px; border-bottom-width: 2px; }
+  .paper-a5 .brand { font-size: 15px; letter-spacing: 2px; }
+  .paper-a5 h1 { font-size: 15px; }
+  .paper-a5 .sub { font-size: 10.5px; }
+  .paper-a5 .meta { margin: 10px 0; gap: 4px 14px; font-size: 11px; }
+  .paper-a5 table { margin-top: 8px; font-size: 10.5px; }
+  .paper-a5 th, .paper-a5 td { padding: 3px 5px; }
+  .paper-a5 h2 { margin-top: 12px; font-size: 12px; }
+  .paper-a5 .totals { margin-top: 10px; font-size: 12px; }
+  .paper-a5 .totals .big { font-size: 13.5px; }
+  .paper-a5 .small { font-size: 9.5px; }
+  .paper-a5 .foot { margin-top: 14px; font-size: 9.5px; }
+  .paper-a5 .sign { margin-top: 26px; font-size: 11px; }
+  .paper-a5 .qr { margin-top: 12px; }
+  .paper-a5 .qr img { width: 78px; height: 78px; }
+  /* Une ligne de tableau ne se coupe pas entre deux pages. */
+  .paper-a5 tr { page-break-inside: avoid; }
+`;
+
 // Le bloc scannable. Rien si la page n'a pas (encore) produit l'image : un
 // document sans QR reste un document valide, il se retrouve à la référence.
 export const qrBlock = (qr, reference) =>
   (qr ? `<div class="qr"><img src="${qr}" alt=""><div>${esc(reference || '')}</div></div>` : '');
 
 // Open a standalone window with a finished document and trigger the print dialog.
-export function printWindowHtml({ title, societe, docTitle, subtitle, body }) {
+export function printWindowHtml({ title, societe, docTitle, subtitle, body, paper = 'a4' }) {
   const s = societe ?? {};
   const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
-    <title>${esc(title)}</title><style>${PRINT_CSS}</style></head><body>
+    <title>${esc(title)}</title><style>${PRINT_CSS}${paper === 'a5' ? A5_CSS : ''}</style></head><body${paper === 'a5' ? ' class="paper-a5"' : ''}>
     <div class="head">
       <div>
         <div class="brand">${esc(s.nom || 'SWIFT CARGO')}</div>
@@ -198,16 +223,6 @@ export function orderManifestBody(d, qr) {
         <td class="r"><strong>${money(amount)}</strong></td>`;
   });
 
-  const carriers = d.carriers || [];
-  const carrierRows = carriers.length
-    ? rows(carriers, (b) => `
-        <td>${esc(b.reference)}</td>
-        <td>${esc(b.passager_name || '—')}</td>
-        <td>${esc(BON_STATUS_FR[b.status] || b.status)}</td>
-        <td class="r">${formatMoney(b.transport_fee, b.transport_currency)}</td>
-        <td class="r">${b.passager_payment != null ? formatMoney(b.passager_payment, b.transport_currency) : '—'}</td>`)
-    : `<tr><td colspan="5" class="muted">Aucun passager n’a encore pris cette marchandise — tout est au bureau de Chine.</td></tr>`;
-
   return `
     <div class="meta">
       <div><span class="k">Référence :</span><strong>${esc(d.reference)}</strong></div>
@@ -234,12 +249,6 @@ export function orderManifestBody(d, qr) {
     </table>
     <p class="small">Confié : pris par un passager. Arrivé : compté au bureau d’Algérie, manquants déduits. Remis : emporté par le fournisseur.
       Reste en Chine : pas encore confié.</p>
-
-    <h2>Transport</h2>
-    <table>
-      <thead><tr><th>Bon passager</th><th>Passager</th><th>Statut</th><th class="r">Frais de transport</th><th class="r">Dû au passager</th></tr></thead>
-      <tbody>${carrierRows}</tbody>
-    </table>
 
     <div class="totals">
       Marchandises : ${money(t.goods ?? t.transport_fee)}<br>

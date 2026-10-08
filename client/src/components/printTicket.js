@@ -133,24 +133,13 @@ export function bonTicket(bon, societe, qr) {
     ${footer(societe)}`;
 }
 
-// ── Bon fournisseur / manifest — one entry per child bon ─────────────
+// ── Bon fournisseur — le fournisseur n'a que faire du transport ───────
 export function orderTicket(order, societe, qr) {
-  const items = (order.bons || []).map((b) => `
-    <div class="item">
-      <div class="name">${esc(b.reference)}</div>
-      <div class="row">
-        <span class="k">${esc(b.passager_name || '—')}</span>
-        <span class="v">${money(b.transport_fee)}</span>
-      </div>
-    </div>`).join('');
   return `
     ${header(societe, 'Bon fournisseur', order.reference)}
     ${line('Fournisseur', order.fournisseur_name || '—')}
     ${line('Statut', order.status)}
     ${line('Créé le', dt(order.created_at))}
-    <hr>
-    <div class="c sub">BONS PASSAGERS (${(order.bons || []).length})</div>
-    ${items || '<div class="c sub">Aucun bon</div>'}
     <hr>
     ${line('Marchandises', money(order.totals?.goods ?? order.totals?.transport_fee))}
     ${Number(order.totals?.commission) ? line('Commission', money(order.totals.commission)) : ''}

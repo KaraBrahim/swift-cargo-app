@@ -1,6 +1,6 @@
 // Un seul contrôle d'impression, pour tous les écrans.
 //
-// Chaque document sort en A4 ou en ticket (80 / 58 mm), imprimé par le
+// Chaque document sort en A4 (A5 pour les bons) ou en ticket (80 / 58 mm), imprimé par le
 // navigateur ou enregistré en PDF — sur le poste, avec une vraie boîte
 // d'enregistrement. La page fournit le document une fois (`a4`, `ticket`) ;
 // le menu, l'en-tête de la société et le format mémorisé sont ici.
@@ -21,6 +21,8 @@ const desk = () => (typeof window !== 'undefined' && typeof window.desk?.savePdf
 // Le dernier format choisi revient en tête : on imprime presque toujours pareil.
 
 
+const A5_FORMAT = { key: 'a5', label: 'A5 / PDF', hint: 'Le format des bons, une demi-feuille' };
+
 const BROWSER_FORMATS = [
   { key: 'a4', label: 'A4 / PDF', hint: 'Document classique, pour archive ou e-mail' },
   { key: '80', label: 'Ticket 80 mm', hint: 'Via le navigateur — rouleau standard' },
@@ -33,13 +35,14 @@ export function PrintButton({
   subtitle,
   a4,             // () => html string (A4 body)
   ticket,         // (societe) => html string (roll body); omit to hide roll options
+  paper = 'a4',   // 'a5' pour les bons : A5 proposé en tête, mémorisé à part
   label = 'Imprimer',
   className = 'btn btn-ghost',
   disabled = false,
 }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [last, rememberFormat] = useSticky('sc_print_format', null);
+  const [last, rememberFormat] = useSticky(paper === 'a5' ? 'sc_print_format_a5' : 'sc_print_format', null);
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
   const settings = useApi('/settings');
@@ -55,8 +58,8 @@ export function PrintButton({
   }, [open]);
 
   // Le même HTML sert à imprimer et à enregistrer.
-  const buildHtml = (format) => (format === 'a4'
-    ? printWindowHtml({ title, societe, docTitle: docTitle || title, subtitle, body: a4() })
+  const buildHtml = (format) => (format === 'a4' || format === 'a5'
+    ? printWindowHtml({ title, societe, docTitle: docTitle || title, subtitle, body: a4(), paper: format })
     : ticketWindowHtml({ title, mm: Number(format), body: ticket(societe) }));
 
   const runBrowser = (format) => {
@@ -75,20 +78,21 @@ export function PrintButton({
     try {
       const html = buildHtml(format);
       if (!desk()) { printHtml(html); return; } // la boîte d'impression propose « Enregistrer en PDF »
-      const res = await desk().savePdf({ html, title, widthMm: format === 'a4' ? null : Number(format) });
+      const res = await desk().savePdf({ html, title, widthMm: format === 'a4' || format === 'a5' ? null : Number(format), paper: format });
       if (res.saved) toast.success(`PDF enregistré : ${res.path}`);
     } catch (err) {
       toast.error(`Enregistrement impossible : ${err.message}`);
     }
   };
 
-  const all = ticket ? BROWSER_FORMATS : BROWSER_FORMATS.slice(0, 1);
+  const base = paper === 'a5' ? [A5_FORMAT, ...BROWSER_FORMATS] : BROWSER_FORMATS;
+  const all = ticket ? base : base.slice(0, 1);
   const formats = [...all].sort((x, y) => (x.key === last ? -1 : y.key === last ? 1 : 0));
 
   // Nothing to choose from: no roll builder and no printer — print A4 directly.
   if (formats.length === 1) {
     return (
-      <button className={className} onClick={() => runBrowser('a4')} disabled={disabled}>
+      <button className={className} onClick={() => runBrowser(formats[0].key)} disabled={disabled}>
         <IconEl name="print" />{label}
       </button>
     );
