@@ -11,6 +11,7 @@ import { useApi, useDebounced } from '../api/useApi.js';
 import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { Who, Sources } from '../components/cells.jsx';
+import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { SearchBar } from '../components/SearchBar.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
@@ -76,7 +77,7 @@ export default function BonsPage() {
                 <thead>
                   <tr>
                     <th>Bon</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th>
-                    <th className="right">À payer</th><th className="right" aria-label="Actions" />
+                    <th>Voyage</th><th className="right">À payer</th><th className="right" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -91,7 +92,13 @@ export default function BonsPage() {
                       <td><Who name={b.passager_name} icon="passager" /></td>
                       <td><Sources names={b.fournisseur_name} /></td>
                       <td><span className={`status-badge ${BON_STATUS[b.status].cls}`}>{BON_STATUS[b.status].label}</span></td>
-                      <td className="right">{formatMoney(b.transport_fee, b.transport_currency)}</td>
+                      <td className="bar-cell"><ProgressBar progress={b.progress} compact /></td>
+                      <td className="right">
+                        <span className="cell-stack">
+                          <span>{formatMoney(b.transport_fee, b.transport_currency)}</span>
+                          <MoneyBar pay={b.pay} code={b.transport_currency} label="Versé" compact />
+                        </span>
+                      </td>
                       <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
                         {/* Supprimer definitivement : reserve au super-administrateur. */}
                         {isSuper && (

@@ -7,6 +7,7 @@ import { writeAudit } from '../../lib/audit.js';
 import { insertChildBon, deleteBonTx } from '../bons/bons.service.js';
 import { applyMovement } from '../stock/stock.service.js';
 import { recomputeOrderStatus, deliverableLines, ARRIVED, QTY } from './orderStatus.js';
+import { orderProgress, moneyProgress } from '../../lib/progress.js';
 
 export async function createOrder({ admin, data, ip }) {
   if (!Array.isArray(data.bons) || data.bons.length === 0) {
@@ -196,6 +197,19 @@ export async function deleteOrder({ admin, id, ip }) {
   });
 }
 
+// Les voyages d'une ligne fournisseur, en colonnes : confié à un passager,
+// encore en route (porteur pas arrivé), manquant (arrivé mais en moins) et
+// arrivé. La fiche et la liste lisent les mêmes colonnes, donc les mêmes barres.
+const LINE_FLOW = `
+  ${QTY('bl')} AS quantity,
+  bl.delivered_quantity,
+  ${ARRIVED} AS arrived,
+  COALESCE((SELECT SUM(${QTY('a')}) FROM bon_lines a WHERE a.source_line_id = bl.id), 0) AS allocated,
+  COALESCE((SELECT SUM(${QTY('a')}) FROM bon_lines a JOIN bons ab ON ab.id = a.bon_id
+             WHERE a.source_line_id = bl.id AND ab.status NOT IN ('arrive','regle')), 0)::numeric(20,3) AS in_transit,
+  COALESCE((SELECT SUM(${QTY('a')} - COALESCE(a.received_quantity, ${QTY('a')})) FROM bon_lines a JOIN bons ab ON ab.id = a.bon_id
+             WHERE a.source_line_id = bl.id AND ab.status IN ('arrive','regle')), 0)::numeric(20,3) AS missing`;
+
 export async function listOrders({ status, search, fournisseurId, limit = 100 } = {}) {
   const params = [];
   const conds = [];
@@ -208,6 +222,7 @@ export async function listOrders({ status, search, fournisseurId, limit = 100 } 
     `SELECT o.*, f.name AS fournisseur_name,
             COUNT(b.id) AS bon_count,
             COALESCE(SUM(b.transport_fee),0) AS total_fee,
+            COALESCE(SUM(b.discount),0) AS total_discount,
             COALESCE(SUM(b.loss_total),0) AS total_loss
        FROM orders o
        JOIN people f ON f.id = o.fournisseur_id
@@ -217,7 +232,33 @@ export async function listOrders({ status, search, fournisseurId, limit = 100 } 
       ORDER BY o.created_at DESC, o.id DESC LIMIT $${params.length}`,
     params
   );
-  return rows;
+  if (!rows.length) return rows;
+
+  // Où en est chaque ordre : un seul aller-retour pour toutes les lignes, un
+  // autre pour l'argent déjà versé.
+  const ids = rows.map((r) => r.id);
+  const [{ rows: flow }, { rows: cash }] = await Promise.all([
+    getPool().query(
+      `SELECT b.order_id, bl.measure, bl.unit, bl.weight_kg, ${LINE_FLOW}
+         FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
+        WHERE b.order_id = ANY($1)`, [ids]),
+    getPool().query(
+      `SELECT ref_order_id AS order_id, SUM(ABS(amount)) AS total FROM person_ledger
+        WHERE ref_order_id = ANY($1) AND type = 'fee_payment' GROUP BY ref_order_id`, [ids]),
+  ]);
+  const flowOf = new Map(), cashOf = new Map(cash.map((c) => [String(c.order_id), c.total]));
+  for (const l of flow) {
+    const k = String(l.order_id);
+    if (!flowOf.has(k)) flowOf.set(k, []);
+    flowOf.get(k).push(l);
+  }
+  return rows.map((o) => ({
+    ...o,
+    progress: orderProgress(flowOf.get(String(o.id)) ?? []),
+    pay: moneyProgress(
+      Decimal.max(new Decimal(o.total_fee).minus(o.total_discount), 0),
+      cashOf.get(String(o.id)) ?? 0),
+  }));
 }
 
 export async function getOrderDetail(id, client = getPool()) {
@@ -243,12 +284,8 @@ export async function getOrderDetail(id, client = getPool()) {
   // (`allocated`), ce qui est réellement arrivé au bureau (`arrived`, manquants
   // déduits) et ce que le fournisseur a emporté (`delivered_quantity`).
   const { rows: lines } = await client.query(
-    `SELECT bl.id AS line_id, bl.designation, bl.measure, bl.unit, bl.unit_price,
-            ${QTY('bl')} AS quantity,
-            bl.delivered_quantity,
-            ${ARRIVED} AS arrived,
-            COALESCE((SELECT SUM(${QTY('a')})
-                        FROM bon_lines a WHERE a.source_line_id = bl.id), 0) AS allocated
+    `SELECT bl.id AS line_id, bl.designation, bl.measure, bl.unit, bl.weight_kg, bl.unit_price,
+            ${LINE_FLOW}
        FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
       WHERE b.order_id = $1 ORDER BY bl.id`,
     [id]
@@ -300,15 +337,19 @@ export async function getOrderDetail(id, client = getPool()) {
     // colonnes que le service : l'écran ne peut donc pas offrir une quantité
     // qui serait refusée à la seconde d'après.
     deliverable: Decimal.max(new Decimal(l.arrived).minus(l.delivered_quantity), 0).toFixed(3),
+    progress: orderProgress([l]),
   }));
+  const billed = Decimal.max(feeTotal.minus(discountTotal), 0);
   return {
     ...rows[0], bons, carriers, lines: withRemaining,
+    progress: orderProgress(lines),
+    pay: moneyProgress(billed, cash.total),
     totals: {
       ...totals,
       discount,
       commission,
       goods: feeTotal.minus(commissionTotal).toFixed(2),
-      billed: Decimal.max(feeTotal.minus(discountTotal), 0).toFixed(2),
+      billed: billed.toFixed(2),
       collected: new Decimal(cash.total).toFixed(2),
       due: Decimal.max(feeTotal.minus(discountTotal).minus(cash.total), 0).toFixed(2),
       // What is still sitting in China waiting for a passager.

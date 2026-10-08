@@ -347,3 +347,61 @@ test('une marchandise encore en vol n’est pas livrable', async () => {
     (e) => e.code === 'CONFLICT'
   );
 });
+
+// La barre de progression : cinq tranches qui se recouvrent exactement, dont la
+// somme est la quantité reçue. Si elles ne bouclaient pas, l'écran afficherait
+// une barre qui ne dit pas la vérité.
+const seg = (progress, key) => progress.segments.find((s) => s.key === key);
+
+test('la progression d’un ordre répartit la marchandise sans rien perdre', async () => {
+  // 40 reçus, 30 confiés (10 restent en Chine), 2 manquants à l'arrivée, 10 remis.
+  const s = await shipment({ qty: '40', take: '30', missing: '2' });
+  await orders.deliverOrder({ admin, id: s.order.id, lines: [{ lineId: s.lineId, quantity: '10' }] });
+
+  const d = await orders.getOrderDetail(s.order.id);
+  const p = d.progress;
+  assert.equal(p.mixed, false);
+  assert.equal(p.total, '40.000');
+  assert.equal(seg(p, 'china').value, '10.000');
+  assert.equal(seg(p, 'transit').value, '0.000');
+  assert.equal(seg(p, 'missing').value, '2.000');
+  assert.equal(seg(p, 'office').value, '18.000');
+  assert.equal(seg(p, 'delivered').value, '10.000');
+  const sum = p.segments.reduce((a, x) => a + Number(x.value), 0);
+  assert.equal(sum, 40, 'les tranches bouclent sur le total');
+  assert.equal(seg(p, 'delivered').pct, 25);
+  assert.equal(seg(p, 'china').pct, 25);
+  // La ligne porte la même chose que l'ordre, et la liste aussi.
+  assert.equal(seg(d.lines[0].progress, 'delivered').pct, 25);
+  const inList = (await orders.listOrders({ limit: 500 })).find((o) => o.id === s.order.id);
+  assert.equal(seg(inList.progress, 'office').value, '18.000');
+});
+
+test('une marchandise en vol apparaît « en route », pas au bureau', async () => {
+  const n = ++seq;
+  const f = (await pool().query(
+    'INSERT INTO people (name, is_fournisseur) VALUES ($1, true) RETURNING *', [`Fourn. Barre ${n}`]
+  )).rows[0];
+  const p = (await pool().query(
+    'INSERT INTO people (name, is_passager) VALUES ($1, true) RETURNING *', [`Passager Barre ${n}`]
+  )).rows[0];
+  const o = await orders.createOrder({ admin, data: { fournisseurId: f.id, bons: [{
+    transportCurrency: 'DZD',
+    lines: [{ designation: `Livr-Barre ${n}`, measure: 'quantite', value: '20', unitPrice: '300' }],
+  }] } });
+  const bon = await bons.createBon({ admin, data: {
+    passagerId: p.id, transportCurrency: 'DZD',
+    lines: [{ sourceLineId: o.lines[0].line_id, measure: 'quantite', value: '5', unitPrice: '50' }],
+  } });
+  await bons.advanceStatus({ admin, id: bon.id }); // en transit
+
+  const d = await orders.getOrderDetail(o.id);
+  assert.equal(seg(d.progress, 'china').pct, 75);
+  assert.equal(seg(d.progress, 'transit').pct, 25);
+  assert.equal(seg(d.progress, 'office').pct, 0);
+
+  // Et le bon passager lui-même : tout est en route, rien n'est arrivé.
+  const b = await bons.getBonDetail(bon.id);
+  assert.equal(seg(b.progress, 'transit').pct, 100);
+  assert.equal(seg(b.progress, 'arrived').pct, 0);
+});

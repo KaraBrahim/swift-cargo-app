@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi.js';
+import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
+import { ORDER_STATUS } from '../components/orderStatus.js';
 import { api } from '../api/client.js';
 import { Spinner, formatMoney, fitStyle } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
@@ -103,6 +105,7 @@ const CURRENCY = 'DZD';
 
 export default function Dashboard() {
   const { admin } = useAuth();
+  const navigate = useNavigate();
   // Les choix d'affichage sont retenus d'une session à l'autre : personne ne
   // veut re-choisir « ce mois » chaque matin. Voir lib/useSticky.js.
   const [caMode, setCaMode] = useSticky('sc_dash_ca_mode', 'argent');
@@ -110,6 +113,9 @@ export default function Dashboard() {
   // control (the four stat cards, the financial panel) then refetches only its
   // own slice, so they move independently.
   const { data, loading, error } = useApi(`/dashboard/overview?period=mois&currency=${CURRENCY}`);
+  // Les bons fournisseurs encore ouverts, avec où en est leur marchandise.
+  const orderList = useApi('/orders?limit=100');
+  const openOrders = (orderList.data?.orders ?? []).filter((o) => o.status !== 'cloturee');
 
   const [finPeriod, setFinPeriod] = useSticky('sc_dash_fin_period', 'mois');
   const [fin, setFin] = useState(null);
@@ -331,6 +337,34 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── la marchandise en cours : où en est chaque bon fournisseur ── */}
+      {openOrders.length > 0 && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">Marchandises en cours <span className="muted">({openOrders.length})</span></h2>
+            <Link to="/bons-fournisseur" className="back-link">Voir tout</Link>
+          </div>
+          <div className="table-wrap">
+            <table className="table table-tight">
+              <thead>
+                <tr><th>Bon</th><th>Fournisseur</th><th>Statut</th><th>Marchandise</th><th>Encaissé</th></tr>
+              </thead>
+              <tbody>
+                {openOrders.slice(0, 8).map((o) => (
+                  <tr key={o.id} className="clickable" onClick={() => navigate(`/bons-fournisseur/${o.id}`)}>
+                    <td><span className="gold">{o.reference}</span></td>
+                    <td>{o.fournisseur_name}</td>
+                    <td><span className={`status-badge ${ORDER_STATUS[o.status].cls}`}>{ORDER_STATUS[o.status].label}</span></td>
+                    <td className="bar-cell"><ProgressBar progress={o.progress} compact /></td>
+                    <td className="bar-cell"><MoneyBar pay={o.pay} label="Encaissé" compact /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
     </div>
   );

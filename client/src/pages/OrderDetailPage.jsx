@@ -20,6 +20,7 @@ import AmountInput from '../components/AmountInput.jsx';
 import { EntityPicker } from '../components/EntityPicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { PrintButton } from '../components/PrintButton.jsx';
+import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { orderManifestBody } from '../components/printDocument.js';
 import { orderTicket } from '../components/printTicket.js';
 import { formatQty } from '../lib/format.js';
@@ -267,6 +268,15 @@ export default function OrderDetailPage() {
         <Kpi icon="alert" label="Manquants" value={formatMoney(o.totals.loss_total, cur)} tone={Number(o.totals.loss_total) > 0 ? 'neg' : ''} />
       </Kpis>
 
+      {/* Où est la marchandise, en chiffres et en pourcentages : chaque
+          tranche est une part de ce qui a été reçu, et leur somme fait tout. */}
+      <Section icon="box" title="Avancement de la marchandise">
+        <div className="pg-panel">
+          <ProgressBar progress={o.progress} />
+          {Number(o.totals.billed) > 0 && <MoneyBar pay={o.pay} code={cur} label="Encaissé" />}
+        </div>
+      </Section>
+
       <Section icon="box" title="Marchandises reçues" count={lines.length}>
         <div className="table-wrap">
           <table className="table">
@@ -274,7 +284,7 @@ export default function OrderDetailPage() {
               <tr>
                 <th>Désignation</th><th className="right">Prix de revient</th><th className="right">Reçu</th>
                 <th>Confié</th><th className="right">Arrivé</th><th>Livré</th>
-                <th className="right">Reste</th><th className="right">Montant</th>
+                <th className="right">Reste</th><th>Avancement</th><th className="right">Montant</th>
               </tr>
             </thead>
             <tbody>
@@ -299,15 +309,16 @@ export default function OrderDetailPage() {
                         : <span className="muted">—</span>}
                     </td>
                     <td className={`right ${Number(l.remaining) > 0 ? 'gold' : 'muted'}`}>{formatQty(l.remaining)} {u}</td>
+                    <td className="bar-cell"><ProgressBar progress={l.progress} compact /></td>
                     <td className="right">{formatMoney(Number(l.unit_price) * Number(l.quantity), cur)}</td>
                   </tr>
                 );
               })}
-              {!lines.length && <tr><td colSpan="8" className="muted pad">Aucune marchandise.</td></tr>}
+              {!lines.length && <tr><td colSpan="9" className="muted pad">Aucune marchandise.</td></tr>}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan="7" className="right muted">Total marchandises</td>
+                <td colSpan="8" className="right muted">Total marchandises</td>
                 <td className="right">{formatMoney(o.totals.goods, cur)}</td>
               </tr>
               {o.totals.commission > 0 && (

@@ -10,6 +10,7 @@ import { ORDER_STATUS } from '../components/orderStatus.js';
 import { IconEl } from '../components/icons.jsx';
 import { SearchBar } from '../components/SearchBar.jsx';
 import { Who } from '../components/cells.jsx';
+import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
@@ -72,7 +73,7 @@ export default function OrdersPage() {
                 <thead>
                   <tr>
                     <th>Bon</th><th>Fournisseur</th><th>Statut</th>
-                    <th className="right">Facturé</th><th className="right" aria-label="Actions" />
+                    <th>Marchandise</th><th className="right">Facturé</th><th className="right" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -86,7 +87,13 @@ export default function OrdersPage() {
                       </td>
                       <td><Who name={o.fournisseur_name} icon="fournisseur" /></td>
                       <td><span className={`status-badge ${ORDER_STATUS[o.status].cls}`}>{ORDER_STATUS[o.status].label}</span></td>
-                      <td className="right">{formatMoney(o.total_fee)}</td>
+                      <td className="bar-cell"><ProgressBar progress={o.progress} compact /></td>
+                      <td className="right">
+                        <span className="cell-stack">
+                          <span>{formatMoney(o.pay?.due ?? o.total_fee)}</span>
+                          <MoneyBar pay={o.pay} label="Encaissé" compact />
+                        </span>
+                      </td>
                       <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
                         {/* Supprimer definitivement : reserve au super-administrateur. */}
                         {isSuper && (

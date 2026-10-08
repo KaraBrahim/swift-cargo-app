@@ -65,6 +65,14 @@ export const PRINT_CSS = `
   .qr { margin-top:22px; text-align:center; }
   .qr img { width:104px; height:104px; image-rendering:pixelated; }
   .qr div { margin-top:4px; font-size:11px; letter-spacing:1px; color:#666; }
+  /* La barre d'avancement : en couleur à l'écran et sur PDF, et dite en toutes
+     lettres dessous pour qu'un tirage noir et blanc ne perde rien. */
+  .pgbar { height:10px; border:1px solid #bbb; border-radius:6px; overflow:hidden; margin:8px 0 6px;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact; background:#f2f2f2; }
+  .pgbar span { display:block; float:left; height:100%; }
+  .pglegend { display:flex; flex-wrap:wrap; gap:3px 14px; font-size:11.5px; }
+  .pglegend i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; border:1px solid #888;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   /* The app's own layout must never clip a multi-page document. */
   @media print { body { margin:12mm; } .no-print { display:none !important; }
     html, body { overflow:visible !important; height:auto !important; } }
@@ -94,6 +102,20 @@ const A5_CSS = `
   /* Une ligne de tableau ne se coupe pas entre deux pages. */
   .paper-a5 tr { page-break-inside: avoid; }
 `;
+
+// L'avancement de la marchandise, tel que le serveur le calcule
+// (server/src/lib/progress.js) : une barre, puis chaque tranche en chiffres et
+// en pourcentage. Rien n'est recalculé ici.
+const PROGRESS_TONE = { muted: '#d4d4d4', gold: '#C8A84B', red: '#d9534f', blue: '#4f7cd6', green: '#3aa86b' };
+export function progressBlock(progress, title = 'Avancement') {
+  const segs = progress?.segments;
+  if (!segs?.length) return '';
+  const bar = segs.filter((s) => s.pct > 0)
+    .map((s) => `<span style="width:${s.pct}%;background:${PROGRESS_TONE[s.tone] || '#999'}"></span>`).join('');
+  const legend = segs.map((s) => `<span><i style="background:${PROGRESS_TONE[s.tone] || '#999'}"></i>${esc(s.label)} :
+      ${s.value != null ? `${num(s.value)} ${esc(progress.unit || '')} · ` : ''}<strong>${num(s.pct)} %</strong></span>`).join('');
+  return `<h2>${esc(title)}</h2><div class="pgbar">${bar}</div><div class="pglegend">${legend}</div>`;
+}
 
 // Le bloc scannable. Rien si la page n'a pas (encore) produit l'image : un
 // document sans QR reste un document valide, il se retrouve à la référence.
@@ -234,6 +256,8 @@ export function orderManifestBody(d, qr) {
       ${d.note ? `<div style="grid-column:1/-1"><span class="k">Note :</span>${esc(d.note)}</div>` : ''}
     </div>
 
+    ${progressBlock(d.progress, 'Avancement de la marchandise')}
+
     <h2>Marchandises</h2>
     <table>
       <thead><tr>
@@ -255,6 +279,8 @@ export function orderManifestBody(d, qr) {
       ${Number(t.commission) ? `Commission : ${money(t.commission)}<br>` : ''}
       ${Number(t.discount) ? `Remise : − ${money(t.discount)}<br>` : ''}
       <span class="big">À facturer au fournisseur : <strong>${money(t.billed ?? t.transport_fee)}</strong></span><br>
+      ${Number(t.collected) ? `Encaissé : ${money(t.collected)}${d.pay ? ` (${num(d.pay.pct)} %)` : ''}<br>` : ''}
+      ${Number(t.collected) ? `Reste dû : <strong>${money(t.due)}</strong><br>` : ''}
       ${Number(t.loss_total) ? `Valeur des manquants (portée en avoir) : ${money(t.loss_total)}<br>` : ''}
     </div>
     ${qrBlock(qr, d.reference)}
@@ -332,6 +358,7 @@ export function bonDocBody(bon, qr) {
       <div><span class="k">Créé le :</span>${new Date(bon.created_at).toLocaleString('fr-FR')}</div>
       <div><span class="k">Arrivée :</span>${bon.arrived_at ? new Date(bon.arrived_at).toLocaleString('fr-FR') : '—'}</div>
     </div>
+    ${progressBlock(bon.progress, 'Avancement du voyage')}
     <table>
       <thead><tr><th>Désignation</th><th class="r">Prix de transport</th><th class="r">Valeur du manquant</th><th class="r">Quantité</th><th class="r">Manquant</th><th class="r">Montant</th></tr></thead>
       <tbody>${body || '<tr><td colspan="6">Aucune ligne</td></tr>'}</tbody>
@@ -340,6 +367,7 @@ export function bonDocBody(bon, qr) {
       Frais de transport (commandé) : <strong>${formatMoney(bon.transport_fee, cur)}</strong><br>
       Manquants : ${formatMoney(bon.loss_total, cur)}<br>
       ${bon.passager_payment != null ? `Payé au passager (livré) : <strong>${formatMoney(bon.passager_payment, cur)}</strong>` : ''}
+      ${bon.pay && Number(bon.pay.paid) > 0 ? `<br>Versé : ${formatMoney(bon.pay.paid, cur)} (${num(bon.pay.pct)} %) · Reste : <strong>${formatMoney(bon.pay.rest, cur)}</strong>` : ''}
     </div>
     ${qrBlock(qr, bon.reference)}
     <div class="sign"><div>Signature Fournisseur</div><div>Signature Passager</div></div>`;

@@ -17,6 +17,7 @@ import { IconEl } from '../components/icons.jsx';
 import { DetailHead, Kpis, Kpi, Section, Footnote, ScanBanner, StepFlow } from '../components/DetailKit.jsx';
 import { EntityPicker, OptionChips } from '../components/EntityPicker.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
+import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { bonDocBody, measureOf, measureQty, measureUnit, declaredOf } from '../components/printDocument.js';
 import { bonTicket } from '../components/printTicket.js';
 import { LineEditor, emptyLine, lineValid, lineTotal } from '../components/LineEditor.jsx';
@@ -478,6 +479,17 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
             <button className="btn btn-ghost" disabled={busy} onClick={() => setEdit(null)}>
               <IconEl name="close" />Annuler
             </button>
+          </div>
+        </Section>
+      )}
+
+      {/* Un bon fournisseur se suit sur sa propre fiche d'ordre ; ici, le
+          voyage du bon passager : parti, en route, arrivé, manquant. */}
+      {!isFournisseurBon && (
+        <Section icon="plane" title="Avancement">
+          <div className="pg-panel">
+            <ProgressBar progress={bon.progress} />
+            {bon.pay && <MoneyBar pay={bon.pay} code={cur} label="Versé au passager" />}
           </div>
         </Section>
       )}

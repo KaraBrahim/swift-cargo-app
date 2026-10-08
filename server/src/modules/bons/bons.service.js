@@ -5,6 +5,7 @@
 import { getPool, withTx } from '../../db/pool.js';
 import { Decimal, toDecimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
+import { bonProgress, moneyProgress } from '../../lib/progress.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendEntry, replayPersonLedger } from '../accounts/accounts.service.js';
 import { postMovement, replayChain } from '../caisse/caisse.service.js';
@@ -536,6 +537,10 @@ export async function deleteBon(args) {
 // query was the one place that forgot, which is why fournisseur shipments were
 // turning up in the passagers table. Pass an explicit `orderId` to look inside
 // an order instead.
+// Combien du dû au passager est déjà versé. Rien avant le règlement : tant que
+// `passager_payment` n'est pas calculé, il n'y a pas de montant à comparer.
+const passagerPay = (bon, paid) => (bon.passager_payment == null ? null : moneyProgress(bon.passager_payment, paid ?? 0));
+
 export async function listBons({ status, search, fournisseurId, passagerId, orderId, limit = 100 } = {}) {
   const params = [];
   const conds = [];
@@ -571,7 +576,27 @@ export async function listBons({ status, search, fournisseurId, passagerId, orde
        ${where} ORDER BY b.created_at DESC, b.id DESC LIMIT $${params.length}`,
     params
   );
-  return rows;
+  if (!rows.length) return rows;
+
+  const ids = rows.map((r) => r.id);
+  const [{ rows: lines }, { rows: paid }] = await Promise.all([
+    getPool().query(
+      'SELECT bon_id, measure, unit, quantity, weight_kg, received_quantity FROM bon_lines WHERE bon_id = ANY($1)', [ids]),
+    getPool().query(
+      `SELECT ref_bon_id AS bon_id, SUM(ABS(amount)) AS total FROM person_ledger
+        WHERE ref_bon_id = ANY($1) AND type = 'passager_payment' GROUP BY ref_bon_id`, [ids]),
+  ]);
+  const linesOf = new Map(), paidOf = new Map(paid.map((p) => [String(p.bon_id), p.total]));
+  for (const l of lines) {
+    const k = String(l.bon_id);
+    if (!linesOf.has(k)) linesOf.set(k, []);
+    linesOf.get(k).push(l);
+  }
+  return rows.map((b) => ({
+    ...b,
+    progress: bonProgress(b.status, linesOf.get(String(b.id)) ?? []),
+    pay: passagerPay(b, paidOf.get(String(b.id))),
+  }));
 }
 
 export async function getBonDetail(id, client = getPool()) {
@@ -629,8 +654,13 @@ export async function getBonDetail(id, client = getPool()) {
       WHERE l.bon_id = $1 ORDER BY f.name`,
     [id]
   );
+  const paidToPassager = payments.rows
+    .filter((p) => p.type === 'passager_payment')
+    .reduce((acc, p) => acc.plus(new Decimal(p.amount).abs()), new Decimal(0));
   return {
     ...rows[0],
+    progress: bonProgress(rows[0].status, lines.rows),
+    pay: passagerPay(rows[0], paidToPassager),
     fournisseurs: fournisseurs.rows,
     lines: lines.rows,
     history: history.rows,
