@@ -59,14 +59,14 @@ async function shipment({ qty = '40', take = '40', missing = null, f: reuseF, p:
 
   const o = await orders.createOrder({ admin, data: { fournisseurId: f.id, bons: [{
     transportCurrency: 'DZD',
-    lines: [{ designation: `Livr-Test ${n}`, measure: 'quantite', value: qty, unitPrice: '300' }],
+    lines: [{ designation: `Livr-Test ${n}`, measure: 'quantite', quantity: qty, weight_kg: qty, unitPrice: '300' }],
   }] } });
   const srcLine = o.lines[0];
   const itemId = await itemOf(srcLine.line_id);
 
   const bon = await bons.createBon({ admin, data: {
     passagerId: p.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: srcLine.line_id, measure: 'quantite', value: take, unitPrice: '50' }],
+    lines: [{ sourceLineId: srcLine.line_id, measure: 'quantite', quantity: take, unitPrice: '50' }],
   } });
   await bons.advanceStatus({ admin, id: bon.id });           // départ de Chine
   await bons.advanceStatus({ admin, id: bon.id });           // arrivée à Alger
@@ -330,11 +330,11 @@ test('une marchandise encore en vol n’est pas livrable', async () => {
   )).rows[0];
   const o = await orders.createOrder({ admin, data: { fournisseurId: f.id, bons: [{
     transportCurrency: 'DZD',
-    lines: [{ designation: `Livr-Vol ${n}`, measure: 'quantite', value: '20', unitPrice: '300' }],
+    lines: [{ designation: `Livr-Vol ${n}`, measure: 'quantite', quantity: '20', weight_kg: '20', unitPrice: '300' }],
   }] } });
   const bon = await bons.createBon({ admin, data: {
     passagerId: p.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: o.lines[0].line_id, measure: 'quantite', value: '20', unitPrice: '50' }],
+    lines: [{ sourceLineId: o.lines[0].line_id, measure: 'quantite', quantity: '20', unitPrice: '50' }],
   } });
   await bons.advanceStatus({ admin, id: bon.id }); // en transit, pas encore arrivé
 
@@ -387,11 +387,11 @@ test('une marchandise en vol apparaît « en route », pas au bureau', async () 
   )).rows[0];
   const o = await orders.createOrder({ admin, data: { fournisseurId: f.id, bons: [{
     transportCurrency: 'DZD',
-    lines: [{ designation: `Livr-Barre ${n}`, measure: 'quantite', value: '20', unitPrice: '300' }],
+    lines: [{ designation: `Livr-Barre ${n}`, measure: 'quantite', quantity: '20', weight_kg: '20', unitPrice: '300' }],
   }] } });
   const bon = await bons.createBon({ admin, data: {
     passagerId: p.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: o.lines[0].line_id, measure: 'quantite', value: '5', unitPrice: '50' }],
+    lines: [{ sourceLineId: o.lines[0].line_id, measure: 'quantite', quantity: '5', unitPrice: '50' }],
   } });
   await bons.advanceStatus({ admin, id: bon.id }); // en transit
 

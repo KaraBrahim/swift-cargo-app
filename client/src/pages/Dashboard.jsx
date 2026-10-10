@@ -254,7 +254,6 @@ export default function Dashboard() {
           <h2 className="panel-title">Chiffre d’affaires — quantité expédiée ({revPeriodLabel})</h2>
           <div className="qty-grid">
             <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.weightKg)}</span><span className="qty-k">kg au total</span></div>
-            <div className="qty-cell"><span className="qty-v">{formatQty(revTile.quantity.cbm)}</span><span className="qty-k">CBM au total</span></div>
             <div className="qty-cell"><span className="qty-v">{revTile.quantity.bons}</span><span className="qty-k">bons expédiés</span></div>
             {revTile.quantity.byUnit.map((u) => (
               <div key={u.unit} className="qty-cell">

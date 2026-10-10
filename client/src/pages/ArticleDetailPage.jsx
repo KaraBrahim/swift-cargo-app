@@ -90,7 +90,7 @@ export default function ArticleDetailPage() {
           </div>
         </div>
         <div className="page-actions">
-          {Number(it.totals.quantity) > 0 || Number(it.totals.weight_kg) > 0 || Number(it.totals.cbm) > 0
+          {Number(it.totals.quantity) > 0 || Number(it.totals.weight_kg) > 0
             ? <span className="status-badge st-arrive" style={{ alignSelf: 'center' }}>En stock</span>
             : <span className="status-badge st-cree" style={{ alignSelf: 'center' }}>Enregistré, hors stock</span>}
           {!it.active && <span className="status-badge st-transit" style={{ alignSelf: 'center' }}>Inactif</span>}
@@ -132,8 +132,8 @@ export default function ArticleDetailPage() {
       {/* ── Where it is ── */}
       <div className="kpi-row">
         {['china', 'algeria'].map((office) => {
-          const lvl = it.levels.find((l) => l.office === office) || { quantity: 0, weight_kg: 0, cbm: 0 };
-          const empty = !Number(lvl.quantity) && !Number(lvl.weight_kg) && !Number(lvl.cbm);
+          const lvl = it.levels.find((l) => l.office === office) || { quantity: 0, weight_kg: 0 };
+          const empty = !Number(lvl.quantity) && !Number(lvl.weight_kg);
           return (
             <div key={office} className="kpi-card kpi-static">
               <div className="kpi-ico"><IconEl name="stock" /></div>
@@ -141,7 +141,7 @@ export default function ArticleDetailPage() {
                 <div className={`kpi-val ${Number(lvl.quantity) < 0 ? 'neg' : ''}`}>{formatQty(lvl.quantity)}</div>
                 <div className="kpi-label">Bureau {OFFICE_LABEL[office]}</div>
                 <div className="kpi-sub">
-                  {empty ? 'Rien à cet emplacement' : `${formatQty(lvl.weight_kg)} kg · ${formatQty(lvl.cbm)} m³`}
+                  {empty ? 'Rien à cet emplacement' : `${formatQty(lvl.weight_kg)} kg`}
                 </div>
               </div>
             </div>
@@ -177,8 +177,8 @@ export default function ArticleDetailPage() {
                     <td>{b.order_id ? b.fournisseur_name : (b.passager_name || '—')}</td>
                     <td><span className={`status-badge ${BON_STATUS[b.status]?.cls || ''}`}>{BON_STATUS[b.status]?.label || b.status}</span></td>
                     <td className="right">
-                      {formatQty(b.measure === 'poids' ? b.weight_kg : b.measure === 'cbm' ? b.cbm : b.quantity)}{' '}
-                      {b.measure === 'poids' ? 'kg' : b.measure === 'cbm' ? 'm³' : b.unit}
+                      {formatQty(b.quantity)} {b.unit}
+                      {Number(b.weight_kg) > 0 && <span className="muted"> · {formatQty(b.weight_kg)} kg</span>}
                     </td>
                     <td className="right">{formatMoney(b.unit_price)}</td>
                   </tr>
@@ -196,7 +196,7 @@ export default function ArticleDetailPage() {
         {it.movements.length ? (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Date</th><th>Motif</th><th>Bureau</th><th className="right">Qté</th><th className="right">Poids</th><th className="right">CBM</th><th>Origine</th><th>Par</th><th className="right">Actions</th></tr></thead>
+              <thead><tr><th>Date</th><th>Motif</th><th>Bureau</th><th className="right">Qté</th><th className="right">Poids</th><th>Origine</th><th>Par</th><th className="right">Actions</th></tr></thead>
               <tbody>
                 {it.movements.map((m) => (
                   <tr key={m.id}>
@@ -205,7 +205,6 @@ export default function ArticleDetailPage() {
                     <td>{OFFICE_LABEL[m.office]}</td>
                     <td className={`right ${Number(m.quantity_delta) < 0 ? 'neg' : 'pos'}`}>{signed(m.quantity_delta)}</td>
                     <td className="right">{signed(m.weight_delta)}</td>
-                    <td className="right">{signed(m.cbm_delta)}</td>
                     <td className="gold">{m.bon_reference || m.order_reference || '—'}</td>
                     <td className="muted">{m.admin_name || '—'}</td>
                     <td className="right">

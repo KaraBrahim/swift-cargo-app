@@ -317,7 +317,7 @@ test('a bon fournisseur never shows up in the bons passagers list', async () => 
     admin: ctx.admin,
     data: {
       fournisseurId: f.id,
-      bons: [{ transportCurrency: 'DZD', lines: [{ designation: 'Cartons', measure: 'quantite', value: '10', unitPrice: '500' }] }],
+      bons: [{ transportCurrency: 'DZD', lines: [{ designation: 'Cartons', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '500' }] }],
     },
   });
 
@@ -344,9 +344,9 @@ test('a bon passager carries goods from two fournisseurs and credits each one', 
   const p = await mk('Passager Mixte', 'is_passager');
 
   const o1 = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f1.id,
-    bons: [{ transportCurrency: 'DZD', lines: [{ designation: 'Écrans', measure: 'quantite', value: '10', unitPrice: '1000' }] }] } });
+    bons: [{ transportCurrency: 'DZD', lines: [{ designation: 'Écrans', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '1000' }] }] } });
   const o2 = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f2.id,
-    bons: [{ transportCurrency: 'DZD', lines: [{ designation: 'Claviers', measure: 'quantite', value: '10', unitPrice: '400' }] }] } });
+    bons: [{ transportCurrency: 'DZD', lines: [{ designation: 'Claviers', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '400' }] }] } });
 
   const avail = await bons.listAllocatable({});
   const l1 = avail.find((l) => l.designation === 'Écrans');
@@ -357,8 +357,8 @@ test('a bon passager carries goods from two fournisseurs and credits each one', 
   const bon = await bons.createBon({ admin: ctx.admin, data: {
     passagerId: p.id, transportCurrency: 'DZD',
     lines: [
-      { sourceLineId: l1.line_id, measure: 'quantite', value: '10', unitPrice: '600' },
-      { sourceLineId: l2.line_id, measure: 'quantite', value: '10', unitPrice: '250' },
+      { sourceLineId: l1.line_id, measure: 'quantite', quantity: '10', unitPrice: '600' },
+      { sourceLineId: l2.line_id, measure: 'quantite', quantity: '10', unitPrice: '250' },
     ],
   } });
   assert.equal(bon.fournisseur_id, null, 'un bon passager n’appartient à aucun fournisseur');
@@ -397,7 +397,7 @@ test('la commission s’ajoute au prix de revient et reste acquise sur les manqu
   // 40 cartons a 300 = 12 000 de marchandises, plus 1 500 de commission.
   const o = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f.id, bons: [{
     transportCurrency: 'DZD', commission: '1500',
-    lines: [{ designation: 'Cartons', measure: 'quantite', value: '40', unitPrice: '300' }],
+    lines: [{ designation: 'Cartons', measure: 'quantite', quantity: '40', weight_kg: '40', unitPrice: '300' }],
   }] } });
   const detail = await orders.getOrderDetail(o.id);
   // Chaînes à échelle fixe, comme tout montant qui traverse cette API : ces
@@ -416,7 +416,7 @@ test('la commission s’ajoute au prix de revient et reste acquise sur les manqu
   const lot = (await bons.listAllocatable({ fournisseurId: f.id }))[0];
   const bon = await bons.createBon({ admin: ctx.admin, data: {
     passagerId: pas.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', value: '40', unitPrice: '50' }],
+    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', quantity: '40', unitPrice: '50' }],
   } });
   await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
   await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
@@ -441,13 +441,13 @@ test('un manquant qui dépasse le portage laisse une dette au passager', async (
 
   const o = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f.id, bons: [{
     transportCurrency: 'DZD',
-    lines: [{ designation: 'Lot précieux', measure: 'quantite', value: '1', unitPrice: '12000' }],
+    lines: [{ designation: 'Lot précieux', measure: 'quantite', quantity: '1', weight_kg: '1', unitPrice: '12000' }],
   }] } });
   const lot = (await bons.listAllocatable({ orderId: o.id }))[0];
   // Il gagne 1 500 pour le porter, et le perd.
   const bon = await bons.createBon({ admin: ctx.admin, data: {
     passagerId: pas.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', value: '1', unitPrice: '1500' }],
+    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', quantity: '1', unitPrice: '1500' }],
   } });
   await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
   await bons.advanceStatus({ admin: ctx.admin, id: bon.id });
@@ -472,7 +472,7 @@ test('un code scanné retrouve sa pièce, et refuse ce qu’il ne connaît pas',
   )).rows[0];
   const o = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f.id, bons: [{
     transportCurrency: 'DZD',
-    lines: [{ designation: 'Scanné', measure: 'quantite', value: '2', unitPrice: '100' }],
+    lines: [{ designation: 'Scanné', measure: 'quantite', quantity: '2', weight_kg: '2', unitPrice: '100' }],
   }] } });
   const order = await orders.getOrderDetail(o.id);
 
@@ -494,7 +494,7 @@ test('un code scanné retrouve sa pièce, et refuse ce qu’il ne connaît pas',
   const lot = (await bons.listAllocatable({ orderId: o.id }))[0];
   const bp = await bons.createBon({ admin: ctx.admin, data: {
     passagerId: pas.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', value: '2', unitPrice: '40' }],
+    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', quantity: '2', unitPrice: '40' }],
   } });
   await bons.advanceStatus({ admin: ctx.admin, id: bp.id });
   const hit = await resolveScan(encodeScan('bon', bp.uuid));

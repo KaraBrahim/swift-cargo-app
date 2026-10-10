@@ -26,7 +26,7 @@ export function formatMoney(value, code) {
   return code ? `${s} ${code}` : s;
 }
 
-// Quantities, weights and CBM: up to 3 decimals, trailing zeros dropped.
+// Quantities and weights: up to 3 decimals, trailing zeros dropped.
 export const formatQty = (value) =>
   value == null ? '—' : formatNumber(value, { decimals: 3, trim: true });
 

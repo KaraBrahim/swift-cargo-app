@@ -13,20 +13,18 @@ const id = z.coerce.number().int().positive();
 const num = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
 const status = z.enum(['cree', 'en_transit', 'arrive', 'regle']);
 
-// A line names an article (typed designation OR a reused itemId) and is
-// quantified by exactly one measure (value + measure). quantity/weight_kg/cbm
-// are still accepted for backward compatibility.
+// A line names an article (typed designation OR a reused itemId) and carries a
+// quantity AND a weight, always. `measure` only says which of the two the unit
+// price multiplies.
 const lineSchema = z.object({
   designation: z.string().trim().max(200).optional(),
   itemId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
   createItem: z.boolean().optional(),
   categoryId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
-  measure: z.enum(['quantite', 'poids', 'cbm']).optional(),
-  value: num.optional(),
+  measure: z.enum(['quantite', 'poids']).optional(),
   quantity: num.optional(),
   unit: z.string().trim().max(20).optional(),
   weight_kg: num.optional(),
-  cbm: num.optional(),
   unitPrice: num.optional(),
   // Ce que le passager doit par unite non livree. Absent : la valeur convenue
   // avec le fournisseur pour ce lot.

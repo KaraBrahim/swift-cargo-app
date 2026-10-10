@@ -95,3 +95,11 @@
 
 الترتيب: **1، 2، 3، 4، 5، 6، 7**. المرحلة 3 قبل 5 و6 لأنهما تعتمدان على الكمية والوزن معاً.
 بعد كل مرحلة: اختبارات، commit، push، ثم بناء التطبيق المكتبي عند الطلب.
+
+## 7. Avancement
+
+- Phase 1 (A5, PDF fournisseur sans transport) — faite, poussée.
+- Phase 2 (barres de progression) — faite, poussée.
+- Phase 3 (quantité + poids, CBM supprimé, mesure suggérée par article) — faite, **non poussée** :
+  la migration 033 est irréversible (elle supprime les colonnes `cbm`). Sauvegarde de la
+  page Maintenance avant le déploiement.

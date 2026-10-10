@@ -6,6 +6,7 @@ import { getPool, withTx } from '../../db/pool.js';
 import { Decimal, toDecimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { bonProgress, moneyProgress } from '../../lib/progress.js';
+import { priceBasis, weightShare, pricedPart, perPiece, perMeasureUnit } from '../../lib/lineMath.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendEntry, replayPersonLedger } from '../accounts/accounts.service.js';
 import { postMovement, replayChain } from '../caisse/caisse.service.js';
@@ -29,41 +30,41 @@ function parseQty(v, field, { positive = false } = {}) {
   return d.toFixed(3);
 }
 
-// Parse the incoming goods lines: one measure per line, article link fields.
-// Back-compat: if no 'measure' is sent (older callers), default to 'quantite'.
-// The quantity that a line's unit_price multiplies: whichever measure the line
-// is quantified by (pieces, kg, or m³).
-function lineQty(l) {
-  return l.measure === 'poids' ? l.weight_kg : l.measure === 'cbm' ? l.cbm : l.quantity;
+// Sum of (prix unitaire × base de prix) over lines — the derived transport fee.
+// La base est la quantité ou le poids selon `measure` (voir lib/lineMath.js).
+function linesTotal(lines) {
+  return lines.reduce((acc, l) => acc.plus(new Decimal(l.unit_price).times(priceBasis(l))), new Decimal(0));
 }
 
-// Sum of (unit_price × quantity) over lines — the derived transport fee. Pass a
-// map of lineId → delivered quantity to bill only what arrived (default: ordered).
-function linesTotal(lines, deliveredByQtyFn) {
-  return lines.reduce((acc, l) => {
-    const qty = deliveredByQtyFn ? deliveredByQtyFn(l) : lineQty(l);
-    return acc.plus(new Decimal(l.unit_price).times(qty));
-  }, new Decimal(0));
-}
-
+// Parse the incoming goods lines. Chaque ligne porte une QUANTITÉ et un POIDS,
+// les deux, toujours ; `measure` ne dit que par quoi se multiplie le prix.
+// Une ligne qui tire sur un lot d'un bon fournisseur (`sourceLineId`) peut
+// omettre le poids : il s'en déduit alors au prorata du lot.
 function parseLines(data) {
   if (!Array.isArray(data.lines) || data.lines.length === 0) {
     throw errors.validation([{ field: 'lines', message: 'Au moins une ligne de marchandise est requise.' }]);
   }
   const lines = data.lines.map((l) => {
-    const measure = ['quantite', 'poids', 'cbm'].includes(l.measure) ? l.measure : 'quantite';
-    let quantity = '0', weight_kg = '0', cbm = '0';
-    if (measure === 'quantite') quantity = parseQty(l.quantity ?? l.value, 'Quantité', { positive: true });
-    else if (measure === 'poids') weight_kg = parseQty(l.weight_kg ?? l.value, 'Poids', { positive: true });
-    else cbm = parseQty(l.cbm ?? l.value, 'CBM', { positive: true });
-    const unit = measure === 'quantite' ? String(l.unit || 'pièce').trim().slice(0, 20)
-      : measure === 'poids' ? 'kg' : 'm³';
+    const measure = l.measure === 'poids' ? 'poids' : 'quantite';
+    const sourceLineId = l.sourceLineId ? Number(l.sourceLineId) : null;
+    const name = String(l.designation || '').trim();
+    const given = (v) => v != null && String(v).trim() !== '';
+    const who = name ? `« ${name} » : ` : '';
+    if (!given(l.quantity)) {
+      throw errors.validation([{ field: 'lines', message: `${who}la quantité est obligatoire.` }]);
+    }
+    if (!given(l.weight_kg) && !sourceLineId) {
+      throw errors.validation([{ field: 'lines', message: `${who}le poids est obligatoire, en plus de la quantité.` }]);
+    }
     return {
-      designation: String(l.designation || '').trim(),
+      designation: name,
       itemId: l.itemId ? Number(l.itemId) : null,
       createItem: Boolean(l.createItem),
       categoryId: l.categoryId ? Number(l.categoryId) : null,
-      measure, quantity, weight_kg, cbm, unit,
+      measure,
+      quantity: parseQty(l.quantity, 'Quantité', { positive: true }),
+      weight_kg: given(l.weight_kg) ? parseQty(l.weight_kg, 'Poids', { positive: true }) : null,
+      unit: String(l.unit || 'pièce').trim().slice(0, 20),
       unit_price: parseMoney(l.unitPrice ?? l.unit_price, 'Prix de revient'),
       // Ce que le passager doit par unité non livrée. Laissé vide, il prendra la
       // valeur convenue avec le fournisseur (voir insertResolvedLines) : c'est
@@ -71,7 +72,7 @@ function parseLines(data) {
       missing_unit_price: l.missingUnitPrice != null && l.missingUnitPrice !== ''
         ? parseMoney(l.missingUnitPrice, 'Valeur du manquant')
         : null,
-      sourceLineId: l.sourceLineId ? Number(l.sourceLineId) : null,
+      sourceLineId,
       note: l.note ?? null,
     };
   });
@@ -83,21 +84,28 @@ function parseLines(data) {
   return lines;
 }
 
-// Quantity of a stored bon_line, in whatever measure it uses.
-const rowQty = (r) => (r.measure === 'poids' ? r.weight_kg : r.measure === 'cbm' ? r.cbm : r.quantity);
-
-// How much of a bon fournisseur line has already been drawn by bons passagers.
-// `exceptBonId` lets a bon being edited ignore its own previous allocation.
+// How much of a bon fournisseur line has already been drawn by bons passagers,
+// en QUANTITÉ. `exceptBonId` lets a bon being edited ignore its own allocation.
 async function allocatedOf(c, sourceLineId, exceptBonId = null) {
   const { rows } = await c.query(
-    `SELECT COALESCE(SUM(CASE WHEN measure='poids' THEN weight_kg
-                              WHEN measure='cbm'   THEN cbm
-                              ELSE quantity END), 0) AS allocated
+    `SELECT COALESCE(SUM(quantity), 0) AS allocated
        FROM bon_lines
       WHERE source_line_id = $1 ${exceptBonId ? 'AND bon_id <> $2' : ''}`,
     exceptBonId ? [sourceLineId, exceptBonId] : [sourceLineId]
   );
   return new Decimal(rows[0].allocated);
+}
+
+// Le poids d'une ligne qui tire sur un lot et ne l'a pas donné : sa part du poids
+// du lot. À résoudre AVANT de totaliser — un prix au kilo multiplie ce poids, et
+// un poids encore vide ferait un transport à zéro.
+async function fillWeights(c, lines) {
+  for (const l of lines) {
+    if (l.weight_kg != null) continue;
+    const { rows: [src] } = await c.query('SELECT quantity, weight_kg FROM bon_lines WHERE id=$1', [l.sourceLineId]);
+    if (!src) throw errors.notFound('Ligne de bon fournisseur introuvable.');
+    l.weight_kg = weightShare(src, l.quantity).toFixed(3);
+  }
 }
 
 // Bon fournisseur lines that still have goods available to hand to a passager.
@@ -112,13 +120,9 @@ export async function listAllocatable({ fournisseurId, orderId, forBonId } = {})
   if (forBonId) { params.push(forBonId); skip = `AND a.bon_id <> $${params.length}`; }
   const { rows } = await getPool().query(
     `SELECT bl.id AS line_id, bl.item_id, bl.designation, bl.measure, bl.unit,
-            bl.unit_price AS sale_price,
-            (CASE WHEN bl.measure='poids' THEN bl.weight_kg
-                  WHEN bl.measure='cbm'   THEN bl.cbm
-                  ELSE bl.quantity END) AS quantity,
-            COALESCE((SELECT SUM(CASE WHEN a.measure='poids' THEN a.weight_kg
-                                      WHEN a.measure='cbm'   THEN a.cbm
-                                      ELSE a.quantity END)
+            bl.unit_price AS sale_price, bl.weight_kg,
+            bl.quantity AS quantity,
+            COALESCE((SELECT SUM(a.quantity)
                         FROM bon_lines a WHERE a.source_line_id = bl.id ${skip}), 0) AS allocated,
             b.id AS source_bon_id, b.reference AS source_bon_reference,
             o.id AS order_id, o.reference AS order_reference,
@@ -138,14 +142,17 @@ export async function listAllocatable({ fournisseurId, orderId, forBonId } = {})
 
 // Resolve each line, insert the bon_line, and — for a bon fournisseur (orderId
 // set) — post the China reception movement. A bon passager line instead DRAWS
-// from a bon fournisseur line: the article and measure come from the source, and
-// the quantity taken may not exceed what is still unallocated on it.
+// from a bon fournisseur line: the article comes from the source, the quantity
+// taken may not exceed what is still unallocated on it, and its weight — if not
+// given — is the matching share of the lot's weight.
 async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
   for (const l of lines) {
     let itemId = null;
     let designation = l.designation;
     let sourceLineId = null;
     let sourceUnitPrice = null;
+    let weightKg = l.weight_kg;
+    let unit = l.unit;
 
     if (l.sourceLineId) {
       // Lock the source line so two bons cannot over-draw it concurrently.
@@ -159,11 +166,8 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
       // passager travels with one suitcase and fills it wherever the goods are
       // ready. What each fournisseur is owed stays right because every credit is
       // computed from the SOURCE line (see missingSaleCredits).
-      if (src.measure !== l.measure) {
-        throw errors.validation([{ field: 'lines', message: `« ${src.designation} » se mesure en ${src.measure}.` }]);
-      }
-      const want = new Decimal(l.measure === 'poids' ? l.weight_kg : l.measure === 'cbm' ? l.cbm : l.quantity);
-      const remaining = new Decimal(rowQty(src)).minus(await allocatedOf(c, src.id, bon.id));
+      const want = new Decimal(l.quantity);
+      const remaining = new Decimal(src.quantity).minus(await allocatedOf(c, src.id, bon.id));
       if (want.gt(remaining)) {
         throw errors.conflict(`Quantité indisponible pour « ${src.designation} » : il reste ${remaining.toFixed(3)}, demandé ${want.toFixed(3)}.`);
       }
@@ -181,7 +185,14 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
       itemId = src.item_id;
       designation = src.designation;
       sourceLineId = src.id;
-      sourceUnitPrice = src.unit_price;
+      unit = src.unit;
+      // Le prix convenu avec le fournisseur est par unité de SA mesure. Si ce
+      // bon tarife autrement (au poids là où le lot l'est à la pièce), on le
+      // ramène à la pièce puis à la mesure de ce bon.
+      sourceUnitPrice = src.measure === l.measure
+        ? src.unit_price
+        : perMeasureUnit({ measure: l.measure, quantity: l.quantity, weight_kg: weightKg }, perPiece(src, src.unit_price))
+          .toDecimalPlaces(2).toFixed(2);
     } else if (l.itemId) {
       const it = await c.query('SELECT id, name FROM stock_items WHERE id=$1 AND active=TRUE', [l.itemId]);
       if (!it.rows.length) throw errors.notFound('Article introuvable ou inactif.');
@@ -196,13 +207,13 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
     const missingUnitPrice = l.missing_unit_price ?? sourceUnitPrice ?? l.unit_price;
 
     await c.query(
-      `INSERT INTO bon_lines (bon_id, item_id, source_line_id, designation, measure, quantity, unit, weight_kg, cbm, unit_price, missing_unit_price, note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [bon.id, itemId, sourceLineId, designation, l.measure, l.quantity, l.unit, l.weight_kg, l.cbm, l.unit_price, missingUnitPrice, l.note]
+      `INSERT INTO bon_lines (bon_id, item_id, source_line_id, designation, measure, quantity, unit, weight_kg, unit_price, missing_unit_price, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [bon.id, itemId, sourceLineId, designation, l.measure, l.quantity, unit, weightKg, l.unit_price, missingUnitPrice, l.note]
     );
     if (orderId && itemId) {
       await applyMovement(c, {
-        itemId, office: 'china', dQ: l.quantity, dW: l.weight_kg, dC: l.cbm,
+        itemId, office: 'china', dQ: l.quantity, dW: weightKg,
         reason: 'reception', refOrderId: orderId, refBonId: bon.id, adminId,
       });
     }
@@ -254,6 +265,7 @@ async function postFournisseurCharge(c, { bon, fournisseurId, currency, fee, dis
 export async function insertChildBon(c, { admin, orderId = null, fournisseurId, data }) {
   const transportCurrency = (data.transportCurrency || 'DZD').toUpperCase();
   const lines = parseLines(data);
+  await fillWeights(c, lines);
   // Derived from the lines: Σ(prix unitaire × quantité). On a bon FOURNISSEUR
   // that is the SALE total (what the fournisseur owes); on a bon PASSAGER it is
   // the COST total (what the passager will be paid).
@@ -341,6 +353,7 @@ export async function updateBon({ admin, id, data, ip }) {
       }
     }
     const lines = parseLines(data);
+    await fillWeights(c, lines);
     // Fee is derived from the (possibly changed) lines.
     const newCommission = bon.order_id != null
       ? ('commission' in data ? parseMoney(data.commission, 'Commission') : bon.commission)
@@ -350,13 +363,12 @@ export async function updateBon({ admin, id, data, ip }) {
 
     // Reverse the OLD fournisseur reception (bon fournisseur only).
     if (bon.order_id != null) {
-      const { rows: old } = await c.query('SELECT item_id, quantity, weight_kg, cbm FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL', [id]);
+      const { rows: old } = await c.query('SELECT item_id, quantity, weight_kg FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL', [id]);
       for (const l of old) {
         await applyMovement(c, {
           itemId: l.item_id, office: 'china',
           dQ: new Decimal(l.quantity).negated().toFixed(3),
           dW: new Decimal(l.weight_kg).negated().toFixed(3),
-          dC: new Decimal(l.cbm).negated().toFixed(4),
           reason: 'ajustement', refBonId: id, adminId: admin.id, note: `Annulation réception ${bon.reference} (modification)`,
         });
       }
@@ -480,13 +492,12 @@ export async function deleteBonTx(c, { admin, id, ip }) {
         throw errors.conflict('Suppression impossible : des bons passagers transportent déjà ces marchandises. Supprimez-les d’abord.');
       }
       // Undo the China reception and the fournisseur's charge/remise.
-      const { rows: lines } = await c.query('SELECT item_id, quantity, weight_kg, cbm FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL', [id]);
+      const { rows: lines } = await c.query('SELECT item_id, quantity, weight_kg FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL', [id]);
       for (const l of lines) {
         await applyMovement(c, {
           itemId: l.item_id, office: 'china',
           dQ: new Decimal(l.quantity).negated().toFixed(3),
           dW: new Decimal(l.weight_kg).negated().toFixed(3),
-          dC: new Decimal(l.cbm).negated().toFixed(4),
           reason: 'ajustement', refBonId: id, adminId: admin.id, note: `Suppression ${fresh.reference}`,
         });
       }
@@ -632,7 +643,9 @@ export async function getBonDetail(id, client = getPool()) {
   const [lines, history] = await Promise.all([
     // Carry the source line's sale price so the UI can show the margin.
     client.query(
-      `SELECT bl.*, src.unit_price AS source_unit_price, sb.reference AS source_bon_reference,
+      `SELECT bl.*, src.unit_price AS source_unit_price, src.measure AS source_measure,
+              src.quantity AS source_quantity, src.weight_kg AS source_weight_kg,
+              sb.reference AS source_bon_reference,
               so.id AS source_order_id, so.reference AS source_order_reference
          FROM bon_lines bl
          LEFT JOIN bon_lines src ON src.id = bl.source_line_id
@@ -676,17 +689,16 @@ export async function getBonDetail(id, client = getPool()) {
 // at creation, and free-text lines carry no stock.
 async function shipLinesStock(c, { bon, direction, adminId }) {
   const { rows: lines } = await c.query(
-    'SELECT item_id, measure, quantity, weight_kg, cbm FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL',
+    'SELECT item_id, quantity, weight_kg FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL',
     [bon.id]
   );
   for (const l of lines) {
     if (direction === 'depart') {
       const { rows } = await c.query(
-        'SELECT quantity, weight_kg, cbm FROM stock_levels WHERE item_id=$1 AND office=$2', [l.item_id, 'china']
+        'SELECT quantity FROM stock_levels WHERE item_id=$1 AND office=$2', [l.item_id, 'china']
       );
-      const lvl = rows[0] || { quantity: '0', weight_kg: '0', cbm: '0' };
-      const need = l.measure === 'poids' ? l.weight_kg : l.measure === 'cbm' ? l.cbm : l.quantity;
-      const have = l.measure === 'poids' ? lvl.weight_kg : l.measure === 'cbm' ? lvl.cbm : lvl.quantity;
+      const need = l.quantity;
+      const have = rows[0]?.quantity ?? '0';
       if (new Decimal(have).lt(need)) {
         const nm = (await c.query('SELECT name FROM stock_items WHERE id=$1', [l.item_id])).rows[0]?.name || 'article';
         throw errors.conflict(`Stock Chine insuffisant pour « ${nm} » (disponible ${have}, requis ${need}).`);
@@ -695,13 +707,12 @@ async function shipLinesStock(c, { bon, direction, adminId }) {
         itemId: l.item_id, office: 'china',
         dQ: new Decimal(l.quantity).negated().toFixed(3),
         dW: new Decimal(l.weight_kg).negated().toFixed(3),
-        dC: new Decimal(l.cbm).negated().toFixed(4),
         reason: 'depart', refBonId: bon.id, adminId,
       });
     } else {
       await applyMovement(c, {
         itemId: l.item_id, office: 'algeria',
-        dQ: l.quantity, dW: l.weight_kg, dC: l.cbm,
+        dQ: l.quantity, dW: l.weight_kg,
         reason: 'arrivee', refBonId: bon.id, adminId,
       });
     }
@@ -751,7 +762,7 @@ export async function reconcile({ admin, id, lines, ip }) {
     for (const l of lines) {
       const dl = byId.get(String(l.lineId));
       if (!dl) throw errors.validation([{ field: 'lineId', message: `Ligne ${l.lineId} inconnue.` }]);
-      const qty = new Decimal(lineQty(dl));
+      const qty = new Decimal(dl.quantity);
       // Prefer an explicit missing quantity; fall back to a delivered quantity.
       let missing;
       if (l.missing != null && l.missing !== '') missing = new Decimal(parseQty(l.missing, 'Quantité manquante'));
@@ -762,7 +773,7 @@ export async function reconcile({ admin, id, lines, ip }) {
       // À SA valeur — celle convenue avec le fournisseur pour cette marchandise —
       // et non au tarif de portage : perdre un carton coûte le carton, pas les
       // frais de route.
-      const lossValue = new Decimal(dl.missing_unit_price).times(missing);
+      const lossValue = new Decimal(dl.missing_unit_price).times(pricedPart(dl, missing));
       lossTotal = lossTotal.plus(lossValue);
       await c.query(
         'UPDATE bon_lines SET received_quantity=$2, loss_value=$3, responsible=$4 WHERE id=$1 AND bon_id=$5',
@@ -785,9 +796,8 @@ export async function reconcile({ admin, id, lines, ip }) {
         const back = delta.negated();
         await applyMovement(c, {
           itemId: dl.item_id, office: 'algeria',
-          dQ: dl.measure === 'quantite' ? back.toFixed(3) : '0',
-          dW: dl.measure === 'poids' ? back.toFixed(3) : '0',
-          dC: dl.measure === 'cbm' ? back.toFixed(4) : '0',
+          dQ: back.toFixed(3),
+          dW: weightShare(dl, back).toFixed(3),
           reason: 'ajustement', refBonId: id, adminId: admin.id,
           note: `Manquant ${bon.reference} — ${dl.designation}`,
         });
@@ -816,8 +826,16 @@ export async function reconcile({ admin, id, lines, ip }) {
 const LAST_PRICES = `
   SELECT DISTINCT ON (COALESCE(bl.item_id::text, bl.designation))
          COALESCE(bl.item_id::text, bl.designation) AS key,
-         bl.item_id, bl.designation, bl.unit_price, bl.missing_unit_price,
+         bl.item_id, bl.designation, bl.unit_price, bl.missing_unit_price, bl.measure,
          b.transport_currency AS currency,
+         -- La mesure (quantité ou poids) que cet article prend d'habitude, de ce
+         -- côté-ci : la plus fréquente de ses 10 dernières lignes, la plus récente
+         -- en cas d'égalité. Une seule erreur de saisie ne la renverse pas.
+         (SELECT m.measure FROM (
+              SELECT x.measure, x.id FROM bon_lines x JOIN bons xb ON xb.id = x.bon_id
+               WHERE x.item_id = bl.item_id AND (xb.order_id IS NULL) = (b.order_id IS NULL)
+               ORDER BY x.id DESC LIMIT 10) m
+           GROUP BY m.measure ORDER BY COUNT(*) DESC, MAX(m.id) DESC LIMIT 1) AS suggested_measure,
          COALESCE(o.reference, b.reference) AS reference, b.created_at
     FROM bon_lines bl
     JOIN bons b ON b.id = bl.bon_id
@@ -864,10 +882,12 @@ export async function priceHistory({ fournisseurId, passagerId, scope } = {}) {
 // passager. Grouped by source bon, since a bon passager may carry goods billed
 // in different currencies.
 async function missingSaleCredits(c, bonId) {
-  const qty = "(CASE WHEN l.measure='poids' THEN l.weight_kg WHEN l.measure='cbm' THEN l.cbm ELSE l.quantity END)";
+  // Le prix de la ligne source s'applique à SA mesure : à la pièce, ou au poids
+  // — auquel cas une pièce manquante vaut sa part du poids du lot.
+  const perPieceSale = "(src.unit_price * (CASE WHEN src.measure='poids' THEN src.weight_kg / NULLIF(src.quantity, 0) ELSE 1 END))";
   const { rows } = await c.query(
     `SELECT sb.fournisseur_id, sb.transport_currency AS currency, sb.order_id,
-            SUM(src.unit_price * GREATEST(${qty} - COALESCE(l.received_quantity, ${qty}), 0)) AS credit
+            SUM(${perPieceSale} * GREATEST(l.quantity - COALESCE(l.received_quantity, l.quantity), 0)) AS credit
        FROM bon_lines l
        JOIN bon_lines src ON src.id = l.source_line_id
        JOIN bons sb ON sb.id = src.bon_id
@@ -959,8 +979,7 @@ async function reverseSettlement(c, bon, admin, note) {
 // entière qui suit retombe exactement sur le niveau d'avant l'arrivée.
 async function restoreMissingStock(c, bon, adminId) {
   const { rows } = await c.query(
-    `SELECT item_id, designation, measure, received_quantity,
-            ${'CASE WHEN measure=\'poids\' THEN weight_kg WHEN measure=\'cbm\' THEN cbm ELSE quantity END'} AS qty
+    `SELECT item_id, designation, quantity, weight_kg, received_quantity, quantity AS qty
        FROM bon_lines
       WHERE bon_id=$1 AND item_id IS NOT NULL AND received_quantity IS NOT NULL`,
     [bon.id]
@@ -970,9 +989,8 @@ async function restoreMissingStock(c, bon, adminId) {
     if (missing.isZero()) continue;
     await applyMovement(c, {
       itemId: l.item_id, office: 'algeria',
-      dQ: l.measure === 'quantite' ? missing.toFixed(3) : '0',
-      dW: l.measure === 'poids' ? missing.toFixed(3) : '0',
-      dC: l.measure === 'cbm' ? missing.toFixed(4) : '0',
+      dQ: missing.toFixed(3),
+      dW: weightShare(l, missing).toFixed(3),
       reason: 'ajustement', refBonId: bon.id, adminId,
       note: `Annulation manquant ${bon.reference} — ${l.designation}`,
     });
@@ -982,16 +1000,15 @@ async function restoreMissingStock(c, bon, adminId) {
 // Reverse a stock leg when stepping a passager bon backward. Undoing a departure
 // returns goods to China (+); undoing an arrival removes them from Algeria (−).
 async function reverseShip(c, bon, leg, adminId) {
-  const { rows: lines } = await c.query('SELECT item_id, quantity, weight_kg, cbm FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL', [bon.id]);
+  const { rows: lines } = await c.query('SELECT item_id, quantity, weight_kg FROM bon_lines WHERE bon_id=$1 AND item_id IS NOT NULL', [bon.id]);
   for (const l of lines) {
     if (leg === 'depart') {
-      await applyMovement(c, { itemId: l.item_id, office: 'china', dQ: l.quantity, dW: l.weight_kg, dC: l.cbm, reason: 'ajustement', refBonId: bon.id, adminId, note: `Retour en Chine ${bon.reference}` });
+      await applyMovement(c, { itemId: l.item_id, office: 'china', dQ: l.quantity, dW: l.weight_kg, reason: 'ajustement', refBonId: bon.id, adminId, note: `Retour en Chine ${bon.reference}` });
     } else {
       await applyMovement(c, {
         itemId: l.item_id, office: 'algeria',
         dQ: new Decimal(l.quantity).negated().toFixed(3),
         dW: new Decimal(l.weight_kg).negated().toFixed(3),
-        dC: new Decimal(l.cbm).negated().toFixed(4),
         reason: 'ajustement', refBonId: bon.id, adminId, note: `Annulation arrivée ${bon.reference}`,
       });
     }

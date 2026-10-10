@@ -17,10 +17,10 @@
 // that gets overwritten by this function a line later.
 import { Decimal } from '../../lib/money.js';
 
-// La quantité d'une ligne, dans la mesure qui est la sienne.
-export const QTY = (t) => `CASE WHEN ${t}.measure='poids' THEN ${t}.weight_kg
-                         WHEN ${t}.measure='cbm'   THEN ${t}.cbm
-                         ELSE ${t}.quantity END`;
+// La quantité d'une ligne : l'unité du suivi (confié, arrivé, manquant, remis).
+// Le poids n'en est qu'une part (voir lib/lineMath.js) ; `measure` ne dit que
+// par quoi se multiplie le prix, pas ce qui se compte.
+export const QTY = (t) => `${t}.quantity`;
 
 // Ce qui est ARRIVÉ d'une ligne fournisseur : ce que les bons passagers qui en
 // tirent leur marchandise ont effectivement rapporté. `received_quantity` est
@@ -158,7 +158,7 @@ export async function deliverableLines(client, { orderId, personId, lineIds } = 
   if (!conds.length) throw new Error('deliverableLines: aucun filtre — refus de lire toute la base.');
 
   const { rows } = await client.query(
-    `SELECT bl.id, bl.bon_id, bl.item_id, bl.designation, bl.measure, bl.unit,
+    `SELECT bl.id, bl.bon_id, bl.item_id, bl.designation, bl.measure, bl.unit, bl.weight_kg,
             ${QTY('bl')} AS quantity,
             bl.delivered_quantity,
             ${ARRIVED} AS arrived,

@@ -169,7 +169,7 @@ const ARTICLES = [
   ['T-shirts coton (lot 50)', 'Textile', 'quantite', 'carton', 1200, 1650],
   ['Vestes hiver', 'Textile', 'quantite', 'carton', 1900, 2400],
   ['Robes femme', 'Textile', 'quantite', 'carton', 1500, 2000],
-  ['Tissu ameublement', 'Textile', 'cbm', 'm³', 44000, 62000],
+  ['Tissu ameublement', 'Textile', 'quantite', 'lot', 44000, 62000],
   ['Chaussettes (lot 200)', 'Textile', 'quantite', 'carton', 900, 1300],
   ['Écouteurs Bluetooth', 'Électronique', 'quantite', 'carton', 1700, 2300],
   ['Chargeurs USB-C', 'Électronique', 'quantite', 'carton', 1300, 1750],
@@ -189,13 +189,13 @@ const ARTICLES = [
   ['Filtres à huile', 'Pièces auto', 'quantite', 'carton', 1250, 1700],
   ["Bougies d'allumage", 'Pièces auto', 'quantite', 'carton', 1150, 1550],
   ['Essuie-glaces', 'Pièces auto', 'quantite', 'carton', 1000, 1350],
-  ['Poupées', 'Jouets', 'cbm', 'm³', 42000, 58000],
+  ['Poupées', 'Jouets', 'quantite', 'lot', 42000, 58000],
   ['Voitures télécommandées', 'Jouets', 'quantite', 'carton', 1400, 1900],
   ['Puzzles', 'Jouets', 'quantite', 'carton', 950, 1300],
-  ['Peluches', 'Jouets', 'cbm', 'm³', 40000, 55000],
+  ['Peluches', 'Jouets', 'quantite', 'lot', 40000, 55000],
   ['Sacs à main', 'Maroquinerie', 'quantite', 'carton', 1750, 2350],
   ['Portefeuilles cuir', 'Maroquinerie', 'quantite', 'carton', 1300, 1750],
-  ['Valises cabine', 'Maroquinerie', 'cbm', 'm³', 46000, 66000],
+  ['Valises cabine', 'Maroquinerie', 'quantite', 'lot', 46000, 66000],
   ['Ceintures', 'Maroquinerie', 'quantite', 'carton', 1050, 1450],
   ['Visserie assortie', 'Quincaillerie', 'poids', 'kg', 800, 980],
   ['Serrures', 'Quincaillerie', 'quantite', 'carton', 1300, 1750],
@@ -205,7 +205,7 @@ const ARTICLES = [
   ['Supports voiture', 'Téléphonie', 'quantite', 'carton', 1100, 1500],
   ['Mixeurs', 'Électroménager', 'quantite', 'carton', 1900, 2450],
   ['Bouilloires', 'Électroménager', 'quantite', 'carton', 1600, 2100],
-  ['Ventilateurs', 'Électroménager', 'cbm', 'm³', 45000, 64000],
+  ['Ventilateurs', 'Électroménager', 'quantite', 'lot', 45000, 64000],
   ['Thé vert', 'Alimentaire', 'poids', 'kg', 790, 1000],
   ['Épices assorties', 'Alimentaire', 'poids', 'kg', 820, 1050],
 ];
@@ -514,14 +514,17 @@ function makeLine(currency) {
   const it = pick(items);
   const s = scaleFor(currency);
   const unitPrice = (money(it.low, it.high, 10) * s).toFixed(2);
-  const qty = it.measure === 'quantite' ? int(8, 60)
-    : it.measure === 'poids' ? int(20, 180)
-      : (int(8, 45) / 10).toFixed(1);
+  // Toute ligne porte une quantité ET un poids ; `measure` ne dit que par quoi
+  // se multiplie le prix. Les articles tarifés au poids se comptent en sacs.
+  const byWeight = it.measure === 'poids';
+  const qty = byWeight ? int(2, 14) : int(8, 60);
+  const weight = byWeight ? int(20, 180) : Math.max(1, Math.round(qty * (0.4 + rnd() * 3)));
   return {
     itemId: it.id,
-    measure: it.measure,
-    unit: it.unit,
-    value: String(qty),
+    measure: byWeight ? 'poids' : 'quantite',
+    unit: byWeight ? 'sac' : (it.unit === 'm³' ? 'lot' : it.unit),
+    quantity: String(qty),
+    weight_kg: String(weight),
     unitPrice,
     _qty: Number(qty),
     _name: it.name,
@@ -541,7 +544,7 @@ async function createOrder(date) {
     bons: [{
       transportCurrency: currency,
       commission,
-      lines: lines.map(({ itemId, measure, unit, value, unitPrice }) => ({ itemId, measure, unit, value, unitPrice })),
+      lines: lines.map(({ itemId, measure, unit, quantity, weight_kg, unitPrice }) => ({ itemId, measure, unit, quantity, weight_kg, unitPrice })),
     }],
   }, chinaToken()));
   if (!r) return;
@@ -629,15 +632,15 @@ async function createPassagerBon(date, currency, orderId, takeAll) {
   const lines = [];
   for (const lot of chosen) {
     let take = takeAll ? lot.remaining : lot.remaining * (0.45 + rnd() * 0.4);
-    // On ne coupe pas un carton en deux : ce qui se compte en pieces se prend
-    // en entier, ce qui se pese ou se cube garde ses decimales.
-    take = lot.measure === 'quantite' ? Math.max(1, Math.round(take)) : Number(take.toFixed(3));
-    if (take < 0.05 || take > lot.remaining + 1e-9) take = lot.measure === 'quantite' ? Math.floor(lot.remaining) : Number(lot.remaining.toFixed(3));
-    if (take < 0.05) continue;
+    // On ne coupe pas un carton en deux : le suivi se compte en quantités
+    // entières, et le poids suit au prorata du lot.
+    take = Math.max(1, Math.round(take));
+    if (take > lot.remaining + 1e-9) take = Math.floor(lot.remaining);
+    if (take < 1) continue;
     lines.push({
       sourceLineId: lot.lineId,
       measure: lot.measure,
-      value: take.toFixed(3),
+      quantity: take.toFixed(3),
       unitPrice: (lot.salePrice * ratio).toFixed(2),
       _lot: lot,
       _take: take,
@@ -650,7 +653,7 @@ async function createPassagerBon(date, currency, orderId, takeAll) {
     passagerId: passager.id,
     transportCurrency: currency,
     notes: chance(0.2) ? 'Bagage accompagné — vol Guangzhou → Alger.' : undefined,
-    lines: lines.map(({ sourceLineId, measure, value, unitPrice }) => ({ sourceLineId, measure, value, unitPrice })),
+    lines: lines.map(({ sourceLineId, measure, quantity, unitPrice }) => ({ sourceLineId, measure, quantity, unitPrice })),
   }, chinaToken()));
   if (!r) return;
   counts.bonsPassagers++;
@@ -682,8 +685,8 @@ async function reconcileBon(bonId, currency, date, passager) {
   // ce reste qui fait vivre le rapport Manquants et les avoirs fournisseurs.
   const withLoss = chance(0.26);
   const lines = bon.lines.map((l, i) => {
-    const qty = Number(l.measure === 'poids' ? l.weight_kg : l.measure === 'cbm' ? l.cbm : l.quantity);
-    const missing = withLoss && i === 0 ? Number((qty * (0.03 + rnd() * 0.1)).toFixed(3)) : 0;
+    const qty = Number(l.quantity);
+    const missing = withLoss && i === 0 ? Math.max(1, Math.round(qty * (0.03 + rnd() * 0.1))) : 0;
     return {
       lineId: l.id,
       missing: missing.toFixed(3),
@@ -758,8 +761,8 @@ async function deliverGoods(orderId, date) {
   const lines = avail.map((l, i) => {
     if (!partial || i > 0) return { lineId: l.line_id, quantity: l.deliverable };
     const part = Number(l.deliverable) * (0.4 + rnd() * 0.3);
-    // Un carton ne se coupe pas en deux ; un poids et un volume, si.
-    const q = l.measure === 'quantite' ? Math.max(1, Math.round(part)) : Number(part.toFixed(3));
+    // Un carton ne se coupe pas en deux.
+    const q = Math.max(1, Math.round(part));
     return { lineId: l.line_id, quantity: String(q) };
   });
 

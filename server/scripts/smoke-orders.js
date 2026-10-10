@@ -62,8 +62,8 @@ try {
   const order = (await call('POST', '/api/orders', {
     fournisseurId: f.id,
     bons: [{ transportCurrency: 'DZD', lines: [
-      { designation: 'Colis A', measure: 'quantite', value: '10', unitPrice: '500' },
-      { designation: 'Colis B', measure: 'quantite', value: '4', unitPrice: '750' },
+      { designation: 'Colis A', measure: 'quantite', quantity: '10', weight_kg: '30', unitPrice: '500' },
+      { designation: 'Colis B', measure: 'quantite', quantity: '4', weight_kg: '12', unitPrice: '750' },
     ] }],
   }, 201)).order;
   const crate = order.bons[0];
@@ -85,11 +85,11 @@ try {
 
   const b1 = (await call('POST', '/api/bons', {
     passagerId: p1.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lotA.line_id, measure: 'quantite', value: '10', unitPrice: '500' }],
+    lines: [{ sourceLineId: lotA.line_id, measure: 'quantite', quantity: '10', unitPrice: '500' }],
   }, 201)).bon;
   const b2 = (await call('POST', '/api/bons', {
     passagerId: p2.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lotB.line_id, measure: 'quantite', value: '4', unitPrice: '750' }],
+    lines: [{ sourceLineId: lotB.line_id, measure: 'quantite', quantity: '4', unitPrice: '750' }],
   }, 201)).bon;
   chk('un bon passager n\u2019appartient \u00e0 aucun fournisseur', b1.fournisseur_id, null);
 

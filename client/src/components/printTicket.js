@@ -14,7 +14,7 @@
 // The same window is also how you get a PDF: "Imprimer → Enregistrer au format
 // PDF" produces a single long page matching the roll.
 import {
-  esc, printHtml, BON_STATUS_FR, measureUnit, qtyFr,
+  esc, printHtml, BON_STATUS_FR, measureUnit, priceUnit, qtyFr,
   declaredOf, missingOf, lineAmount,
 } from './printDocument.js';
 import { formatMoney } from '../lib/format.js';
@@ -102,7 +102,7 @@ export function bonTicket(bon, societe, qr) {
         <span class="v">${esc(money(lineAmount(l), cur))}</span>
       </div>
       ${Number(l.missing_unit_price) && bon.order_id == null
-        ? `<div class="row"><span class="k">Valeur manquant</span><span class="v">${esc(money(l.missing_unit_price, cur))} / ${esc(measureUnit(l))}</span></div>`
+        ? `<div class="row"><span class="k">Valeur manquant</span><span class="v">${esc(money(l.missing_unit_price, cur))} / ${esc(priceUnit(l))}</span></div>`
         : ''}
       ${missing > 0 ? `<div class="row"><span class="k">Manquant</span><span class="v">${esc(qtyFr(missing))} ${esc(measureUnit(l))}</span></div>` : ''}
     </div>`;

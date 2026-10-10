@@ -1,35 +1,35 @@
-// One goods line for a bon: an article picker + a single measure (Quantité, Poids,
-// or CBM) — the user chooses one and fills only that value. Used by both the bon
-// fournisseur (OrdersPage) and bon passager (BonsPage) forms.
+// One goods line for a bon: an article picker, a QUANTITÉ and a POIDS — both,
+// always — and the price. `measure` only says which of the two the price
+// multiplies (« Prix par : quantité | poids »). Used by the bon fournisseur forms.
 import { useEffect, useRef } from 'react';
 import { ArticlePicker } from './ArticlePicker.jsx';
 import { IconEl } from './icons.jsx';
 import AmountInput from './AmountInput.jsx';
 import { formatNumber, formatQty } from '../lib/format.js';
+import { priceBasis } from '../lib/lineMath.js';
 
 export const emptyLine = () => ({
   designation: '', itemId: null, createItem: false, categoryId: '',
-  measure: 'quantite', value: '', unit: 'pièce', unitPrice: '', note: '',
+  measure: 'quantite', quantity: '', weight_kg: '', unit: 'pièce', unitPrice: '', note: '',
 });
 
 const MEASURES = [
   { key: 'quantite', label: 'Quantité' },
-  { key: 'poids', label: 'Poids (kg)' },
-  { key: 'cbm', label: 'CBM (m³)' },
+  { key: 'poids', label: 'Poids' },
 ];
 const UNITS = ['pièce', 'carton', 'sac', 'palette', 'lot', 'paire'];
 
-// Per-unit label for the prix de revient, per the line's measure.
-const perUnit = (m) => (m === 'poids' ? '/ kg' : m === 'cbm' ? '/ m³' : '/ unité');
+// Per-unit label for the price, per the line's pricing basis.
+const perUnit = (l) => (l.measure === 'poids' ? '/ kg' : `/ ${l.unit || 'unité'}`);
 
-// value × prix de revient — the line's contribution to the transport fee.
-export const lineTotal = (l) => Number(l.value || 0) * Number(l.unitPrice || 0);
+// prix × (quantité ou poids) — the line's contribution to the transport fee.
+export const lineTotal = (l) => priceBasis(l) * Number(l.unitPrice || 0);
 
-// A line is complete when it names an article, has a positive measure, and a
-// positive prix de revient (the fee is derived from it).
+// A line is complete when it names an article, carries a quantity AND a weight,
+// and a positive price (the fee is derived from it).
 export const lineValid = (l) =>
   (Boolean(l.itemId) || Boolean(String(l.designation || '').trim())) &&
-  Number(l.value) > 0 && Number(l.unitPrice) > 0;
+  Number(l.quantity) > 0 && Number(l.weight_kg) > 0 && Number(l.unitPrice) > 0;
 
 export function LineEditor({ line, items, categories, onPatch, onRemove, removable, autoFocus, allowCreate = true, suggestion = null }) {
   const patch = (p) => onPatch({ ...line, ...p });
@@ -43,7 +43,9 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
     if (!suggestion || !articleKey || applied.current === articleKey) return;
     if (String(line.unitPrice ?? '').trim() !== '') return;
     applied.current = articleKey;
-    onPatch({ ...line, unitPrice: String(suggestion.unit_price) });
+    // Le prix, et la mesure que cet article prend d'habitude : un article qui se
+    // tarife au poids depuis dix bons se propose au poids.
+    onPatch({ ...line, unitPrice: String(suggestion.unit_price), measure: suggestion.suggested_measure ?? line.measure });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [articleKey, suggestion]);
 
@@ -51,54 +53,59 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
   // stock), show what's available for the chosen measure.
   const picked = line.itemId ? items.find((i) => i.id === line.itemId) : null;
   const avail = picked && picked.quantity != null
-    ? (line.measure === 'poids' ? picked.weight_kg : line.measure === 'cbm' ? picked.cbm : picked.quantity)
+    ? `${formatQty(picked.quantity)} · ${formatQty(picked.weight_kg)} kg`
     : null;
 
   return (
     <div className="line-editor">
       <div className="line-article">
         <ArticlePicker line={line} items={items} categories={categories} onPatch={patch} autoFocus={autoFocus} allowCreate={allowCreate} />
-        {avail != null && <span className="line-avail">Disponible : {formatQty(avail)}</span>}
+        {avail != null && <span className="line-avail">Disponible : {avail}</span>}
       </div>
 
       <div className="line-measure">
-        <div className="seg seg-measure">
-          {MEASURES.map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              className={line.measure === m.key ? 'active' : ''}
-              onClick={() => patch({ measure: m.key })}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <AmountInput decimals={3}
+          className="line-value"
+          placeholder="Quantité"
+          // Un carton se compte à l'unité : le pas est de un.
+          step={1}
+          value={line.quantity}
+          onChange={(v) => patch({ quantity: v })}
+        />
+
+        <select className="line-unit" value={line.unit} onChange={(e) => patch({ unit: e.target.value })}>
+          {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
 
         <AmountInput decimals={3}
           className="line-value"
-          placeholder={line.measure === 'quantite' ? 'Qté' : line.measure === 'poids' ? 'kg' : 'm³'}
-          // Un carton ou un kilo se comptent à l'unité ; un mètre cube, non —
-          // en sauter un d'un clic ferait passer un lot du simple au double.
-          step={line.measure === 'cbm' ? 0.1 : 1}
-          value={line.value}
-          onChange={(v) => patch({ value: v })}
+          placeholder="Poids (kg)"
+          step={1}
+          value={line.weight_kg}
+          onChange={(v) => patch({ weight_kg: v })}
         />
 
-        {line.measure === 'quantite' && (
-          <select className="line-unit" value={line.unit} onChange={(e) => patch({ unit: e.target.value })}>
-            {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-        )}
-
         <div className="line-price">
+          <div className="seg seg-measure" role="group" aria-label="Le prix se multiplie par">
+            {MEASURES.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                className={line.measure === m.key ? 'active' : ''}
+                title={`Le prix se multiplie par ${m.key === 'poids' ? 'le poids' : 'la quantité'}`}
+                onClick={() => patch({ measure: m.key })}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           <AmountInput
             className="line-value"
             placeholder="Prix de revient"
             value={line.unitPrice}
             onChange={(v) => patch({ unitPrice: v })}
           />
-          <span className="line-per">{perUnit(line.measure)}</span>
+          <span className="line-per">{perUnit(line)}</span>
         </div>
 
         {removable && (
@@ -110,7 +117,7 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
         <button
           type="button"
           className="line-sugg"
-          onClick={() => patch({ unitPrice: String(suggestion.unit_price) })}
+          onClick={() => patch({ unitPrice: String(suggestion.unit_price), measure: suggestion.suggested_measure ?? line.measure })}
           title="Reprendre ce prix"
         >
           <IconEl name="trend" />
@@ -119,7 +126,7 @@ export function LineEditor({ line, items, categories, onPatch, onRemove, removab
         </button>
       )}
 
-      {Number(line.value) > 0 && Number(line.unitPrice) > 0 && (
+      {priceBasis(line) > 0 && Number(line.unitPrice) > 0 && (
         <div className="line-total">= {formatNumber(lineTotal(line), { decimals: 2, trim: true })}</div>
       )}
     </div>

@@ -8,6 +8,7 @@ import { insertChildBon, deleteBonTx } from '../bons/bons.service.js';
 import { applyMovement } from '../stock/stock.service.js';
 import { recomputeOrderStatus, deliverableLines, ARRIVED, QTY } from './orderStatus.js';
 import { orderProgress, moneyProgress } from '../../lib/progress.js';
+import { weightShare } from '../../lib/lineMath.js';
 
 export async function createOrder({ admin, data, ip }) {
   if (!Array.isArray(data.bons) || data.bons.length === 0) {
@@ -102,9 +103,8 @@ export async function applyDelivery(c, { admin, lines, allow, note }) {
       const neg = want.negated();
       await applyMovement(c, {
         itemId: l.item_id, office: 'algeria',
-        dQ: l.measure === 'quantite' ? neg.toFixed(3) : '0',
-        dW: l.measure === 'poids' ? neg.toFixed(3) : '0',
-        dC: l.measure === 'cbm' ? neg.toFixed(4) : '0',
+        dQ: neg.toFixed(3),
+        dW: weightShare(l, neg).toFixed(3),
         reason: 'livraison', refOrderId: l.order_id, refBonId: l.bon_id, adminId: admin.id,
         note: note ?? `Remise au fournisseur ${l.order_reference}`,
       });
@@ -140,7 +140,7 @@ export async function cancelDelivery({ admin, id, ip }) {
     if (!order) throw errors.notFound('Bon fournisseur introuvable.');
 
     const { rows } = await c.query(
-      `SELECT bl.id, bl.item_id, bl.designation, bl.measure, bl.delivered_quantity, bl.bon_id
+      `SELECT bl.id, bl.item_id, bl.designation, bl.quantity, bl.weight_kg, bl.delivered_quantity, bl.bon_id
          FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
         WHERE b.order_id = $1 AND bl.delivered_quantity > 0
         ORDER BY bl.id FOR UPDATE OF bl`,
@@ -153,9 +153,8 @@ export async function cancelDelivery({ admin, id, ip }) {
       if (l.item_id) {
         await applyMovement(c, {
           itemId: l.item_id, office: 'algeria',
-          dQ: l.measure === 'quantite' ? back.toFixed(3) : '0',
-          dW: l.measure === 'poids' ? back.toFixed(3) : '0',
-          dC: l.measure === 'cbm' ? back.toFixed(4) : '0',
+          dQ: back.toFixed(3),
+          dW: weightShare(l, back).toFixed(3),
           reason: 'ajustement', refOrderId: id, refBonId: l.bon_id, adminId: admin.id,
           note: `Annulation livraison ${order.reference}`,
         });

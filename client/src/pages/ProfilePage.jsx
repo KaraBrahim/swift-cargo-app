@@ -157,7 +157,7 @@ export default function ProfilePage() {
 
   // ── Le comptoir ──────────────────────────────────────────────────
   const waitingOrders = waiting.data?.orders ?? [];
-  const unitOf = (l) => (l.measure === 'poids' ? 'kg' : l.measure === 'cbm' ? 'm³' : l.unit || 'u');
+  const unitOf = (l) => l.unit || 'u';
   // Absent du formulaire = « tout », parce qu'emporter tout est le cas ordinaire
   // et qu'il ne doit coûter aucun clic.
   const takeOf = (l) => {
@@ -354,7 +354,7 @@ export default function ProfilePage() {
                                 </label>
                                 {!full && (
                                   <AmountInput decimals={3} className={`mini-input ${over ? 'input-error' : ''}`}
-                                    step={l.measure === 'cbm' ? 0.1 : 1} max={l.deliverable}
+                                    step={1} max={l.deliverable}
                                     value={h?.qty ?? ''}
                                     onChange={(v) => setHandover({ ...handover, [l.id]: { full: false, qty: v } })} />
                                 )}

@@ -55,7 +55,7 @@ try {
   const item = (await call('POST', '/api/stock/items', { category_id: cat.id, name: 'Téléphone' }, 201)).item;
   // Stock is held per office in stock_levels now, and the route that sets an
   // absolute level is /level (it was /inventory before the office split).
-  await call('POST', `/api/stock/items/${item.id}/level`, { office: 'china', quantity: '97', weight_kg: '29.1', cbm: '0.194', note: 'Comptage' }, 201);
+  await call('POST', `/api/stock/items/${item.id}/level`, { office: 'china', quantity: '97', weight_kg: '29.1', note: 'Comptage' }, 201);
   // Looked up by id, not by ILIKE '%Tel%' — that never matched « Téléphone »
   // (é is not e), which is why this line used to print undefined.
   const levels = (await call('GET', '/api/stock/levels?office=china')).items;
@@ -66,8 +66,8 @@ try {
   const bon = (await call('POST', '/api/bons', {
     fournisseurId: f.id, passagerId: p.id, transportCurrency: 'DZD', transportFee: '5000',
     lines: [
-      { designation: 'Cartons A', quantity: '10', weight_kg: '50', cbm: '0.8' },
-      { designation: 'Cartons B', quantity: '5', weight_kg: '20', cbm: '0.3' },
+      { designation: 'Cartons A', quantity: '10', weight_kg: '50' },
+      { designation: 'Cartons B', quantity: '5', weight_kg: '20' },
     ],
   }, 201)).bon;
   out.push(`Bon créé: ${bon.reference}, statut ${bon.status}, ${bon.lines.length} lignes`);
@@ -92,26 +92,26 @@ try {
   const bon2 = (await call('POST', '/api/bons', {
     fournisseurId: f.id, passagerId: p.id, transportCurrency: 'DZD', transportFee: '0',
     lines: [
-      { designation: 'Riz Basmati', createItem: true, measure: 'poids', value: '25' },
-      { designation: 'Cartons A', createItem: true, measure: 'quantite', value: '3', unit: 'carton' },
+      { designation: 'Riz Basmati', createItem: true, measure: 'poids', quantity: '2', weight_kg: '25' },
+      { designation: 'Cartons A', createItem: true, measure: 'quantite', quantity: '3', weight_kg: '9', unit: 'carton' },
     ],
   }, 201)).bon;
   const rizLine = bon2.lines.find((l) => l.designation === 'Riz Basmati');
-  out.push(`Ligne poids: measure=${rizLine.measure} poids=${rizLine.weight_kg} qte=${rizLine.quantity} [attendu poids/25.000/0.000]`);
+  out.push(`Ligne poids: measure=${rizLine.measure} poids=${rizLine.weight_kg} qte=${rizLine.quantity} [attendu poids/25.000/2.000]`);
 
   const rizItem = (await call('GET', '/api/stock/items?search=Riz')).items.find((i) => i.name === 'Riz Basmati');
   out.push(`Article auto-créé et listé: ${rizItem ? rizItem.name : 'INTROUVABLE'} [attendu Riz Basmati]`);
 
   const bon3 = (await call('POST', '/api/bons', {
     fournisseurId: f.id, transportCurrency: 'DZD', transportFee: '0',
-    lines: [{ itemId: rizItem.id, measure: 'poids', value: '10' }],
+    lines: [{ itemId: rizItem.id, measure: 'poids', quantity: '1', weight_kg: '10' }],
   }, 201)).bon;
   out.push(`Réutilisation par itemId: designation=${bon3.lines[0].designation} item_id=${bon3.lines[0].item_id} [attendu Riz Basmati / ${rizItem.id}]`);
 
   // A line whose chosen measure is 0 must be rejected.
   await call('POST', '/api/bons', {
     fournisseurId: f.id, transportCurrency: 'DZD', transportFee: '0',
-    lines: [{ designation: 'Vide', measure: 'quantite', value: '0' }],
+    lines: [{ designation: 'Vide', measure: 'quantite', quantity: '0', weight_kg: '0' }],
   }, 400);
 
   // Guard: settling again must fail (already regle)

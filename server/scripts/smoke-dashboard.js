@@ -76,8 +76,8 @@ try {
   const order = (await call('POST', '/api/orders', {
     fournisseurId: f.id,
     bons: [{ transportCurrency: 'DZD', lines: [
-      { designation: 'Cartons', measure: 'quantite', value: '10', unit: 'carton', unitPrice: '500' },
-      { designation: 'Riz', measure: 'poids', value: '50', unitPrice: '100' },
+      { designation: 'Cartons', measure: 'quantite', quantity: '10', weight_kg: '80', unit: 'carton', unitPrice: '500' },
+      { designation: 'Riz', measure: 'poids', quantity: '5', weight_kg: '50', unit: 'sac', unitPrice: '100' },
     ] }],
   }, 201)).order;
   const crate = order.bons[0];
@@ -88,7 +88,7 @@ try {
   // Bon A — porté jusqu'au bout : réglé, puis le passager payé (3 000).
   const a = (await call('POST', '/api/bons', {
     passagerId: p.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lotCartons.line_id, measure: 'quantite', value: '10', unitPrice: '300' }],
+    lines: [{ sourceLineId: lotCartons.line_id, measure: 'quantite', quantity: '10', unitPrice: '300' }],
   }, 201)).bon;
   await call('POST', `/api/bons/${a.id}/advance`, {});
   await call('POST', `/api/bons/${a.id}/advance`, {});
@@ -105,7 +105,7 @@ try {
   // Bon B — laissé « En attente ».
   await call('POST', '/api/bons', {
     passagerId: p.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lotRiz.line_id, measure: 'poids', value: '50', unitPrice: '40' }],
+    lines: [{ sourceLineId: lotRiz.line_id, measure: 'poids', quantity: '5', unitPrice: '40' }],
   }, 201);
 
   // ── the assertions ────────────────────────────────────────────────

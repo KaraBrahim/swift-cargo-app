@@ -203,7 +203,6 @@ export async function revenue(period = 'mois', currency = 'DZD', db = getPool())
   const [{ rows: bulk }, { rows: byUnit }] = await Promise.all([
     db.query(
       `SELECT COALESCE(SUM(bl.weight_kg),0)::text AS kg,
-              COALESCE(SUM(bl.cbm),0)::text      AS cbm,
               COUNT(DISTINCT b.id)::int          AS bons
          FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
         WHERE b.created_at >= now() - $1::interval AND b.order_id IS NOT NULL`,
@@ -227,7 +226,6 @@ export async function revenue(period = 'mois', currency = 'DZD', db = getPool())
     money,
     quantity: {
       weightKg: bulk[0].kg,
-      cbm: bulk[0].cbm,
       bons: bulk[0].bons,
       byUnit: byUnit.map((r) => ({ unit: r.unit, quantity: r.qty })),
     },

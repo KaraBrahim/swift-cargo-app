@@ -8,7 +8,7 @@
 //   ordre (bon fournisseur) : en Chine · confié, en route · manquant · à Alger · remis
 //   bon passager            : à partir · en route · arrivé · manquant
 //
-// Les lignes n'ont pas toutes la même unité (des pièces, des kilos). On ne
+// Les lignes n'ont pas toutes la même unité (des cartons, des sacs). On ne
 // somme des quantités que si l'unité est commune ; sinon la barre porte des
 // pourcentages (moyenne des lignes) et pas de quantité, plutôt qu'un total qui
 // additionnerait des pièces et des kilos.
@@ -17,9 +17,10 @@ import { Decimal } from './money.js';
 const D = (v) => new Decimal(v ?? 0);
 const zero = (v) => Decimal.max(v, 0);
 
-// La quantité d'une ligne, dans la mesure qui est la sienne (pièces ou kilos).
-export const qtyOf = (l) => (l.measure === 'poids' ? D(l.weight_kg) : D(l.quantity));
-export const unitOf = (l) => (l.measure === 'poids' ? 'kg' : (l.unit || 'pièce'));
+// Le suivi se compte en QUANTITÉ, dans l'unité de la ligne : le poids n'en est
+// que la conséquence, et `measure` ne dit que par quoi se multiplie le prix.
+export const qtyOf = (l) => D(l.quantity);
+export const unitOf = (l) => l.unit || 'pièce';
 
 const pct = (n, total) => (total.gt(0) ? Decimal.min(n.div(total).times(100), 100).toDecimalPlaces(1).toNumber() : 0);
 

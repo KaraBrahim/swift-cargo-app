@@ -433,21 +433,18 @@ export async function goodsReport({ from, to, dateBy = 'creation' } = {}, db = g
               COUNT(*)::int AS lignes,
               SUM(bl.quantity)::text  AS quantite,
               SUM(bl.weight_kg)::text AS poids,
-              SUM(bl.cbm)::text       AS cbm,
               SUM(bl.unit_price * (CASE WHEN bl.measure='poids' THEN bl.weight_kg
-                                        WHEN bl.measure='cbm'   THEN bl.cbm
                                         ELSE bl.quantity END))::text AS valeur
          FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
         WHERE b.order_id IS NOT NULL AND ${RANGE_SQL(col, 1, 2, 3)}
-        GROUP BY 1 ORDER BY 6 DESC NULLS LAST LIMIT 100`,
+        GROUP BY 1 ORDER BY 5 DESC NULLS LAST LIMIT 100`,
       p
     ),
     // Les mouvements de stock n'avaient jamais eu de rapport.
     db.query(
       `SELECT sm.office, sm.reason, COUNT(*)::int AS n,
               SUM(sm.quantity_delta)::text AS quantite,
-              SUM(sm.weight_delta)::text   AS poids,
-              SUM(sm.cbm_delta)::text      AS cbm
+              SUM(sm.weight_delta)::text   AS poids
          FROM stock_movements sm
         WHERE ${RANGE_SQL('sm.created_at', 1, 2, 3)}
         GROUP BY sm.office, sm.reason ORDER BY sm.office, sm.reason`,
@@ -457,8 +454,7 @@ export async function goodsReport({ from, to, dateBy = 'creation' } = {}, db = g
     db.query(
       `SELECT COUNT(*)::int AS bons,
               COALESCE(SUM(bl.quantity), 0)::text  AS quantite,
-              COALESCE(SUM(bl.weight_kg), 0)::text AS poids,
-              COALESCE(SUM(bl.cbm), 0)::text       AS cbm
+              COALESCE(SUM(bl.weight_kg), 0)::text AS poids
          FROM bons b LEFT JOIN bon_lines bl ON bl.bon_id = b.id
         WHERE b.order_id IS NULL AND b.status = 'en_transit'`
     ),

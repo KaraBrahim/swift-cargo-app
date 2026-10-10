@@ -97,6 +97,6 @@ stockRouter.get(
 // Set an article's absolute level at one office (manual inventory / adjustment).
 stockRouter.post(
   '/stock/items/:id/level',
-  validate({ params: z.object({ id }), body: z.object({ office, quantity: qty, weight_kg: qty, cbm: qty, note: z.string().trim().max(500).optional() }) }),
+  validate({ params: z.object({ id }), body: z.object({ office, quantity: qty, weight_kg: qty, note: z.string().trim().max(500).optional() }) }),
   asyncHandler(async (req, res) => res.status(201).json({ level: await svc.setLevel({ admin: req.admin, itemId: req.params.id, ...req.body, ip: req.ip }) }))
 );

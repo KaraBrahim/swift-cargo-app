@@ -22,20 +22,18 @@ const bonSchema = z.object({
   commission: num.optional(),
   notes: z.string().trim().max(1000).optional(),
   lines: z.array(z.object({
-    // A line names an article (typed designation OR a reused itemId) and is
-    // quantified by exactly one measure (value + measure). quantity/weight_kg/cbm
-    // are still accepted for backward compatibility.
+    // A line names an article (typed designation OR a reused itemId) and carries
+    // a quantity AND a weight, always. `measure` only says which of the two the
+    // unit price multiplies.
     designation: z.string().trim().max(200).optional(),
     itemId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
     createItem: z.boolean().optional(),
     categoryId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
-    measure: z.enum(['quantite', 'poids', 'cbm']).optional(),
-    value: num.optional(),
+    measure: z.enum(['quantite', 'poids']).optional(),
     missingUnitPrice: num.optional(),
     quantity: num.optional(),
     unit: z.string().trim().max(20).optional(),
     weight_kg: num.optional(),
-    cbm: num.optional(),
     unitPrice: num.optional(),
     sourceLineId: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().int().positive().optional()),
     note: z.string().trim().max(300).optional(),

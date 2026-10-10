@@ -44,7 +44,7 @@ const makeOrder = (lines, currency = 'DZD', commission = '0') => orders.createOr
 
 // ── 1 · Un encaissement ne peut pas dépasser ce qui est dû ──────────────────
 test('collectFee refuses a second full collection', async () => {
-  const o = await makeOrder([{ designation: 'A', measure: 'quantite', quantity: '10', unitPrice: '100' }]);
+  const o = await makeOrder([{ designation: 'A', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '100' }]);
   const bonId = o.bons[0].id;
   await bons.collectFee({ admin: ctx.admin, id: bonId, caisseId: ctx.caisseId });
   await assert.rejects(
@@ -56,7 +56,7 @@ test('collectFee refuses a second full collection', async () => {
 });
 
 test('collectFee refuses more than what is left owing', async () => {
-  const o = await makeOrder([{ designation: 'B', measure: 'quantite', quantity: '10', unitPrice: '100' }]);
+  const o = await makeOrder([{ designation: 'B', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '100' }]);
   await bons.collectFee({ admin: ctx.admin, id: o.bons[0].id, caisseId: ctx.caisseId, amount: '400' });
   await assert.rejects(
     () => bons.collectFee({ admin: ctx.admin, id: o.bons[0].id, caisseId: ctx.caisseId, amount: '700' }),
@@ -71,7 +71,7 @@ test('collectFee refuses more than what is left owing', async () => {
 });
 
 test('two simultaneous collectFee calls collect once', async () => {
-  const o = await makeOrder([{ designation: 'C', measure: 'quantite', quantity: '5', unitPrice: '200' }]);
+  const o = await makeOrder([{ designation: 'C', measure: 'quantite', quantity: '5', weight_kg: '5', unitPrice: '200' }]);
   const before = await personBalance(fournisseur);
   const results = await Promise.allSettled([
     bons.collectFee({ admin: ctx.admin, id: o.bons[0].id, caisseId: ctx.caisseId }),
@@ -85,7 +85,7 @@ test('two simultaneous collectFee calls collect once', async () => {
 });
 
 test('payPassager is capped at what the bon says it owes', async () => {
-  const o = await makeOrder([{ designation: 'D', measure: 'quantite', quantity: '10', unitPrice: '100' }]);
+  const o = await makeOrder([{ designation: 'D', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '100' }]);
   const srcLine = (await getPool().query('SELECT id FROM bon_lines WHERE bon_id=$1', [o.bons[0].id])).rows[0].id;
   const bp = await bons.createBon({
     admin: ctx.admin,
@@ -124,7 +124,7 @@ test('replayChain keeps the projection equal to the sum of movements', async () 
 
 // ── 3 · Deux devises ne s'additionnent pas ──────────────────────────────────
 test('a passager line drawn from a lot priced in another currency is refused', async () => {
-  const o = await makeOrder([{ designation: 'E', measure: 'quantite', quantity: '10', unitPrice: '500' }], 'CNY');
+  const o = await makeOrder([{ designation: 'E', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '500' }], 'CNY');
   const srcLine = (await getPool().query('SELECT id FROM bon_lines WHERE bon_id=$1', [o.bons[0].id])).rows[0].id;
   await assert.rejects(
     () => bons.createBon({
@@ -146,8 +146,8 @@ test('a passager line drawn from a lot priced in another currency is refused', a
 // ── 4 · L'en-tête d'un bon est d'accord avec ses lignes ─────────────────────
 test('a partial reconcile leaves loss_total equal to the sum of the lines', async () => {
   const o = await makeOrder([
-    { designation: 'F1', measure: 'quantite', quantity: '10', unitPrice: '100' },
-    { designation: 'F2', measure: 'quantite', quantity: '10', unitPrice: '100' },
+    { designation: 'F1', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '100' },
+    { designation: 'F2', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '100' },
   ]);
   const src = (await getPool().query('SELECT id FROM bon_lines WHERE bon_id=$1 ORDER BY id', [o.bons[0].id])).rows;
   const bp = await bons.createBon({
@@ -172,7 +172,7 @@ test('a partial reconcile leaves loss_total equal to the sum of the lines', asyn
 
 // ── 6 · Un ordre bouge d'un seul tenant ─────────────────────────────────────
 test('deleting an order rolls back entirely when a child refuses', async () => {
-  const o = await makeOrder([{ designation: 'G', measure: 'quantite', quantity: '10', unitPrice: '100' }]);
+  const o = await makeOrder([{ designation: 'G', measure: 'quantite', quantity: '10', weight_kg: '10', unitPrice: '100' }]);
   const srcLine = (await getPool().query('SELECT id FROM bon_lines WHERE bon_id=$1', [o.bons[0].id])).rows[0].id;
   // Un passager transporte la marchandise : le bon fournisseur ne peut plus partir.
   await bons.createBon({

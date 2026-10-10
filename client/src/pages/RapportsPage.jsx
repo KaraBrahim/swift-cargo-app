@@ -134,7 +134,7 @@ export default function RapportsPage() {
     goods: () => [
       [{ key: 'designation', label: 'Marchandise' }, { key: 'lignes', label: 'Lignes' },
         { key: 'quantite', label: 'Quantité' }, { key: 'poids', label: 'Poids (kg)' },
-        { key: 'cbm', label: 'CBM' }, { key: 'valeur', label: 'Valeur' }],
+        { key: 'valeur', label: 'Valeur' }],
       data.articles,
     ],
     financial: () => [
@@ -362,7 +362,7 @@ export default function RapportsPage() {
                 <div className="profile-kpis" style={{ marginTop: 0 }}>
                   <Kpi label="En transit maintenant" value={data.enTransit?.bons ?? 0} />
                   <Kpi label="Poids en route" value={formatQty(data.enTransit?.poids)} unit="kg" />
-                  <Kpi label="Volume en route" value={formatQty(data.enTransit?.cbm)} unit="m³" />
+                  <Kpi label="Quantité en route" value={formatQty(data.enTransit?.quantite)} />
                 </div>
                 <Table cols={3} head={<><th>Statut</th><th>Type</th><th className="right">Nombre</th></>}
                   empty={!data.parStatut.length && 'Aucun bon sur cette période.'}>
@@ -377,8 +377,8 @@ export default function RapportsPage() {
               </Panel>
 
               <Panel title="Marchandises reçues" sub="Ce que les bons fournisseurs ont fait entrer, par article.">
-                <Table cols={6}
-                  head={<><th>Marchandise</th><th className="right">Lignes</th><th className="right">Quantité</th><th className="right">Poids</th><th className="right">CBM</th><th className="right">Valeur</th></>}
+                <Table cols={5}
+                  head={<><th>Marchandise</th><th className="right">Lignes</th><th className="right">Quantité</th><th className="right">Poids</th><th className="right">Valeur</th></>}
                   empty={!data.articles.length && 'Aucune marchandise sur cette période.'}>
                   {data.articles.map((a, i) => (
                     <tr key={i}>
@@ -386,7 +386,6 @@ export default function RapportsPage() {
                       <td className="right">{a.lignes}</td>
                       <td className="right">{formatQty(a.quantite)}</td>
                       <td className="right">{formatQty(a.poids)}</td>
-                      <td className="right">{formatQty(a.cbm)}</td>
                       <td className="right">{formatMoney(a.valeur)}</td>
                     </tr>
                   ))}

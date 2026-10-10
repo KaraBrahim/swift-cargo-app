@@ -21,6 +21,7 @@ import { EntityPicker } from '../components/EntityPicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
+import { priceBasis, weightShare, priceUnit } from '../lib/lineMath.js';
 import { orderManifestBody } from '../components/printDocument.js';
 import { orderTicket } from '../components/printTicket.js';
 import { formatQty } from '../lib/format.js';
@@ -28,7 +29,7 @@ import { useQr } from '../lib/useQr.js';
 import { useScanHit, clearScanHit } from '../lib/scanSignal.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
-const unitOf = (l) => (l.measure === 'poids' ? 'kg' : l.measure === 'cbm' ? 'm³' : l.unit || 'u');
+const unitOf = (l) => l.unit || 'u';
 
 export default function OrderDetailPage() {
   const { id } = useParams();
@@ -293,8 +294,8 @@ export default function OrderDetailPage() {
                 return (
                   <tr key={l.line_id}>
                     <td>{l.designation}</td>
-                    <td className="right">{formatMoney(l.unit_price, cur)} <span className="muted">/ {u}</span></td>
-                    <td className="right">{formatQty(l.quantity)} {u}</td>
+                    <td className="right">{formatMoney(l.unit_price, cur)} <span className="muted">/ {priceUnit(l)}</span></td>
+                    <td className="right">{formatQty(l.quantity)} {u}{Number(l.weight_kg) > 0 && <span className="muted"> · {formatQty(l.weight_kg)} kg</span>}</td>
                     <td className="bar-cell">
                       <Bar value={l.allocated} max={l.quantity} title={`${formatQty(l.allocated)} / ${formatQty(l.quantity)} ${u}`} />
                     </td>
@@ -310,7 +311,7 @@ export default function OrderDetailPage() {
                     </td>
                     <td className={`right ${Number(l.remaining) > 0 ? 'gold' : 'muted'}`}>{formatQty(l.remaining)} {u}</td>
                     <td className="bar-cell"><ProgressBar progress={l.progress} compact /></td>
-                    <td className="right">{formatMoney(Number(l.unit_price) * Number(l.quantity), cur)}</td>
+                    <td className="right">{formatMoney(Number(l.unit_price) * priceBasis(l), cur)}</td>
                   </tr>
                 );
               })}
@@ -444,13 +445,16 @@ export default function OrderDetailPage() {
                         <td className="right">
                           <AmountInput
                             decimals={3}
-                            step={l.measure === 'cbm' ? 0.1 : 1}
+                            step={1}
                             max={l.deliverable}
                             className={`mini-input ${over ? 'input-error' : ''}`}
                             value={deliver[l.line_id] ?? ''}
                             onChange={(v) => setDeliver({ ...deliver, [l.line_id]: v })}
                           />
                           <span className="muted"> {u}</span>
+                          {Number(deliver[l.line_id]) > 0 && (
+                            <span className="muted"> · {formatQty(weightShare(l, Number(deliver[l.line_id])))} kg</span>
+                          )}
                         </td>
                       </tr>
                     );

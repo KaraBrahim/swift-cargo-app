@@ -18,7 +18,8 @@ import { DetailHead, Kpis, Kpi, Section, Footnote, ScanBanner, StepFlow } from '
 import { EntityPicker, OptionChips } from '../components/EntityPicker.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
-import { bonDocBody, measureOf, measureQty, measureUnit, declaredOf } from '../components/printDocument.js';
+import { bonDocBody, measureQty, measureUnit, declaredOf, priceUnit } from '../components/printDocument.js';
+import { pricedPart } from '../lib/lineMath.js';
 import { bonTicket } from '../components/printTicket.js';
 import { LineEditor, emptyLine, lineValid, lineTotal } from '../components/LineEditor.jsx';
 import { GoodsPicker, pickedValid, pickedTotal, pickedToLine } from '../components/GoodsPicker.jsx';
@@ -36,12 +37,14 @@ const NEXT_ICON = { cree: 'plane', en_transit: 'check' };
 // Convert a stored bon line back into the editable line shape. A bon passager
 // line keeps its link to the bon fournisseur line it draws from.
 const toEditLine = (l) => {
-  const measure = l.measure || (Number(l.weight_kg) > 0 ? 'poids' : Number(l.cbm) > 0 ? 'cbm' : 'quantite');
-  const value = String(measure === 'poids' ? l.weight_kg : measure === 'cbm' ? l.cbm : l.quantity);
-  const base = { designation: l.designation, measure, value, unit: l.unit || 'pièce', unitPrice: String(l.unit_price ?? ''), note: l.note || '' };
+  const measure = l.measure === 'poids' ? 'poids' : 'quantite';
+  const base = {
+    designation: l.designation, measure, quantity: String(l.quantity), weight_kg: String(l.weight_kg),
+    unit: l.unit || 'pièce', unitPrice: String(l.unit_price ?? ''), note: l.note || '',
+  };
   if (l.source_line_id) {
     return {
-      ...base, sourceLineId: l.source_line_id, remaining: Number(value),
+      ...base, sourceLineId: l.source_line_id, remaining: Number(l.quantity),
       salePrice: Number(l.source_unit_price ?? 0), sourceLabel: l.source_order_reference || '',
     };
   }
@@ -237,7 +240,15 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
     return {
       ...e,
       sourceLineId: l.source_line_id,
-      remaining: src ? Number(src.remaining) : Number(e.value),
+      // Le lot dont elle tire : sa mesure, sa quantité et son poids servent à
+      // ramener ses prix d'une mesure à l'autre.
+      lot: {
+        measure: l.source_measure ?? src?.measure ?? 'quantite',
+        quantity: Number(l.source_quantity ?? src?.quantity ?? l.quantity),
+        weight_kg: Number(l.source_weight_kg ?? src?.weight_kg ?? l.weight_kg),
+      },
+      weightTouched: true, missingTouched: true,
+      remaining: src ? Number(src.remaining) : Number(l.quantity),
       salePrice: Number(l.source_unit_price ?? src?.sale_price ?? 0),
       // La valeur du manquant deja convenue sur ce bon, pas celle par defaut.
       missingPrice: String(l.missing_unit_price ?? l.source_unit_price ?? ''),
@@ -311,7 +322,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   // pertes dépassent le portage, le passager n'est pas payé : il nous doit la
   // différence.
   const recMissingTotal = bon.lines.reduce(
-    (s, l) => s + Number(l.missing_unit_price ?? l.unit_price) * Math.max(qtyNum(l) - receivedOf(l), 0), 0
+    (s, l) => s + Number(l.missing_unit_price ?? l.unit_price) * pricedPart(l, Math.max(qtyNum(l) - receivedOf(l), 0)), 0
   );
   const recNet = Number(bon.transport_fee) - recMissingTotal;
   const recDeliveredTotal = Math.max(recNet, 0);
@@ -510,7 +521,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                 <th>Désignation</th>
                 <th className="right">{isFournisseurBon ? 'Prix de revient' : 'Prix de transport'}</th>
                 {!isFournisseurBon && <th className="right">Valeur du manquant</th>}
-                <th className="right">Quantité</th>
+                <th className="right">Quantité · poids</th>
                 {reconciling ? (
                   <><th className="right">Arrivé</th><th className="right">Manquant</th><th className="right">Montant</th><th>Responsable</th></>
                 ) : (
@@ -530,9 +541,9 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                   return (
                     <tr key={l.id}>
                       <td>{l.designation}</td>
-                      <td className="right">{formatMoney(up, cur)} <span className="muted">/ {unitLabel(l)}</span></td>
+                      <td className="right">{formatMoney(up, cur)} <span className="muted">/ {priceUnit(l)}</span></td>
                       {!isFournisseurBon && (
-                        <td className="right">{formatMoney(l.missing_unit_price, cur)} <span className="muted">/ {unitLabel(l)}</span></td>
+                        <td className="right">{formatMoney(l.missing_unit_price, cur)} <span className="muted">/ {priceUnit(l)}</span></td>
                       )}
                       <td className="right">{declared(l)}</td>
                       {/* La case cochée est le cas ordinaire : tout est arrivé.
@@ -552,7 +563,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                         </label>
                         {!r.full && (
                           <AmountInput decimals={3} className={`mini-input ${over ? 'input-error' : ''}`}
-                            step={measureOf(l) === 'cbm' ? 0.1 : 1} max={q}
+                            step={1} max={q}
                             value={r.received ?? ''}
                             onChange={(v) => setRec({ ...rec, [l.id]: { ...r, received: v } })} />
                         )}
@@ -560,7 +571,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                       <td className={`right ${miss > 0 ? 'neg' : 'muted'}`}>
                         {miss > 0 ? `${formatQty(miss)} ${unitLabel(l)}` : '—'}
                       </td>
-                      <td className="right gold">{formatMoney(arrived * up, cur)}</td>
+                      <td className="right gold">{formatMoney(up * pricedPart(l, arrived), cur)}</td>
                       {/* Demander un responsable sur une ligne complète, c'est le
                           demander sur chaque ligne de chaque bon normal. */}
                       <td>
@@ -577,13 +588,13 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                 return (
                   <tr key={l.id}>
                     <td>{l.designation}</td>
-                    <td className="right">{formatMoney(up, cur)} <span className="muted">/ {unitLabel(l)}</span></td>
+                    <td className="right">{formatMoney(up, cur)} <span className="muted">/ {priceUnit(l)}</span></td>
                     {!isFournisseurBon && (
-                      <td className="right">{formatMoney(l.missing_unit_price, cur)} <span className="muted">/ {unitLabel(l)}</span></td>
+                      <td className="right">{formatMoney(l.missing_unit_price, cur)} <span className="muted">/ {priceUnit(l)}</span></td>
                     )}
                     <td className="right">{declared(l)}</td>
                     <td className={`right ${missDone > 0 ? 'neg' : 'muted'}`}>{missDone > 0 ? `${formatQty(missDone)} ${unitLabel(l)}` : '—'}</td>
-                    <td className="right">{formatMoney(up * (l.received_quantity != null ? Number(l.received_quantity) : q), cur)}</td>
+                    <td className="right">{formatMoney(up * pricedPart(l, l.received_quantity != null ? Number(l.received_quantity) : q), cur)}</td>
                   </tr>
                 );
               })}

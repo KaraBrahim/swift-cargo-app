@@ -12,7 +12,7 @@
 //
 // The bon is walked all the way to « Réglé » through a reception that is one
 // carton short, so the printed ticket exercises the interesting cases: three
-// units of measure, a manquant, and a passager payment net of the loss.
+// pricing bases (quantity or weight), a manquant, and a passager payment net of the loss.
 import './testCredentials.js';
 import { config } from '../src/config.js';
 
@@ -63,16 +63,16 @@ try {
       full_name: 'Karim Benali', phone: '+213 550 12 34 56', type: 'regular', notes: 'Passager de démonstration',
     })).person;
 
-  // Three lines, one per unit of measure, so the ticket shows each form.
+  // Three lines — every one carries a quantity AND a weight; `measure` only picks the price basis.
   const bon = (await call('POST', '/api/bons', {
     fournisseurId: fournisseur.id,
     passagerId: passager.id,
     transportCurrency: 'DZD',
     notes: 'Bon de démonstration — impression',
     lines: [
-      { designation: 'Cartons électronique', measure: 'quantite', value: '10', unit: 'carton', unitPrice: '500' },
-      { designation: 'Textile en sacs', measure: 'poids', value: '25.5', unitPrice: '120' },
-      { designation: 'Pièces détachées', measure: 'cbm', value: '1.2', unitPrice: '3000' },
+      { designation: 'Cartons électronique', measure: 'quantite', quantity: '10', weight_kg: '85', unit: 'carton', unitPrice: '500' },
+      { designation: 'Textile en sacs', measure: 'poids', quantity: '5', weight_kg: '25.5', unit: 'sac', unitPrice: '120' },
+      { designation: 'Pièces détachées', measure: 'quantite', quantity: '12', weight_kg: '40', unitPrice: '250' },
     ],
   })).bon;
   console.log(`Bon créé : ${bon.reference} (frais ${bon.transport_fee} ${bon.transport_currency})`);

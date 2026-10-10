@@ -5,6 +5,7 @@
 // app saves PDFs itself (desktop/main.js).
 import { formatMoney } from './ui.jsx';
 import { formatQty } from '../lib/format.js';
+import { priceBasis, pricedPart, weightShare, priceUnit } from '../lib/lineMath.js';
 import { BON_STATUS } from './bonStatus.js';
 import { ORDER_STATUS } from './orderStatus.js';
 
@@ -233,11 +234,11 @@ export function orderManifestBody(d, qr) {
 
   const lineRows = rows(lines, (l) => {
     const unit = esc(measureUnit(l));
-    const amount = Number(l.unit_price || 0) * Number(l.quantity || 0);
+    const amount = Number(l.unit_price || 0) * priceBasis(l);
     return `
         <td>${esc(l.designation)}</td>
-        <td class="r">${money(l.unit_price)} / ${unit}</td>
-        <td class="r">${num(l.quantity)} ${unit}</td>
+        <td class="r">${money(l.unit_price)} / ${esc(priceUnit(l))}</td>
+        <td class="r">${num(l.quantity)} ${unit}${Number(l.weight_kg) > 0 ? ` · ${num(l.weight_kg)} kg` : ''}</td>
         <td class="r">${num(l.allocated)}</td>
         <td class="r">${num(l.arrived)}</td>
         <td class="r">${num(l.delivered_quantity)}</td>
@@ -319,21 +320,21 @@ const fournisseursOf = (bon) =>
 
 // Les libellés vivent avec leurs statuts (bonStatus.js / orderStatus.js).
 export const BON_STATUS_FR = Object.fromEntries(Object.entries(BON_STATUS).map(([k, v]) => [k, v.label]));
-export const measureOf = (l) =>
-  l.measure || (Number(l.weight_kg) > 0 ? 'poids' : Number(l.cbm) > 0 ? 'cbm' : 'quantite');
-export const measureQty = (l) => {
-  const m = measureOf(l);
-  return Number(m === 'poids' ? l.weight_kg : m === 'cbm' ? l.cbm : l.quantity) || 0;
-};
-export const measureUnit = (l) => {
-  const m = measureOf(l);
-  return m === 'poids' ? 'kg' : m === 'cbm' ? 'm³' : l.unit || 'u';
-};
+export const measureOf = (l) => (l.measure === 'poids' ? 'poids' : 'quantite'); // par quoi se multiplie le prix
+// Le suivi d'une ligne se compte en QUANTITÉ ; le poids s'en déduit.
+export const measureQty = (l) => Number(l.quantity) || 0;
+export const measureUnit = (l) => l.unit || 'pièce';
+export { priceUnit };
 export const qtyFr = (v) => formatQty(v);
-export const declaredOf = (l) => `${qtyFr(measureQty(l))} ${measureUnit(l)}`.trim();
+// « 10 carton · 25 kg » : la quantité et le poids, toujours ensemble.
+export const declaredOf = (l) => {
+  const w = Number(l.weight_kg) || 0;
+  return `${qtyFr(measureQty(l))} ${measureUnit(l)}${w > 0 ? ` · ${qtyFr(w)} kg` : ''}`.trim();
+};
 export const deliveredOf = (l) => (l.received_quantity != null ? Number(l.received_quantity) : measureQty(l));
 export const missingOf = (l) => Math.max(measureQty(l) - deliveredOf(l), 0);
-export const lineAmount = (l) => Number(l.unit_price || 0) * deliveredOf(l);
+// Le montant d'une ligne = prix × (quantité ou poids) de ce qui est arrivé.
+export const lineAmount = (l) => Number(l.unit_price || 0) * pricedPart(l, deliveredOf(l));
 
 // ── Bon passager (A4 body) ───────────────────────────────────────────
 export function bonDocBody(bon, qr) {
@@ -342,10 +343,10 @@ export function bonDocBody(bon, qr) {
     const missing = missingOf(l);
     return `<tr>
       <td>${esc(l.designation)}</td>
-      <td class="r">${formatMoney(l.unit_price, cur)} / ${esc(measureUnit(l))}</td>
-      <td class="r">${formatMoney(l.missing_unit_price, cur)} / ${esc(measureUnit(l))}</td>
       <td class="r">${esc(declaredOf(l))}</td>
-      <td class="r">${missing > 0 ? esc(`${qtyFr(missing)} ${measureUnit(l)}`) : '—'}</td>
+      <td class="r">${formatMoney(l.unit_price, cur)} / ${esc(priceUnit(l))}</td>
+      <td class="r">${formatMoney(l.missing_unit_price, cur)} / ${esc(priceUnit(l))}</td>
+      <td class="r">${missing > 0 ? esc(`${qtyFr(missing)} ${measureUnit(l)} · ${qtyFr(weightShare(l, missing))} kg`) : '—'}</td>
       <td class="r">${formatMoney(lineAmount(l), cur)}</td>
     </tr>`;
   }).join('');
@@ -360,7 +361,7 @@ export function bonDocBody(bon, qr) {
     </div>
     ${progressBlock(bon.progress, 'Avancement du voyage')}
     <table>
-      <thead><tr><th>Désignation</th><th class="r">Prix de transport</th><th class="r">Valeur du manquant</th><th class="r">Quantité</th><th class="r">Manquant</th><th class="r">Montant</th></tr></thead>
+      <thead><tr><th>Désignation</th><th class="r">Quantité · poids</th><th class="r">Prix de transport</th><th class="r">Valeur du manquant</th><th class="r">Manquant</th><th class="r">Montant</th></tr></thead>
       <tbody>${body || '<tr><td colspan="6">Aucune ligne</td></tr>'}</tbody>
     </table>
     <div class="totals">

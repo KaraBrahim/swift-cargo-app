@@ -426,7 +426,8 @@
 /* ── Le panier ────────────────────────────────────────────────────────
    Trois champs par ligne : la quantité, ce qu'on paie au passager, et ce qu'il
    devra si la marchandise n'arrive pas. */
-.gp-row-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gp-row-fields { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.gp-basis .seg { display: inline-flex; }
 .gp-group-sum {
   margin-left: auto; font-size: 0.72rem; font-weight: 700;
   font-variant-numeric: tabular-nums; color: var(--text-2);

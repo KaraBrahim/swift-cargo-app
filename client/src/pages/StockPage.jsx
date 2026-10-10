@@ -15,7 +15,7 @@ const ACCENT = 'var(--c-stock)';
 // Deux bureaux, et l'entre-deux : parti de Chine, pas encore arrivé en Algérie.
 const OFFICES = [{ key: 'china', label: 'Chine' }, { key: 'algeria', label: 'Algérie' }];
 const TRANSIT = 'transit';
-const held = (it) => Number(it.quantity) > 0 || Number(it.weight_kg) > 0 || Number(it.cbm) > 0;
+const held = (it) => Number(it.quantity) > 0 || Number(it.weight_kg) > 0;
 
 export default function StockPage() {
   const toast = useToast();
@@ -38,7 +38,7 @@ export default function StockPage() {
     try {
       await api(`/stock/items/${lvl.id}/level`, {
         method: 'POST',
-        body: { office, quantity: lvl.quantity, weight_kg: lvl.weight_kg, cbm: lvl.cbm, note: lvl.note },
+        body: { office, quantity: lvl.quantity, weight_kg: lvl.weight_kg, note: lvl.note },
       });
       toast.success(`Stock ${OFFICES.find((o) => o.key === office).label} mis à jour.`);
       setLvl(null);
@@ -74,7 +74,7 @@ export default function StockPage() {
           </button>
         </div>
         {!transit && (
-        <button className="btn btn-gold" onClick={() => setLvl(lvl ? null : { id: '', name: '', quantity: '0', weight_kg: '0', cbm: '0', note: '' })}>
+        <button className="btn btn-gold" onClick={() => setLvl(lvl ? null : { id: '', name: '', quantity: '0', weight_kg: '0', note: '' })}>
           <IconEl name={lvl ? 'close' : 'plus'} />{lvl ? 'Fermer' : 'Entrer du stock'}
         </button>
         )}
@@ -128,8 +128,6 @@ export default function StockPage() {
             <AmountInput decimals={3} step={1} autoFocus value={lvl.quantity} onChange={(v) => setLvl({ ...lvl, quantity: v })} /></label>
           <label className="field"><span>Poids (kg)</span>
             <AmountInput decimals={3} step={1} value={lvl.weight_kg} onChange={(v) => setLvl({ ...lvl, weight_kg: v })} /></label>
-          <label className="field"><span>CBM</span>
-            <AmountInput decimals={3} step={0.1} value={lvl.cbm} onChange={(v) => setLvl({ ...lvl, cbm: v })} /></label>
           <button className="btn btn-gold" disabled={busy || !lvl.id}>Confirmer</button>
           <button type="button" className="btn btn-ghost" onClick={() => setLvl(null)}><IconEl name="close" />Annuler</button>
         </form>
@@ -148,7 +146,7 @@ export default function StockPage() {
               <thead>
                 <tr>
                   <th>Article</th><th>Catégorie</th>
-                  <th className="right">Quantité</th><th className="right">Poids (kg)</th><th className="right">CBM</th>
+                  <th className="right">Quantité</th><th className="right">Poids (kg)</th>
                   <th className="right">{transit ? 'Bons' : 'Actions'}</th>
                 </tr>
               </thead>
@@ -159,11 +157,10 @@ export default function StockPage() {
                     <td>{it.category_name || '—'}</td>
                     <td className="right">{formatQty(it.quantity)}</td>
                     <td className="right">{formatQty(it.weight_kg)}</td>
-                    <td className="right">{formatQty(it.cbm)}</td>
                     <td className="right nowrap">
                       {transit ? it.bons : (
                         <button className="icon-btn" title="Ajuster la quantité" aria-label="Ajuster"
-                          onClick={() => setLvl({ id: it.id, name: it.name, quantity: it.quantity, weight_kg: it.weight_kg, cbm: it.cbm, note: '' })}>
+                          onClick={() => setLvl({ id: it.id, name: it.name, quantity: it.quantity, weight_kg: it.weight_kg, note: '' })}>
                           <IconEl name="swap" />
                         </button>
                       )}

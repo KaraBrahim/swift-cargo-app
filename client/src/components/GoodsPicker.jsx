@@ -4,6 +4,7 @@ import { fuzzyRank } from '../lib/fuzzy.js';
 import { formatMoney } from './ui.jsx';
 import { formatQty } from '../lib/format.js';
 import AmountInput from './AmountInput.jsx';
+import { priceBasis, weightShare, perPiece, perMeasureUnit, priceUnit } from '../lib/lineMath.js';
 
 // Ce qui part avec le passager.
 //
@@ -21,51 +22,86 @@ import AmountInput from './AmountInput.jsx';
 //     rembourser.
 
 export const lotKey = (l) => String(l.line_id);
-export const pickedTotal = (l) => Number(l.value || 0) * Number(l.unitPrice || 0);
-export const pickedMargin = (l) => Number(l.value || 0) * (Number(l.salePrice || 0) - Number(l.unitPrice || 0));
-// Ce que le passager devrait si tout le lot se perdait — la mesure de son risque.
-const pickedRisk = (l) => Number(l.value || 0) * Number(l.missingPrice || 0);
 
-// Complet : une quantité positive qui tient dans ce qui reste, un prix de
-// transport, et une valeur du manquant renseignée (zéro compris : un lot sans
+// Une ligne du panier tire en QUANTITÉ sur un lot ; son poids en est la part, et
+// `measure` dit seulement si le prix se multiplie par la quantité ou par le poids.
+const round2 = (v) => String(Math.round(Number(v) * 100) / 100);
+const lotOf = (l) => l.lot; // { measure, quantity, weight_kg } — la ligne du bon fournisseur
+
+export const pickedTotal = (l) => priceBasis(l) * Number(l.unitPrice || 0);
+// Ce que le fournisseur paie pour ces pièces, moins ce qu'on paie le passager.
+export const pickedMargin = (l) => perPiece(lotOf(l), l.salePrice) * Number(l.quantity || 0) - pickedTotal(l);
+
+// Complet : une quantité positive qui tient dans ce qui reste, un poids, un prix
+// de transport, et une valeur du manquant renseignée (zéro compris : un lot sans
 // valeur déclarée est une décision, pas un oubli).
 export const pickedValid = (l) =>
-  Number(l.value) > 0 && Number(l.value) <= Number(l.remaining)
+  Number(l.quantity) > 0 && Number(l.quantity) <= Number(l.remaining)
+  && Number(l.weight_kg) > 0
   && Number(l.unitPrice) > 0
   && String(l.missingPrice ?? '').trim() !== '' && Number(l.missingPrice) >= 0;
 
+// La valeur du manquant convenue avec le fournisseur est par unité de la mesure
+// DU LOT ; ce bon peut tarifer autrement (au kilo ce que le lot vend à la pièce).
+// On la ramène à la pièce, puis à la mesure de cette ligne.
+export const defaultMissing = (l) => {
+  const lot = lotOf(l);
+  if (lot.measure === l.measure) return String(l.salePrice);
+  return round2(perMeasureUnit(l, perPiece(lot, l.salePrice)));
+};
+
 // Un lot du catalogue devient une ligne du panier. La quantité proposée est tout
-// ce qui reste — le cas le plus fréquent —, la valeur du manquant est celle
+// ce qui reste — le cas le plus fréquent —, la mesure du prix est celle que cet
+// article prend d'habitude (sinon celle du lot), la valeur du manquant est celle
 // convenue avec le fournisseur, et le prix de transport vient de ce qu'on a payé
-// à ce passager la dernière fois, s'il y a une dernière fois.
-export const lotToPicked = (o, suggestion = null) => ({
-  sourceLineId: o.line_id,
-  designation: o.designation,
-  measure: o.measure,
-  unit: o.unit,
-  remaining: Number(o.remaining),
-  salePrice: Number(o.sale_price),
-  fournisseurId: o.fournisseur_id,
-  fournisseurName: o.fournisseur_name,
-  sourceLabel: o.order_reference,
-  value: String(o.remaining),
-  unitPrice: suggestion ? String(suggestion.unit_price) : '',
-  missingPrice: String(o.sale_price),
-  suggestion,
-  note: '',
-});
+// la dernière fois, s'il y a une dernière fois.
+export const lotToPicked = (o, suggestion = null) => {
+  const lot = { measure: o.measure, quantity: Number(o.quantity), weight_kg: Number(o.weight_kg) };
+  const measure = suggestion?.suggested_measure ?? o.measure ?? 'quantite';
+  const quantity = Number(o.remaining);
+  const line = {
+    sourceLineId: o.line_id,
+    designation: o.designation,
+    measure,
+    unit: o.unit,
+    lot,
+    remaining: quantity,
+    salePrice: Number(o.sale_price),
+    fournisseurId: o.fournisseur_id,
+    fournisseurName: o.fournisseur_name,
+    sourceLabel: o.order_reference,
+    quantity: String(quantity),
+    weight_kg: String(weightShare(lot, quantity)),
+    unitPrice: suggestion ? String(suggestion.unit_price) : '',
+    suggestion,
+    note: '',
+  };
+  return { ...line, missingPrice: defaultMissing(line) };
+};
 
 // Ce que POST /bons attend d'une ligne.
 export const pickedToLine = (l) => ({
   sourceLineId: l.sourceLineId,
   measure: l.measure,
-  value: l.value,
+  quantity: l.quantity,
+  weight_kg: l.weight_kg,
   unitPrice: l.unitPrice,
   missingUnitPrice: l.missingPrice,
   note: l.note || undefined,
 });
 
-const unitOf = (m, unit) => (m === 'poids' ? 'kg' : m === 'cbm' ? 'm³' : unit || 'u');
+// Modifier une ligne du panier garde ses valeurs DÉRIVÉES cohérentes tant que la
+// personne n'y a pas touché : le poids suit la quantité, et la valeur du manquant
+// suit la mesure. Une fois saisis à la main, ils ne bougent plus.
+export const patchPicked = (l, p) => {
+  const next = { ...l, ...p };
+  if ('weight_kg' in p) next.weightTouched = true;
+  if ('missingPrice' in p) next.missingTouched = true;
+  if ('quantity' in p && !next.weightTouched) next.weight_kg = String(weightShare(lotOf(next), p.quantity));
+  if (('measure' in p || 'quantity' in p || 'weight_kg' in p) && !next.missingTouched) next.missingPrice = defaultMissing(next);
+  return next;
+};
+
 const groupBy = (rows, key) => {
   const out = new Map();
   for (const r of rows) {
@@ -76,16 +112,20 @@ const groupBy = (rows, key) => {
   return [...out.entries()];
 };
 
-// Ce que le passager emporte physiquement : des cartons, des kilos, des mètres
-// cubes. Trois natures qui ne s'additionnent pas, donc trois totaux — c'est là
-// qu'on vérifie une limite de bagage.
+// Ce que le passager emporte physiquement : des cartons et des kilos. Des unités
+// différentes ne s'additionnent pas (des cartons et des sacs), mais le poids,
+// si — et c'est lui qu'on vérifie contre une limite de bagage.
 function measureTotals(picked) {
   const acc = new Map();
+  let kg = 0;
   for (const l of picked) {
-    const u = unitOf(l.measure, l.unit);
-    acc.set(u, (acc.get(u) || 0) + Number(l.value || 0));
+    const u = l.unit || 'u';
+    acc.set(u, (acc.get(u) || 0) + Number(l.quantity || 0));
+    kg += Number(l.weight_kg || 0);
   }
-  return [...acc.entries()].map(([u, v]) => `${formatQty(v)} ${u}`);
+  const parts = [...acc.entries()].map(([u, v]) => `${formatQty(v)} ${u}`);
+  if (kg > 0) parts.push(`${formatQty(kg)} kg`);
+  return parts;
 }
 
 export function GoodsPicker({ options, picked, currency, onChange, loading, suggestFor }) {
@@ -110,7 +150,7 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
     if (taken.has(lotKey(o))) return;
     onChange([...picked, lotToPicked(o, suggestFor ? suggestFor(o) : null)]);
   };
-  const patch = (i, p) => onChange(picked.map((l, idx) => (idx === i ? { ...l, ...p } : l)));
+  const patch = (i, p) => onChange(picked.map((l, idx) => (idx === i ? patchPicked(l, p) : l)));
   const drop = (i) => onChange(picked.filter((_, idx) => idx !== i));
 
   const total = picked.reduce((s, l) => s + pickedTotal(l), 0);
@@ -176,7 +216,8 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
                       <span className="gp-lot-sub">{o.order_reference}</span>
                     </span>
                     <span className="gp-lot-qty">
-                      {formatQty(o.remaining)} {unitOf(o.measure, o.unit)}
+                      {formatQty(o.remaining)} {o.unit}
+                      <em> · {formatQty(weightShare({ quantity: o.quantity, weight_kg: o.weight_kg }, o.remaining))} kg</em>
                     </span>
                     <span className="gp-lot-price">{formatMoney(o.sale_price)}</span>
                     <IconEl name={isTaken ? 'check' : 'plus'} />
@@ -227,8 +268,8 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
               </div>
               {lots.map((l) => {
                 const i = picked.indexOf(l);
-                const u = unitOf(l.measure, l.unit);
-                const over = Number(l.value) > Number(l.remaining);
+                const u = l.unit;
+                const over = Number(l.quantity) > Number(l.remaining);
                 const m = pickedMargin(l);
                 return (
                   <div key={l.sourceLineId} className="gp-row">
@@ -242,22 +283,34 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
                       <label className="field">
                         <span>Quantité <em className="gp-cap">/ {formatQty(l.remaining)} {u}</em></span>
                         <AmountInput
-                          value={l.value}
+                          value={l.quantity}
                           decimals={3}
                           // Le pas s'arrête sur ce qui reste dans le lot : on ne
                           // peut plus dépasser en cliquant, seulement en tapant.
-                          step={l.measure === 'cbm' ? 0.1 : 1}
+                          step={1}
                           max={l.remaining}
                           className={over ? 'input-error' : ''}
-                          onChange={(v) => patch(i, { value: v })}
+                          onChange={(v) => patch(i, { quantity: v })}
                         />
                       </label>
                       <label className="field">
-                        <span>Prix de transport</span>
+                        <span>Poids <em className="gp-cap">kg</em></span>
+                        <AmountInput value={l.weight_kg} decimals={3} step={1} onChange={(v) => patch(i, { weight_kg: v })} />
+                      </label>
+                      <div className="field gp-basis" role="group" aria-label="Le prix se multiplie par">
+                        <span>Prix par</span>
+                        <div className="seg seg-measure">
+                          {[['quantite', 'Quantité'], ['poids', 'Poids']].map(([k, label]) => (
+                            <button key={k} type="button" className={l.measure === k ? 'active' : ''} onClick={() => patch(i, { measure: k })}>{label}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <label className="field">
+                        <span>Prix de transport <em className="gp-cap">/ {priceUnit(l)}</em></span>
                         <AmountInput value={l.unitPrice} onChange={(v) => patch(i, { unitPrice: v })} />
                       </label>
                       <label className="field">
-                        <span>Valeur du manquant</span>
+                        <span>Valeur du manquant <em className="gp-cap">/ {priceUnit(l)}</em></span>
                         <AmountInput value={l.missingPrice} onChange={(v) => patch(i, { missingPrice: v })} />
                       </label>
                     </div>
@@ -266,7 +319,7 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
                       <button
                         type="button"
                         className="gp-sugg"
-                        onClick={() => patch(i, { unitPrice: String(l.suggestion.unit_price) })}
+                        onClick={() => patch(i, { unitPrice: String(l.suggestion.unit_price), ...(l.suggestion.suggested_measure ? { measure: l.suggestion.suggested_measure } : {}) })}
                         title="Reprendre ce prix"
                       >
                         <IconEl name="trend" />
@@ -277,7 +330,7 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
                     <div className="gp-row-foot">
                       {over
                         ? <span className="neg">Il ne reste que {formatQty(l.remaining)} {u}.</span>
-                        : <span className="muted">Fournisseur {formatMoney(l.salePrice)} · {l.sourceLabel}</span>}
+                        : <span className="muted">Fournisseur {formatMoney(l.salePrice)} / {priceUnit({ measure: l.lot.measure, unit: l.unit })} · {l.sourceLabel}</span>}
                       <span className="gp-row-total">
                         {formatMoney(pickedTotal(l), currency)}
                         <em className={m < 0 ? 'neg' : 'pos'}>marge {formatMoney(m, currency)}</em>
