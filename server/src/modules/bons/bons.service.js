@@ -7,6 +7,7 @@ import { Decimal, toDecimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { bonProgress, moneyProgress } from '../../lib/progress.js';
 import { parseDay, ymd, fixDates } from '../../lib/calendar.js';
+import { bonJournal } from './journal.js';
 import { priceBasis, weightShare, pricedPart, perPiece, perMeasureUnit } from '../../lib/lineMath.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendEntry, replayPersonLedger } from '../accounts/accounts.service.js';
@@ -714,8 +715,13 @@ export async function getBonDetail(id, client = getPool()) {
   const paidToPassager = payments.rows
     .filter((p) => p.type === 'passager_payment')
     .reduce((acc, p) => acc.plus(new Decimal(p.amount).abs()), new Decimal(0));
+  const bonRow = fixDates(rows[0], BON_DATE_COLS);
   return {
-    ...fixDates(rows[0], BON_DATE_COLS),
+    ...bonRow,
+    // Un bon passager raconte son voyage ; celui d'un ordre se lit sur l'ordre.
+    journal: bonRow.order_id == null
+      ? bonJournal({ bon: bonRow, lines: lines.rows, history: history.rows, payments: payments.rows })
+      : [],
     progress: bonProgress(rows[0].status, lines.rows),
     pay: passagerPay(rows[0], paidToPassager),
     fournisseurs: fournisseurs.rows,

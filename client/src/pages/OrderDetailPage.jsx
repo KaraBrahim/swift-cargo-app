@@ -21,6 +21,7 @@ import { EntityPicker } from '../components/EntityPicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
+import { Journal } from '../components/Journal.jsx';
 import { priceBasis, weightShare, priceUnit } from '../lib/lineMath.js';
 import { formatDateFr } from '../lib/format.js';
 import { orderManifestBody } from '../components/printDocument.js';
@@ -375,6 +376,13 @@ export default function OrderDetailPage() {
             </tfoot>
           </table>
         </div>
+      </Section>
+
+      {/* Ce qui est arrivé à chaque ligne, dans l'ordre : reçue, confiée (à qui, combien),
+          partie, arrivée (avec ses manquants), remise, remise annulée — et où
+          en est la ligne après chaque étape. */}
+      <Section icon="audit" title="Journal de la marchandise" count={(o.journal ?? []).length}>
+        <Journal events={o.journal ?? []} mode="order" />
       </Section>
 
       {/* L'argent du fournisseur. Partiel permis : il paie ce qu'il veut, quand

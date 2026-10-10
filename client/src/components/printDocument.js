@@ -6,6 +6,7 @@
 import { formatMoney } from './ui.jsx';
 import { formatQty, formatDateFr } from '../lib/format.js';
 import { priceBasis, pricedPart, weightShare, priceUnit } from '../lib/lineMath.js';
+import { describeEvent, describeBonEvent, dayOf } from '../lib/journalText.js';
 import { BON_STATUS } from './bonStatus.js';
 import { ORDER_STATUS } from './orderStatus.js';
 
@@ -76,6 +77,8 @@ export const PRINT_CSS = `
   .pglegend { display:flex; flex-wrap:wrap; gap:3px 14px; font-size:11.5px; }
   .pglegend i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; border:1px solid #888;
     -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .jr-print td { vertical-align: top; }
+  .jr-print .nw { white-space: nowrap; }
   /* The app's own layout must never clip a multi-page document. */
   @media print { body { margin:12mm; } .no-print { display:none !important; }
     html, body { overflow:visible !important; height:auto !important; } }
@@ -118,6 +121,25 @@ export function progressBlock(progress, title = 'Avancement') {
   const legend = segs.map((s) => `<span><i style="background:${PROGRESS_TONE[s.tone] || '#999'}"></i>${esc(s.label)} :
       ${s.value != null ? `${num(s.value)} ${esc(progress.unit || '')} · ` : ''}<strong>${num(s.pct)} %</strong></span>`).join('');
   return `<h2>${esc(title)}</h2><div class="pgbar">${bar}</div><div class="pglegend">${legend}</div>`;
+}
+
+// Le journal sur le papier : date, et ce qui s'est passé. Les mêmes phrases que
+// l'écran (lib/journalText.js) — le papier ne dit pas autre chose.
+export function journalBlock(events, { title = 'Journal', describe = describeEvent, withLine = false } = {}) {
+  if (!events?.length) return '';
+  const rows = events.map((e) => {
+    const d = describe(e);
+    return `<tr>
+      <td class="nw">${esc(dayOf(e) ? formatDateFr(dayOf(e), { year: false }) : '—')}</td>
+      ${withLine ? `<td>${esc(e.designation || '')}</td>` : ''}
+      <td>${esc(d.title)}${d.detail ? `<div class="small">${esc(d.detail)}</div>` : ''}</td>
+    </tr>`;
+  }).join('');
+  return `<h2>${esc(title)}</h2>
+    <table class="jr-print">
+      <thead><tr><th>Date</th>${withLine ? '<th>Marchandise</th>' : ''}<th>Ce qui s'est passé</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // Le bloc scannable. Rien si la page n'a pas (encore) produit l'image : un
@@ -278,6 +300,8 @@ export function orderManifestBody(d, qr) {
     <p class="small">Confié : pris par un passager. Arrivé : compté au bureau d’Algérie, manquants déduits. Remis : emporté par le fournisseur.
       Reste en Chine : pas encore confié.</p>
 
+    ${journalBlock(d.journal, { title: 'Ce qui est arrivé à la marchandise', withLine: (d.lines || []).length > 1 })}
+
     <div class="totals">
       Marchandises : ${money(t.goods ?? t.transport_fee)}<br>
       ${Number(t.commission) ? `Commission : ${money(t.commission)}<br>` : ''}
@@ -370,6 +394,7 @@ export function bonDocBody(bon, qr) {
       <thead><tr><th>Désignation</th><th class="r">Quantité · poids</th><th class="r">Prix de transport</th><th class="r">Valeur du manquant</th><th class="r">Manquant</th><th class="r">Montant</th></tr></thead>
       <tbody>${body || '<tr><td colspan="6">Aucune ligne</td></tr>'}</tbody>
     </table>
+    ${journalBlock(bon.journal, { title: 'Journal du voyage', describe: describeBonEvent })}
     <div class="totals">
       Frais de transport (commandé) : <strong>${formatMoney(bon.transport_fee, cur)}</strong><br>
       Manquants : ${formatMoney(bon.loss_total, cur)}<br>

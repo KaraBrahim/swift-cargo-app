@@ -180,7 +180,7 @@ export async function updateItem({ admin, id, data, ip }) {
 // ── Per-office levels + movement ledger ──────────────────────────────
 // Apply a signed stock movement at an office inside the caller's tx: lock the
 // level row, add the deltas, and record the movement for history.
-export async function applyMovement(c, { itemId, office, dQ = '0', dW = '0', reason, refOrderId = null, refBonId = null, adminId, note = null }) {
+export async function applyMovement(c, { itemId, office, dQ = '0', dW = '0', reason, refOrderId = null, refBonId = null, refLineId = null, adminId, note = null }) {
   await c.query('INSERT INTO stock_levels (item_id, office) VALUES ($1,$2) ON CONFLICT (item_id, office) DO NOTHING', [itemId, office]);
   await c.query('SELECT 1 FROM stock_levels WHERE item_id=$1 AND office=$2 FOR UPDATE', [itemId, office]);
   await c.query(
@@ -188,9 +188,9 @@ export async function applyMovement(c, { itemId, office, dQ = '0', dW = '0', rea
     [itemId, office, dQ, dW]
   );
   await c.query(
-    `INSERT INTO stock_movements (item_id, office, quantity_delta, weight_delta, reason, ref_order_id, ref_bon_id, admin_id, note)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [itemId, office, dQ, dW, reason, refOrderId, refBonId, adminId, note]
+    `INSERT INTO stock_movements (item_id, office, quantity_delta, weight_delta, reason, ref_order_id, ref_bon_id, ref_line_id, admin_id, note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [itemId, office, dQ, dW, reason, refOrderId, refBonId, refLineId, adminId, note]
   );
 }
 

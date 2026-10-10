@@ -20,6 +20,7 @@ import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { TravelFields, travelOf, travelBody } from '../components/TravelFields.jsx';
 import { ArrivalBadge } from '../components/ArrivalBadge.jsx';
+import { Journal } from '../components/Journal.jsx';
 import { bonDocBody, measureQty, measureUnit, declaredOf, priceUnit } from '../components/printDocument.js';
 import { pricedPart } from '../lib/lineMath.js';
 import { bonTicket } from '../components/printTicket.js';
@@ -868,6 +869,14 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
           </div>
         )}
       </Section>
+
+      {/* Le voyage raconté : parti le, arrivé le (et de combien de jours en retard),
+          les manquants ligne par ligne, le règlement et les paiements. */}
+      {!isFournisseurBon && (bon.journal ?? []).length > 0 && (
+        <Section icon="audit" title="Journal du bon" count={bon.journal.length}>
+          <Journal events={bon.journal} mode="bon" />
+        </Section>
+      )}
 
       <Section icon="audit" title="Historique" count={bon.history.length}>
         <ul className="timeline">

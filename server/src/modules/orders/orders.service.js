@@ -10,6 +10,7 @@ import { recomputeOrderStatus, deliverableLines, ARRIVED, QTY } from './orderSta
 import { orderProgress, moneyProgress } from '../../lib/progress.js';
 import { weightShare } from '../../lib/lineMath.js';
 import { parseDay, fixDates } from '../../lib/calendar.js';
+import { orderJournal } from './journal.js';
 
 export async function createOrder({ admin, data, ip }) {
   if (!Array.isArray(data.bons) || data.bons.length === 0) {
@@ -106,7 +107,7 @@ export async function applyDelivery(c, { admin, lines, allow, note }) {
         itemId: l.item_id, office: 'algeria',
         dQ: neg.toFixed(3),
         dW: weightShare(l, neg).toFixed(3),
-        reason: 'livraison', refOrderId: l.order_id, refBonId: l.bon_id, adminId: admin.id,
+        reason: 'livraison', refOrderId: l.order_id, refBonId: l.bon_id, refLineId: l.id, adminId: admin.id,
         note: note ?? `Remise au fournisseur ${l.order_reference}`,
       });
     }
@@ -170,7 +171,7 @@ export async function cancelDelivery({ admin, id, ip }) {
           itemId: l.item_id, office: 'algeria',
           dQ: back.toFixed(3),
           dW: weightShare(l, back).toFixed(3),
-          reason: 'ajustement', refOrderId: id, refBonId: l.bon_id, adminId: admin.id,
+          reason: 'ajustement', refOrderId: id, refBonId: l.bon_id, refLineId: l.id, adminId: admin.id,
           note: `Annulation livraison ${order.reference}`,
         });
       }
@@ -303,7 +304,7 @@ export async function getOrderDetail(id, client = getPool()) {
   // (`allocated`), ce qui est réellement arrivé au bureau (`arrived`, manquants
   // déduits) et ce que le fournisseur a emporté (`delivered_quantity`).
   const { rows: lines } = await client.query(
-    `SELECT bl.id AS line_id, bl.designation, bl.measure, bl.unit, bl.weight_kg, bl.unit_price,
+    `SELECT bl.id AS line_id, bl.item_id, bl.designation, bl.measure, bl.unit, bl.weight_kg, bl.unit_price,
             ${LINE_FLOW}
        FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
       WHERE b.order_id = $1 ORDER BY bl.id`,
@@ -362,6 +363,8 @@ export async function getOrderDetail(id, client = getPool()) {
   return {
     ...fixDates(rows[0], ['pickup_expected_on']), bons, carriers, lines: withRemaining,
     progress: orderProgress(lines),
+    // Ce qui est arrivé à la marchandise, ligne par ligne, dans l'ordre.
+    journal: await orderJournal(client, rows[0], lines),
     pay: moneyProgress(billed, cash.total),
     totals: {
       ...totals,
