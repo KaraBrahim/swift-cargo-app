@@ -390,7 +390,7 @@ export default function OrderDetailPage() {
           il veut — le reste dû suit. Rien n'oblige la marchandise à être
           entièrement livrée pour encaisser. */}
       {goodsBonId && (
-        <Section icon="coins" title="Argent" right={<span className="muted">Facturé {formatMoney(o.totals?.billed, cur)} · encaissé {formatMoney(collected, cur)}</span>}>
+        <Section icon="coins" title="Argent" right={<span className="muted">Facturé {formatMoney(o.totals?.billed, cur)} · encaissé {formatMoney(collected, cur)}{Number(o.totals?.remise) !== 0 ? ` · remise ${formatMoney(o.totals.remise, cur)}` : ''}</span>}>
           {due > 0 ? (
             <div className="money-block">
               <div className="money-head">
@@ -432,7 +432,7 @@ export default function OrderDetailPage() {
               </Footnote>
             </div>
           ) : (
-            <Footnote>Tout est encaissé : {formatMoney(collected, cur)} reçus sur {formatMoney(o.totals?.billed, cur)}.</Footnote>
+            <Footnote>Tout est encaissé : {formatMoney(collected, cur)} reçus sur {formatMoney(o.totals?.billed, cur)}{Number(o.totals?.remise) !== 0 ? `, soldé avec ${formatMoney(o.totals.remise, cur)} de remise de règlement` : ''}.</Footnote>
           )}
         </Section>
       )}

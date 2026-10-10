@@ -148,11 +148,13 @@ export function ScanBanner({ hit, onAct, onDismiss }) {
 }
 
 // Qui a créé la fiche et quand : utile, jamais urgent — donc en bas, en petit.
-export function Footnote({ by, at, extra }) {
+// Une note de bas de section. Avec du texte à l'intérieur, elle le dit ; avec
+// `by` et `at`, elle dit qui a créé la pièce et quand.
+export function Footnote({ by, at, extra, children }) {
   return (
     <p className="dt-foot">
       <IconEl name="note" />
-      Créé par {by} · {new Date(at).toLocaleString('fr-FR')}{extra ? ` · ${extra}` : ''}
+      {children ?? <>Créé par {by} · {new Date(at).toLocaleString('fr-FR')}{extra ? ` · ${extra}` : ''}</>}
     </p>
   );
 }

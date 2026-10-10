@@ -17,6 +17,16 @@
 -- Les montants déjà écrits (transport_fee, loss_value, écritures de compte)
 -- ne sont jamais recalculés ici.
 
+-- Filet de sécurité : cette migration supprime des colonnes, et c'est sans retour.
+-- Avant d'y toucher, on garde une copie de ce qu'elle va transformer. Si une
+-- conversion s'avérait fausse, l'ancienne valeur est là, ligne pour ligne. Ces
+-- copies ne servent qu'à ça : elles se suppriment (Maintenance, domaine
+-- « Journal ») une fois la reprise vérifiée.
+CREATE TABLE archive_033_bon_lines       AS SELECT * FROM bon_lines;
+CREATE TABLE archive_033_stock_levels    AS SELECT * FROM stock_levels;
+CREATE TABLE archive_033_stock_movements AS SELECT * FROM stock_movements;
+CREATE TABLE archive_033_stock_items     AS SELECT id, quantity, weight_kg, cbm FROM stock_items;
+
 UPDATE bon_lines SET quantity = weight_kg, unit = 'kg'
  WHERE measure = 'poids' AND quantity = 0 AND weight_kg > 0;
 UPDATE bon_lines SET quantity = cbm, unit = 'm³', measure = 'quantite'

@@ -27,7 +27,15 @@ export const DOMAINS = [
   { key: 'people', label: 'Passagers, fournisseurs et salariés', hint: 'Le répertoire des personnes et les salariés.', tables: ['people', 'employees'], requires: ['activite'] },
   { key: 'stock', label: 'Articles et stock', hint: 'Catalogue, catégories, niveaux et inventaires.', tables: ['stock_inventory', 'stock_levels', 'stock_items', 'stock_categories'], requires: ['activite'] },
   { key: 'rates', label: 'Taux de change', hint: 'Historique des taux. Les taux de départ sont recréés.', tables: ['pair_rates', 'currency_pairs', 'exchange_rates'], requires: [] },
-  { key: 'journal', label: 'Journal', hint: 'Journal d’audit, tentatives de connexion, clés d’idempotence.', tables: ['audit_log', 'login_attempts', 'idempotency_keys'], requires: [] },
+  {
+    key: 'journal', label: 'Journal',
+    hint: 'Journal d’audit, tentatives de connexion, clés d’idempotence, et les copies de sécurité laissées par les migrations.',
+    // Les `archive_*` sont les copies d'avant une migration destructive (voir 033) :
+    // elles ne servent qu'à vérifier la reprise, puis se jettent.
+    tables: ['audit_log', 'login_attempts', 'idempotency_keys',
+      'archive_033_bon_lines', 'archive_033_stock_levels', 'archive_033_stock_movements', 'archive_033_stock_items'],
+    requires: [],
+  },
   { key: 'users', label: 'Comptes utilisateurs', hint: 'Tous les comptes sauf le super-admin, avec leurs sessions.', tables: [], requires: [] },
 ];
 
@@ -145,9 +153,11 @@ export async function revokeSessions({ admin, ip }) {
 // Une sauvegarde lisible : toutes les tables, en JSON. Pas les sessions ni les
 // mots de passe — une sauvegarde qui circule ne doit pas ouvrir de porte.
 const BACKUP_SKIP = new Set(['sessions', 'idempotency_keys', 'login_attempts']);
+// Les copies d'avant migration (archive_*) doublent la sauvegarde pour rien : elles sont déjà dans la base.
+const isArchive = (t) => t.startsWith('archive_');
 export async function backup() {
   const db = getPool();
-  const present = [...await existingTables(db)].filter((t) => !BACKUP_SKIP.has(t)).sort();
+  const present = [...await existingTables(db)].filter((t) => !BACKUP_SKIP.has(t) && !isArchive(t)).sort();
   const out = { exported_at: new Date().toISOString(), tables: {} };
   for (const t of present) {
     const { rows } = await db.query(`SELECT * FROM ${t} ORDER BY 1`);

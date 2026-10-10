@@ -133,3 +133,10 @@
 .remise-line.on { color: var(--text); }
 .remise-sum { margin: 0; font-size: 12px; }
 .remise-note { font-size: 11px; }
+
+/* Les icônes n'ont pas de taille propre : chaque contexte donne la sienne. */
+.presence-panel svg, .ag-day svg, .ag-overdue svg, .ag-tools svg, .ag-row svg { width: 14px; height: 14px; flex-shrink: 0; }
+.presence-panel .panel-title { display: flex; align-items: center; gap: 8px; }
+.presence-late svg { vertical-align: -2px; }
+.ag-ico svg { width: 15px; height: 15px; }
+.ag-tools .chip { display: inline-flex; align-items: center; gap: 6px; }

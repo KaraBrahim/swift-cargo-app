@@ -96,9 +96,19 @@ test('033 convertit les lignes au poids et au m³ sans toucher aux montants', as
   assert.equal(lvl.quantity, '25.500');
   assert.equal(Number(mv.q), 25.5 + 1.2, 'les mouvements au poids et au m³ deviennent des quantités');
 
-  // Et le m³ n'existe plus nulle part.
+  // Le filet de sécurité : l'ancienne valeur est gardée, ligne pour ligne.
+  const saved = await q('SELECT id, measure, quantity, weight_kg, cbm FROM archive_033_bon_lines ORDER BY id');
+  assert.equal(saved.length, 3);
+  const savedCbm = saved.find((r) => r.id === byCbm);
+  assert.deepEqual([savedCbm.measure, savedCbm.quantity, savedCbm.cbm], ['cbm', '0.000', '1.2000'], 'la ligne au m³ telle qu’elle était');
+  assert.equal((await q('SELECT COUNT(*)::int AS n FROM archive_033_stock_levels'))[0].n, 1);
+  assert.equal((await q('SELECT COUNT(*)::int AS n FROM archive_033_stock_movements'))[0].n, 2);
+
+  // Et le m³ n'existe plus nulle part (hors ces copies).
+
   const cols = await q(`SELECT table_name FROM information_schema.columns
-                         WHERE table_schema='public' AND column_name IN ('cbm','cbm_delta')`);
+                         WHERE table_schema='public' AND column_name IN ('cbm','cbm_delta')
+                           AND table_name NOT LIKE 'archive_%'`);
   assert.deepEqual(cols, []);
 
   // Une mesure 'cbm' ne passe plus.

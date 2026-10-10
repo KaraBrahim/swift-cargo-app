@@ -19,7 +19,10 @@ function Event({ e, describe, withAfter }) {
       <div className="jr-body">
         <div className="jr-when">
           {dayOf(e) ? formatDateFr(dayOf(e)) : '—'}
-          <span className="muted"> · {timeOf(e)}</span>
+          {/* Un jour réel qui n'est pas celui de la saisie : on dit les deux. */}
+          {e.day && e.at && e.day !== e.at.slice(0, 10)
+            ? <span className="muted"> · saisi le {formatDateFr(e.at.slice(0, 10), { year: false })} à {timeOf(e)}</span>
+            : <span className="muted"> · {timeOf(e)}</span>}
         </div>
         <div className="jr-title">{d.title}</div>
         {d.detail && <div className="jr-detail muted">{d.detail}</div>}

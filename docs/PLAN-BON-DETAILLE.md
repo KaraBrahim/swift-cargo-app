@@ -98,8 +98,19 @@
 
 ## 7. Avancement
 
-- Phase 1 (A5, PDF fournisseur sans transport) — faite, poussée.
-- Phase 2 (barres de progression) — faite, poussée.
-- Phase 3 (quantité + poids, CBM supprimé, mesure suggérée par article) — faite, **non poussée** :
-  la migration 033 est irréversible (elle supprime les colonnes `cbm`). Sauvegarde de la
-  page Maintenance avant le déploiement.
+Les sept phases sont faites, testées (120 tests serveur + 5 de remise à zéro, dont un
+parcours complet par HTTP) et poussées.
+
+- 1 · A5, PDF fournisseur sans transport
+- 2 · barres de progression et pourcentages
+- 3 · quantité + poids sur chaque ligne, CBM supprimé, mesure suggérée par article
+- 4 · wilaya des personnes, le fournisseur ne paie qu'en Algérie
+- 5 · dates du voyage, aéroport, compagnie, agenda, carte du tableau de bord, filtres
+- 6 · journal de la marchandise (par ligne, avec l'état après chaque événement) et du bon
+- 7 · remise de règlement (arrondi au pas de la devise, dette soldée, caisse exacte)
+
+### Après le déploiement
+
+La migration 033 supprime les colonnes `cbm`. Elle laisse des copies de sécurité
+(`archive_033_*`) de ce qu'elle transforme : une fois la reprise vérifiée à l'écran,
+Maintenance → domaine « Journal » → supprimer les efface.

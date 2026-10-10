@@ -34,6 +34,18 @@ const lineSchema = z.object({
   note: z.string().trim().max(300).optional(),
 });
 
+// Le voyage d'un bon passager : les dates prévues et promises, l'aéroport
+// d'arrivée et sa wilaya, la compagnie. Vide = effacer ; absent = inchangé.
+const day = z.string().trim().max(10).nullable().optional();
+const text = (max) => z.string().trim().max(max).nullable().optional();
+const travelFields = {
+  departurePlannedOn: day,
+  arrivalPromisedOn: day,
+  airport: text(120),
+  airportWilaya: text(80),
+  airline: text(120),
+};
+
 const createSchema = z.object({
   // Only a bon fournisseur names one. A bon passager takes its goods from the
   // source lines it draws, which may belong to several fournisseurs.
@@ -47,18 +59,6 @@ const createSchema = z.object({
   ...travelFields,
   lines: z.array(lineSchema).min(1),
 });
-
-// Le voyage d'un bon passager : les dates prévues et promises, l'aéroport
-// d'arrivée et sa wilaya, la compagnie. Vide = effacer ; absent = inchangé.
-const day = z.string().trim().max(10).nullable().optional();
-const text = (max) => z.string().trim().max(max).nullable().optional();
-const travelFields = {
-  departurePlannedOn: day,
-  arrivalPromisedOn: day,
-  airport: text(120),
-  airportWilaya: text(80),
-  airline: text(120),
-};
 
 // Editing a bon (only while « Créé »): replace lines, fee/currency, passager.
 const updateSchema = z.object({

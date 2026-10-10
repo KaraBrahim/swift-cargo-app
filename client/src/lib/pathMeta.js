@@ -6,6 +6,7 @@
 const PAGES = [
   ['/bons-fournisseur', 'Bons fournisseurs', 'order'],
   ['/bons-passager', 'Bons passagers', 'bon'],
+  ['/agenda', 'Agenda', 'calendar'],
   ['/caisses', 'Caisse & Finance', 'caisse'],
   ['/charges', 'Charges', 'wallet'],
   ['/stock', 'Stock', 'stock'],
