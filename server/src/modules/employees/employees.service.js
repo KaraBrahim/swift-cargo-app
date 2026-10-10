@@ -16,6 +16,7 @@
 // Le salaire configuré fait foi pour tous les mois écoulés : le changer
 // recalcule le passé. C'est voulu — une personne qui corrige un salaire mal
 // noté veut que son compte dise la vérité, pas qu'il garde l'erreur.
+import { remiseDiff } from '../../lib/remise.js';
 import { getPool, withTx } from '../../db/pool.js';
 import { Decimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
@@ -99,6 +100,7 @@ export async function listEmployees({ includeInactive = false, period } = {}) {
     `SELECT e.*, c.label AS caisse_label,
             COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id AND period = $1), 0)::text AS paid_this_month,
             COALESCE((SELECT SUM(amount) FROM charges WHERE employee_id = e.id), 0)::text AS paid_total,
+            COALESCE((SELECT SUM(amount) FROM employee_remises WHERE employee_id = e.id), 0)::text AS remise_total,
             (SELECT amount     FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_amount,
             (SELECT created_at FROM charges WHERE employee_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_paid_at
        FROM employees e LEFT JOIN caisses c ON c.id = e.caisse_id
@@ -116,7 +118,8 @@ export async function listEmployees({ includeInactive = false, period } = {}) {
       const dates = dueDates(e.first_due_on, asOf);
       const months = dates.length;
       const owed = dates.reduce((acc, d) => acc.plus(salaryAt(history, d)), new Decimal(0));
-      const balance = owed.minus(e.paid_total);
+      // Ce qu'on a laissé tomber par remise de règlement compte comme versé.
+      const balance = owed.minus(e.paid_total).minus(e.remise_total);
       return {
         ...e,
         first_due_on: new Date(e.first_due_on).toISOString().slice(0, 10),
@@ -163,7 +166,7 @@ export async function updateEmployee({ admin, id, ip, ...data }) {
 // Un versement : une charge « salaire » qui sort de la caisse choisie, datée du
 // mois. Rien d'autre à décider. Verser plus que prévu est permis — une prime,
 // un rattrapage : c'est de l'argent réellement sorti, on l'enregistre.
-export async function payEmployee({ admin, id, amount, caisseId, period, note, ip }) {
+export async function payEmployee({ admin, id, amount, caisseId, period, settle = false, note, ip }) {
   const { rows } = await getPool().query('SELECT * FROM employees WHERE id = $1', [id]);
   const e = rows[0];
   if (!e) throw errors.notFound('Salarié introuvable.');
@@ -172,13 +175,27 @@ export async function payEmployee({ admin, id, amount, caisseId, period, note, i
   const caisse = caisseId ?? e.caisse_id;
   if (!caisse) throw errors.validation([{ field: 'caisseId', message: 'Choisissez la caisse qui paie.' }]);
 
+  // Le solde AVANT ce versement : c'est lui qu'une remise vient solder.
+  let before = null;
+  if (settle) {
+    const { employees } = await listEmployees({ period: month });
+    before = new Decimal(employees.find((x) => x.id === Number(id))?.balance ?? 0);
+  }
+
   return withTx(async (c) => {
+    const diff = settle ? await remiseDiff(c, { due: before, amount, currency: e.currency_code }) : null;
     const charge = await createCharge({
       admin, category: 'salaire', label: `Salaire ${month} — ${e.name}`, amount, currency: e.currency_code,
       caisseId: caisse, period: month, recurring: true, note, ip,
     }, c);
     await c.query('UPDATE charges SET employee_id = $2 WHERE id = $1', [charge.id, id]);
-    return { ...charge, employee_id: id };
+    if (diff && !diff.isZero()) {
+      await c.query(
+        'INSERT INTO employee_remises (employee_id, charge_id, amount, admin_id) VALUES ($1,$2,$3,$4)',
+        [id, charge.id, diff.toFixed(2), admin.id]
+      );
+    }
+    return { ...charge, employee_id: id, remise: diff ? diff.toFixed(2) : '0.00' };
   });
 }
 

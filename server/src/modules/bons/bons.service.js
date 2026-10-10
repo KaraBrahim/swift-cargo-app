@@ -8,6 +8,7 @@ import { errors } from '../../lib/AppError.js';
 import { bonProgress, moneyProgress } from '../../lib/progress.js';
 import { parseDay, ymd, fixDates } from '../../lib/calendar.js';
 import { bonJournal } from './journal.js';
+import { remiseDiff } from '../../lib/remise.js';
 import { priceBasis, weightShare, pricedPart, perPiece, perMeasureUnit } from '../../lib/lineMath.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendEntry, replayPersonLedger } from '../accounts/accounts.service.js';
@@ -483,6 +484,9 @@ export async function cancelBonPayment({ admin, id, entryId, ip }) {
       ? (await c.query('SELECT * FROM transactions WHERE id=$1', [entry.caisse_tx_id])).rows[0]
       : null;
 
+    // La remise qui accompagnait ce paiement part avec lui : seule, elle ferait
+    // mentir le compte de la personne.
+    if (entry.caisse_tx_id) await c.query("DELETE FROM person_ledger WHERE caisse_tx_id=$1 AND type='remise'", [entry.caisse_tx_id]);
     await c.query('DELETE FROM person_ledger WHERE id=$1', [entryId]);
     await replayPersonLedger(c, entry.person_type, entry.person_id, entry.currency_code);
 
@@ -590,7 +594,10 @@ export async function deleteBon(args) {
 // an order instead.
 // Combien du dû au passager est déjà versé. Rien avant le règlement : tant que
 // `passager_payment` n'est pas calculé, il n'y a pas de montant à comparer.
-const passagerPay = (bon, paid) => (bon.passager_payment == null ? null : moneyProgress(bon.passager_payment, paid ?? 0));
+const passagerPay = (bon, paid, remise = new Decimal(0)) => (bon.passager_payment == null ? null : {
+  ...moneyProgress(new Decimal(bon.passager_payment).minus(remise), paid ?? 0),
+  remise: new Decimal(remise).toFixed(2),
+});
 
 export async function listBons({ status, search, fournisseurId, passagerId, orderId, dateBy, from, to, limit = 100 } = {}) {
   const params = [];
@@ -639,10 +646,14 @@ export async function listBons({ status, search, fournisseurId, passagerId, orde
     getPool().query(
       'SELECT bon_id, measure, unit, quantity, weight_kg, received_quantity FROM bon_lines WHERE bon_id = ANY($1)', [ids]),
     getPool().query(
-      `SELECT ref_bon_id AS bon_id, SUM(ABS(amount)) AS total FROM person_ledger
-        WHERE ref_bon_id = ANY($1) AND type = 'passager_payment' GROUP BY ref_bon_id`, [ids]),
+      `SELECT ref_bon_id AS bon_id, SUM(ABS(amount)) FILTER (WHERE type = 'passager_payment') AS total,
+              SUM(amount) FILTER (WHERE type = 'remise') AS remise
+         FROM person_ledger
+        WHERE ref_bon_id = ANY($1) AND type IN ('passager_payment', 'remise') GROUP BY ref_bon_id`, [ids]),
   ]);
   const linesOf = new Map(), paidOf = new Map(paid.map((p) => [String(p.bon_id), p.total]));
+  // La remise d'un bon passager est écrite en négatif au grand livre : on rend ce qui a été laissé tomber.
+  const remiseOf = new Map(paid.map((p) => [String(p.bon_id), new Decimal(p.remise ?? 0).negated()]));
   for (const l of lines) {
     const k = String(l.bon_id);
     if (!linesOf.has(k)) linesOf.set(k, []);
@@ -651,7 +662,7 @@ export async function listBons({ status, search, fournisseurId, passagerId, orde
   return rows.map((b) => ({
     ...b,
     progress: bonProgress(b.status, linesOf.get(String(b.id)) ?? []),
-    pay: passagerPay(b, paidOf.get(String(b.id))),
+    pay: passagerPay(b, paidOf.get(String(b.id)), remiseOf.get(String(b.id))),
   }));
 }
 
@@ -674,6 +685,8 @@ export async function getBonDetail(id, client = getPool()) {
   const payments = await client.query(
     `SELECT pl.id, pl.person_type, pl.person_id, pl.type, pl.amount, pl.currency_code,
             pl.caisse_tx_id, pl.created_at, pl.note,
+            (SELECT COALESCE(SUM(r.amount), 0) FROM person_ledger r
+              WHERE r.type = 'remise' AND pl.caisse_tx_id IS NOT NULL AND r.caisse_tx_id = pl.caisse_tx_id) AS remise_raw,
             a.full_name AS admin_name, a.role AS admin_role, t.caisse_id, c.label AS caisse_label,
             pe.name AS person_name
        FROM person_ledger pl
@@ -712,9 +725,19 @@ export async function getBonDetail(id, client = getPool()) {
       WHERE l.bon_id = $1 ORDER BY f.name`,
     [id]
   );
+  // La remise qui accompagne un paiement, ramenée à « ce qu'on a laissé tomber » :
+  // positive quand le dû a baissé, quelle que soit la personne.
+  for (const p of payments.rows) {
+    const raw = new Decimal(p.remise_raw ?? 0);
+    p.remise = (p.type === 'fee_payment' ? raw : raw.negated()).toFixed(2);
+    delete p.remise_raw;
+  }
   const paidToPassager = payments.rows
     .filter((p) => p.type === 'passager_payment')
     .reduce((acc, p) => acc.plus(new Decimal(p.amount).abs()), new Decimal(0));
+  const remisePassager = payments.rows
+    .filter((p) => p.type === 'passager_payment')
+    .reduce((acc, p) => acc.plus(new Decimal(p.remise)), new Decimal(0));
   const bonRow = fixDates(rows[0], BON_DATE_COLS);
   return {
     ...bonRow,
@@ -723,7 +746,7 @@ export async function getBonDetail(id, client = getPool()) {
       ? bonJournal({ bon: bonRow, lines: lines.rows, history: history.rows, payments: payments.rows })
       : [],
     progress: bonProgress(rows[0].status, lines.rows),
-    pay: passagerPay(rows[0], paidToPassager),
+    pay: passagerPay(rows[0], paidToPassager, remisePassager),
     fournisseurs: fournisseurs.rows,
     lines: lines.rows,
     history: history.rows,
@@ -1124,7 +1147,7 @@ async function reverseShip(c, bon, leg, adminId) {
   }
 }
 
-export async function settle({ admin, id, passagerPayment, caisseId, paidNow, note, ip }) {
+export async function settle({ admin, id, passagerPayment, caisseId, paidNow, closeWithRemise, note, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
     const bon = rows[0];
@@ -1147,7 +1170,7 @@ export async function settle({ admin, id, passagerPayment, caisseId, paidNow, no
     // reste se paie plus tard depuis « Argent ». Sans caisse, rien ne sort.
     if (caisseId && bon.passager_id && new Decimal(payment).gt(0)) {
       await payPassagerTx(c, { ...bon, status: 'regle', passager_payment: payment },
-        { admin, caisseId, amount: paidNow, note, ip });
+        { admin, caisseId, amount: paidNow, settle: closeWithRemise, note, ip });
     }
     return getBonDetail(id, c);
   });
@@ -1236,7 +1259,23 @@ async function alreadyMoved(c, bonId, type) {
   return new Decimal(rows[0].total);
 }
 
-export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
+// Ce qu'on a laissé tomber du dû sur ce bon par des remises de règlement. Le
+// grand livre écrit la remise du côté qui ramène le compte à zéro : positive pour
+// un fournisseur (il doit moins), négative pour un passager (on lui doit moins).
+// On rend ici la remise accordée, positive quand on a laissé tomber du dû, dans
+// les deux cas ; un arrondi au-dessus donne un nombre négatif.
+async function alreadyRemised(c, bonId, side) {
+  const { rows } = await c.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM person_ledger WHERE ref_bon_id = $1 AND type = 'remise'`, [bonId]
+  );
+  const total = new Decimal(rows[0].total);
+  return side === 'passager' ? total.negated() : total;
+}
+
+// `settle` : solder ce qui reste dû avec la différence, en remise. Le fournisseur
+// verse 52 000 sur 52 340 : 52 000 entrent en caisse, 340 s'inscrivent en remise,
+// et son compte tombe à zéro.
+export async function collectFee({ admin, id, caisseId, amount, settle = false, note, ip }) {
   return withTx(async (c) => {
     // FOR UPDATE : deux encaissements simultanés sur le même bon lisaient tous
     // les deux « rien encaissé » et postaient tous les deux le total.
@@ -1253,13 +1292,16 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
     await assertCaisseOffice(c, caisseId, 'algeria',
       'Le fournisseur paie en Algérie : choisissez une caisse du bureau d’Algérie.');
     const paid = await alreadyMoved(c, id, 'fee_payment');
-    const due = new Decimal(bon.transport_fee).minus(paid);
+    const remised = await alreadyRemised(c, id, 'fournisseur');
+    const due = new Decimal(bon.transport_fee).minus(paid).minus(remised);
     if (due.lte(0)) {
       throw errors.conflict(`Frais déjà encaissés en totalité pour ${bon.reference} (${paid.toFixed(2)} ${bon.transport_currency}).`);
     }
     const amt = amount != null && amount !== '' ? parseMoney(amount, 'Montant', { allowZero: false }) : due.toFixed(2);
     if (!(new Decimal(amt).gt(0))) throw errors.invalidAmount('Aucun montant à encaisser.');
-    if (new Decimal(amt).gt(due)) {
+    // Au-dessus du dû, seulement pour solder en arrondissant (dans le pas permis).
+    const diff = settle ? await remiseDiff(c, { due, amount: amt, currency: bon.transport_currency }) : null;
+    if (!settle && new Decimal(amt).gt(due)) {
       throw errors.conflict(`Montant supérieur au reste dû : il reste ${due.toFixed(2)} ${bon.transport_currency} sur ${bon.reference}.`);
     }
 
@@ -1272,12 +1314,19 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
       amount: amt, type: 'fee_payment', refOrderId: bon.order_id, refBonId: bon.id,
       caisseTxId: txId, adminId: admin.id, note,
     });
+    if (diff && !diff.isZero()) {
+      await appendEntry(c, {
+        personType: 'personne', personId: bon.fournisseur_id, currency: bon.transport_currency,
+        amount: diff.toFixed(2), type: 'remise', refOrderId: bon.order_id, refBonId: bon.id,
+        caisseTxId: txId, adminId: admin.id, note: 'Remise de règlement',
+      });
+    }
     // Le paiement est devenu une porte du statut : un ordre entièrement livré
     // ne se clôture qu'une fois les frais encaissés. Sans ce recalcul, le
     // dernier dinar reçu ne referme rien, et l'ordre reste « livrée » jusqu'à
     // ce qu'autre chose vienne le toucher par hasard.
     await recomputeOrderStatus(c, bon.order_id);
-    await writeAudit(c, { adminId: admin.id, action: 'bon.collect_fee', entity: 'bon', entityId: id, details: { amount: amt, caisseId }, ip });
+    await writeAudit(c, { adminId: admin.id, action: 'bon.collect_fee', entity: 'bon', entityId: id, details: { amount: amt, caisseId, remise: diff ? diff.toFixed(2) : undefined }, ip });
     return getBonDetail(id, c);
   });
 }
@@ -1287,19 +1336,21 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
 // Partagé par payPassager() et settle() : régler ET payer est un seul geste au
 // comptoir, il doit être une seule transaction — un bon marqué réglé sans que
 // la caisse bouge est exactement ce qu'on ne veut jamais voir.
-async function payPassagerTx(c, bon, { admin, caisseId, amount, note, ip }) {
+async function payPassagerTx(c, bon, { admin, caisseId, amount, settle = false, note, ip }) {
   const id = bon.id;
   {
     if (bon.status !== 'regle') throw errors.conflict('Le bon doit être réglé avant de payer le passager.');
     if (!bon.passager_id) throw errors.conflict('Aucun passager sur ce bon.');
     const paid = await alreadyMoved(c, id, 'passager_payment');
-    const due = new Decimal(bon.passager_payment ?? 0).minus(paid);
+    const remised = await alreadyRemised(c, id, 'passager');
+    const due = new Decimal(bon.passager_payment ?? 0).minus(paid).minus(remised);
     if (due.lte(0)) {
       throw errors.conflict(`Passager déjà payé en totalité pour ${bon.reference} (${paid.toFixed(2)} ${bon.transport_currency}).`);
     }
     const amt = amount != null && amount !== '' ? parseMoney(amount, 'Montant', { allowZero: false }) : due.toFixed(2);
     if (amt == null || !(new Decimal(amt).gt(0))) throw errors.invalidAmount('Aucun paiement à effectuer.');
-    if (new Decimal(amt).gt(due)) {
+    const diff = settle ? await remiseDiff(c, { due, amount: amt, currency: bon.transport_currency }) : null;
+    if (!settle && new Decimal(amt).gt(due)) {
       throw errors.conflict(`Montant supérieur au reste à payer : il reste ${due.toFixed(2)} ${bon.transport_currency} sur ${bon.reference}.`);
     }
 
@@ -1312,16 +1363,25 @@ async function payPassagerTx(c, bon, { admin, caisseId, amount, note, ip }) {
       amount: new Decimal(amt).negated().toFixed(2), type: 'passager_payment',
       refOrderId: bon.order_id, refBonId: bon.id, caisseTxId: txId, adminId: admin.id, note,
     });
-    await writeAudit(c, { adminId: admin.id, action: 'bon.pay_passager', entity: 'bon', entityId: id, details: { amount: amt, caisseId }, ip });
+    // Du côté passager, le compte porte ce QU'ON LUI DOIT (positif) : la remise
+    // qui le ramène à zéro est de signe contraire à la différence.
+    if (diff && !diff.isZero()) {
+      await appendEntry(c, {
+        personType: 'personne', personId: bon.passager_id, currency: bon.transport_currency,
+        amount: diff.negated().toFixed(2), type: 'remise', refOrderId: bon.order_id, refBonId: bon.id,
+        caisseTxId: txId, adminId: admin.id, note: 'Remise de règlement',
+      });
+    }
+    await writeAudit(c, { adminId: admin.id, action: 'bon.pay_passager', entity: 'bon', entityId: id, details: { amount: amt, caisseId, remise: diff ? diff.toFixed(2) : undefined }, ip });
   }
 }
 
-export async function payPassager({ admin, id, caisseId, amount, note, ip }) {
+export async function payPassager({ admin, id, caisseId, amount, settle, note, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
     const bon = rows[0];
     if (!bon) throw errors.notFound('Bon introuvable.');
-    await payPassagerTx(c, bon, { admin, caisseId, amount, note, ip });
+    await payPassagerTx(c, bon, { admin, caisseId, amount, settle, note, ip });
     return getBonDetail(id, c);
   });
 }

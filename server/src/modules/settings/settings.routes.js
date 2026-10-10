@@ -31,6 +31,15 @@ const SCHEMAS = {
       pied_de_page: 'Document généré par Swift Cargo',
     },
   },
+  // Le pas d'arrondi des règlements, par devise : on se règle à 52 000 ou 52 500
+  // plutôt qu'à 52 340. `defaut` vaut pour toute devise sans pas à elle.
+  arrondi: {
+    schema: z.object({
+      defaut: z.number().positive().max(1_000_000),
+      pas: z.record(z.string().length(3), z.number().positive().max(1_000_000)),
+    }),
+    defaults: { defaut: 1, pas: { DZD: 500 } },
+  },
   // Alipay yuan and cash yuan are the same money here, so the app keeps them
   // equal rather than trusting two humans to remember. See rates.service.js.
   taux: {

@@ -53,9 +53,16 @@ export default function ParametresPage() {
   const { data, loading, error, reload } = useApi('/settings');
   const [societe, setSociete] = useState(null);
   const [busy, setBusy] = useState('');
+  // Le pas d'arrondi, par devise : du texte, pour que la saisie ne soit jamais coupée.
+  const [arrondi, setArrondi] = useState(null);
+  const currencies = useApi('/currencies');
 
   useEffect(() => {
-    if (data?.settings) setSociete(data.settings.societe);
+    if (data?.settings) {
+      setSociete(data.settings.societe);
+      const a = data.settings.arrondi;
+      if (a) setArrondi({ defaut: String(a.defaut), pas: Object.fromEntries(Object.entries(a.pas).map(([k, v]) => [k, String(v)])) });
+    }
   }, [data]);
 
   const save = async (key, value) => {
@@ -101,6 +108,41 @@ export default function ParametresPage() {
             </span>
           </label>
         </div>
+      )}
+
+      {/* On se règle à 52 000 plutôt qu'à 52 340 : le pas dit de combien on arrondit. */}
+      {arrondi && (
+        <form
+          className="panel"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const num = (v) => Number(String(v).replace(',', '.'));
+            save('arrondi', {
+              defaut: num(arrondi.defaut) || 1,
+              pas: Object.fromEntries(Object.entries(arrondi.pas).filter(([, v]) => num(v) > 0).map(([k, v]) => [k, num(v)])),
+            });
+          }}
+        >
+          <h2 className="panel-title">Arrondi des règlements</h2>
+          <p className="muted" style={{ fontSize: '0.78rem', marginTop: -4 }}>
+            Quand on solde une dette, le montant proposé est arrondi à ce pas : 52 340 devient 52 000 ou 52 500 avec un pas de 500.
+            La différence s’inscrit en remise ; la caisse ne bouge que du montant réel.
+          </p>
+          <div className="op-form">
+            {(currencies.data?.currencies ?? []).map((c) => (
+              <label key={c.code} className="field"><span>Pas en {c.code}</span>
+                <input
+                  inputMode="decimal"
+                  value={arrondi.pas[c.code] ?? ''}
+                  placeholder={arrondi.defaut}
+                  onChange={(e) => setArrondi({ ...arrondi, pas: { ...arrondi.pas, [c.code]: e.target.value } })}
+                /></label>
+            ))}
+            <label className="field"><span>Autres devises</span>
+              <input inputMode="decimal" value={arrondi.defaut} onChange={(e) => setArrondi({ ...arrondi, defaut: e.target.value })} /></label>
+            <button className="btn btn-gold" disabled={busy === 'arrondi'}>Enregistrer</button>
+          </div>
+        </form>
       )}
 
       {societe && (

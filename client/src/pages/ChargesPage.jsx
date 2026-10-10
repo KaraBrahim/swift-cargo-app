@@ -9,6 +9,7 @@ import { Spinner, PageHeader, EmptyState, formatMoney, errorMessage, useToast } 
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor } from '../lib/offices.js';
+import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import AmountInput from '../components/AmountInput.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
@@ -125,7 +126,8 @@ export default function ChargesPage() {
           <label className="field field-grow"><span>Libellé</span>
             <input autoFocus value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="ex. Abonnement fibre — bureau Chine" /></label>
           <label className="field"><span>Montant</span>
-            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} /></label>
+            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} />
+            <RoundChips amount={form.amount} currency={form.currency} onPick={(v) => setForm({ ...form, amount: v })} /></label>
           <label className="field"><span>Devise</span>
             <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
               {(currencies.data?.currencies ?? []).map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}

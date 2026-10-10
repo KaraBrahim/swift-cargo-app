@@ -7,6 +7,7 @@ import { Decimal, toDecimal, MAX_AMOUNT } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { assertCaisseOffice, postMovement, replayChain } from '../caisse/caisse.service.js';
+import { remiseDiff } from '../../lib/remise.js';
 // orderStatus.js ne dépend que de la lib money : l'importer ici n'introduit
 // aucun cycle, là où importer orders.service.js en aurait créé un.
 import { recomputeOrderStatus } from '../orders/orderStatus.js';
@@ -146,7 +147,7 @@ export async function getAccount(personType, personId) {
 // a fournisseur and be owed as a passager. The caller states it; left unsaid it
 // follows the sign of the balance — negative means they owe us, so money comes
 // IN — which is exactly what the button on the profile offers.
-export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, note, ip }) {
+export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, settle = false, note, ip }) {
   const personType = 'personne';
   return withTx(async (c) => {
     const person = await c.query('SELECT is_fournisseur FROM people WHERE id=$1 AND active=TRUE', [personId]);
@@ -164,6 +165,16 @@ export async function settleAccount({ admin, personId, caisseId, amount, currenc
         [personType, personId, currency]
       );
       incoming = new Decimal(rows[0]?.balance ?? 0).lte(0);
+    }
+    // `settle` : solder le compte avec la différence, en remise de règlement.
+    let diff = null;
+    if (settle) {
+      const { rows: [bal] } = await c.query(
+        'SELECT balance FROM person_balances WHERE person_type=$1 AND person_id=$2 AND currency_code=$3 FOR UPDATE',
+        [personType, personId, currency]
+      );
+      const balance = new Decimal(bal?.balance ?? 0);
+      diff = await remiseDiff(c, { due: incoming ? balance.negated() : balance, amount: amt, currency });
     }
     // Un fournisseur qui règle sa dette paie au bureau d'Algérie.
     if (incoming && person.rows[0].is_fournisseur) {
@@ -184,12 +195,22 @@ export async function settleAccount({ admin, personId, caisseId, amount, currenc
       type: incoming ? 'fee_payment' : 'passager_payment',
       caisseTxId: txId, adminId: admin.id, note,
     });
+    // La remise ramène le compte à zéro : même sens que le paiement quand on
+    // encaisse, sens contraire quand on paie.
+    if (diff && !diff.isZero()) {
+      await appendEntry(c, {
+        personType, personId, currency,
+        amount: (incoming ? diff : diff.negated()).toFixed(2),
+        type: 'remise', caisseTxId: txId, adminId: admin.id, note: 'Remise de règlement',
+      });
+    }
     await recomputePersonOrders(c, personType, personId);
     await writeAudit(c, {
       adminId: admin.id, action: 'person.settle', entity: 'person', entityId: personId,
-      details: { amount: amt.toFixed(2), currency, caisseId }, ip,
+      details: { amount: amt.toFixed(2), currency, caisseId, remise: diff ? diff.toFixed(2) : undefined }, ip,
     });
-    return { entry, balance: entry.balance_after };
+    const after = (await c.query('SELECT balance FROM person_balances WHERE person_type=$1 AND person_id=$2 AND currency_code=$3', [personType, personId, currency])).rows[0];
+    return { entry, balance: after?.balance ?? entry.balance_after };
   });
 }
 
@@ -301,6 +322,8 @@ export async function updateCharge({ admin, id, label, amount, category, period,
     const { rows } = await c.query('SELECT * FROM charges WHERE id=$1 FOR UPDATE', [id]);
     const ch = rows[0];
     if (!ch) throw errors.notFound('Charge introuvable.');
+    const { rows: [rem] } = await c.query('SELECT 1 FROM employee_remises WHERE charge_id=$1', [id]);
+    if (rem) throw errors.conflict('Ce versement solde un salaire avec une remise : annulez-le et refaites-le, plutôt que de le corriger.');
     const amt = amount != null && amount !== '' ? new Decimal(amount) : new Decimal(ch.amount);
     if (!amt.gt(0)) throw errors.invalidAmount('Le montant doit être supérieur à zéro.');
 
@@ -352,6 +375,13 @@ async function loadPayment(c, entryId) {
 export async function updatePayment({ admin, entryId, amount, note, ip }) {
   return withTx(async (c) => {
     const entry = await loadPayment(c, entryId);
+    // Un paiement qui solde avec une remise ne se corrige pas à la main : changer
+    // son montant laisserait la remise à l'ancien chiffre, et le compte à côté de
+    // zéro. On l'annule et on le refait.
+    if (entry.caisse_tx_id) {
+      const { rows: [r] } = await c.query("SELECT 1 FROM person_ledger WHERE caisse_tx_id=$1 AND type='remise' LIMIT 1", [entry.caisse_tx_id]);
+      if (r) throw errors.conflict('Ce paiement solde un compte avec une remise : annulez-le et refaites-le, plutôt que de le corriger.');
+    }
     const next = amount != null && amount !== '' ? new Decimal(amount) : new Decimal(entry.amount).abs();
     if (!next.gt(0)) throw errors.invalidAmount('Le montant doit être supérieur à zéro.');
     if (next.decimalPlaces() > 2) throw errors.invalidAmount('Montant : maximum 2 décimales.');
@@ -387,6 +417,8 @@ export async function deletePayment({ admin, entryId, ip }) {
       ? (await c.query('SELECT * FROM transactions WHERE id=$1', [entry.caisse_tx_id])).rows[0]
       : null;
 
+    // La remise qui accompagnait ce paiement part avec lui.
+    if (entry.caisse_tx_id) await c.query("DELETE FROM person_ledger WHERE caisse_tx_id=$1 AND type='remise'", [entry.caisse_tx_id]);
     await c.query('DELETE FROM person_ledger WHERE id=$1', [entryId]);
     await replayPersonLedger(c, entry.person_type, entry.person_id, entry.currency_code);
 

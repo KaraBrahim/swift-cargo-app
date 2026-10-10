@@ -62,6 +62,8 @@ employeesRouter.post(
   validate({ params: z.object({ id }), body: z.object({
     amount: money, caisseId: id.optional(),
     period: z.string().trim().regex(/^\d{4}-\d{2}$/).optional(),
+    // Solder le salaire : la différence entre le dû et le versé s'inscrit en remise.
+    settle: z.boolean().optional(),
     note: z.string().trim().max(300).optional(),
   }) }),
   asyncHandler(async (req, res) => res.status(201).json({ payment: await svc.payEmployee({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))

@@ -57,6 +57,8 @@ peopleRouter.post(
       amount: z.union([z.string(), z.number()]).transform((v) => String(v).trim()),
       currency: z.string().trim().toUpperCase().length(3).default('DZD'),
       direction: z.enum(['in', 'out']).optional(),
+      // Solder le compte : la différence entre le dû et ce qu'on règle s'inscrit en remise.
+      settle: z.boolean().optional(),
       note: z.string().trim().max(300).optional(),
     }),
   }),

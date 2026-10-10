@@ -7,6 +7,7 @@ import { Spinner, Money, formatMoney, errorMessage, useToast } from '../componen
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
+import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { tableDocBody } from '../components/printDocument.js';
 import { listTicket } from '../components/printTicket.js';
@@ -377,6 +378,7 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
             value={amount}
             onChange={(v) => setAmount(v)}
           />
+          <RoundChips amount={amount} currency={currency} onPick={setAmount} />
         </label>
 
         <label className="field field-grow">

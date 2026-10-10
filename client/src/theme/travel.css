@@ -124,3 +124,12 @@
 .jr-line { border: 1px solid var(--border); border-radius: 12px; padding: 8px 14px 12px; background: var(--surface-1); }
 .jr-line > summary { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; padding: 6px 0; list-style: none; }
 .jr-line > summary::-webkit-details-marker { display: none; }
+
+/* ── arrondir un règlement, et solder avec la différence ── */
+.round-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+.remise { display: grid; gap: 6px; margin-top: 8px; }
+.remise-line { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+.remise-line input { margin-top: 3px; }
+.remise-line.on { color: var(--text); }
+.remise-sum { margin: 0; font-size: 12px; }
+.remise-note { font-size: 11px; }

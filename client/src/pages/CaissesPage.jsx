@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { RoleBadges } from '../components/RolePicker.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
+import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import AmountInput from '../components/AmountInput.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 
@@ -423,7 +424,8 @@ export default function CaissesPage() {
               {curList.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
             </select></label>
           <label className="field"><span>Montant</span>
-            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} /></label>
+            <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} />
+            <RoundChips amount={form.amount} currency={form.currency} onPick={(v) => setForm({ ...form, amount: v })} /></label>
           <label className="field field-grow"><span>Note</span>
             <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
           <button className="btn btn-gold" disabled={busy || !form.fromCaisseId || !form.toCaisseId || !(Number(form.amount) > 0)}>Envoyer</button>

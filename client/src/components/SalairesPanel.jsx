@@ -16,6 +16,7 @@ import AmountInput from './AmountInput.jsx';
 import { EntityPicker } from './EntityPicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { defaultCurrencyFor } from '../lib/offices.js';
+import { RemiseControl, RoundChips } from './RemiseControl.jsx';
 
 const monthLabel = (p) => new Date(`${p}-01T00:00:00`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 const dt = (v) => (v ? new Date(v).toLocaleDateString('fr-FR') : '—');
@@ -74,7 +75,7 @@ export function SalairesPanel({ offices, currencies }) {
     ev.preventDefault();
     run(() => idem((key) => api(`/employees/${pay.id}/pay`, {
       method: 'POST', idem: key,
-      body: { amount: pay.amount, caisseId: Number(pay.caisseId), note: pay.note || undefined },
+      body: { amount: pay.amount, caisseId: Number(pay.caisseId), note: pay.note || undefined, settle: pay.settle || undefined },
     })), `${formatMoney(pay.amount, pay.currency)} versés à ${pay.name}.`);
   };
 
@@ -148,6 +149,13 @@ export function SalairesPanel({ offices, currencies }) {
           <button className="btn btn-gold" disabled={busy || !pay.caisseId || !(Number(pay.amount) > 0)}>
             <IconEl name="arrowOut" />Verser {formatMoney(Number(pay.amount || 0), pay.currency)}
           </button>
+          <div className="field-grow">
+            <RemiseControl
+              due={Number(pay.remaining)} amount={pay.amount} currency={pay.currency}
+              onAmount={(v) => setPay((p) => ({ ...p, amount: v }))}
+              settle={pay.settle} onSettle={(v) => setPay((p) => ({ ...p, settle: v }))}
+            />
+          </div>
           <button type="button" className="btn btn-ghost" onClick={() => setPay(null)}>Annuler</button>
         </form>
       )}

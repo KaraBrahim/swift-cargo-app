@@ -68,6 +68,7 @@ export function MoneyBar({ pay, code, label = 'Réglé', compact = false }) {
       </div>
       <div className="pg-line">
         {compact ? `${pctText(pay.pct)} ${label.toLowerCase()}` : <>{text} · <strong>{pctText(pay.pct)}</strong></>}
+        {Number(pay.remise) !== 0 && !compact && <span className="muted"> · dont remise de règlement {formatMoney(pay.remise, code)}</span>}
       </div>
     </div>
   );

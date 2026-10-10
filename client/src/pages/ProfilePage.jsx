@@ -13,6 +13,7 @@ import AmountInput from '../components/AmountInput.jsx';
 import { WilayaField } from '../components/WilayaField.jsx';
 import { RolePicker, RoleBadges, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
+import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const ENTRY_LABEL = {
@@ -23,6 +24,9 @@ const ENTRY_LABEL = {
   // Ce que le passager doit quand ce qu'il n'a pas livré valait plus que son
   // portage : une dette a son nom, pas un simple non-paiement.
   passager_manquant: 'Manquants à rembourser',
+  // La différence convenue pour solder une dette à un montant rond : elle ne
+  // passe pas par la caisse.
+  remise: 'Remise de règlement',
   adjustment: 'Ajustement',
   avance: 'Avance',
   remboursement: 'Remboursement',
@@ -200,14 +204,14 @@ export default function ProfilePage() {
         method: 'POST', idem: key,
         body: {
           caisseId: Number(pay.caisseId), amount: pay.amount, currency: pay.currency,
-          direction: incoming ? 'in' : 'out', note: pay.note || undefined,
+          direction: incoming ? 'in' : 'out', note: pay.note || undefined, settle: pay.settle || undefined,
         },
       }));
       toast.success(incoming ? 'Encaissement enregistré.' : 'Paiement enregistré.');
       // La devise n'est pas remise au dinar : le rechargement du compte, juste
       // après, reproposera la devise et le montant qui restent à régler. La
       // forcer ici ne ferait que faire clignoter « 0.00 DZD » entre les deux.
-      setPay((p) => ({ ...p, caisseId: '', amount: '', note: '' }));
+      setPay((p) => ({ ...p, caisseId: '', amount: '', note: '', settle: false }));
       account.reload();
     } catch (err) { toast.error(errorMessage(err)); }
     finally { setBusy(false); }
@@ -428,6 +432,11 @@ export default function ProfilePage() {
                 {busy ? '…' : incoming ? 'Encaisser' : 'Payer'}
               </button>
             </form>
+            <RemiseControl
+              due={Math.abs(Number(owedIn(balances, pay.currency)))} amount={pay.amount} currency={pay.currency}
+              onAmount={(v) => setPay((p) => ({ ...p, amount: v }))}
+              settle={pay.settle} onSettle={(v) => setPay((p) => ({ ...p, settle: v }))}
+            />
             <p className="muted line-hint">
               Un montant partiel est accepté : le solde restant reste {incoming ? 'dû par cette personne' : 'dû à cette personne'}.
             </p>

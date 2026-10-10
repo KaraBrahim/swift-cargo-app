@@ -22,6 +22,7 @@ import { useIdempotent } from '../lib/useIdempotent.js';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { Journal } from '../components/Journal.jsx';
+import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { priceBasis, weightShare, priceUnit } from '../lib/lineMath.js';
 import { formatDateFr } from '../lib/format.js';
 import { orderManifestBody } from '../components/printDocument.js';
@@ -127,10 +128,10 @@ export default function OrderDetailPage() {
     try {
       await idem((key) => api(`/bons/${goodsBonId}/collect-fee`, {
         method: 'POST', idem: key,
-        body: { caisseId: Number(cash.caisseId), amount: cash.amount || undefined },
+        body: { caisseId: Number(cash.caisseId), amount: cash.amount || undefined, settle: cash.settle || undefined },
       }));
       toast.success('Encaissé.');
-      setCash({ caisseId: '', amount: '' });
+      setCash({ caisseId: '', amount: '', settle: false });
       reload();
     } catch (err) { toast.error(errorMessage(err)); }
     finally { setBusy(false); }
@@ -420,6 +421,11 @@ export default function OrderDetailPage() {
                   <IconEl name="arrowIn" />Encaisser {formatMoney(Number(cash.amount || 0), cur)}
                 </button>
               </div>
+              <RemiseControl
+                due={due} amount={cash.amount} currency={cur}
+                onAmount={(v) => setCash((f) => ({ ...f, amount: v }))}
+                settle={cash.settle} onSettle={(v) => setCash((f) => ({ ...f, settle: v }))}
+              />
               <Footnote>
                 Un versement partiel est accepté : corrigez le montant, le reste dû suivra.
                 Tant qu'aucune caisse n'est choisie, rien n'est encaissé — le fournisseur paiera plus tard.

@@ -21,6 +21,7 @@ import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { TravelFields, travelOf, travelBody } from '../components/TravelFields.jsx';
 import { ArrivalBadge } from '../components/ArrivalBadge.jsx';
 import { Journal } from '../components/Journal.jsx';
+import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { bonDocBody, measureQty, measureUnit, declaredOf, priceUnit } from '../components/printDocument.js';
 import { pricedPart } from '../lib/lineMath.js';
 import { bonTicket } from '../components/printTicket.js';
@@ -52,6 +53,15 @@ const toEditLine = (l) => {
     };
   }
   return { ...base, itemId: l.item_id || null, createItem: false, categoryId: '' };
+};
+
+// Ce qui reste dû sur un bon : le total, moins ce qui est entré ou sorti de caisse,
+// moins ce qu'on a laissé tomber par remise de règlement.
+const dueAfter = (total, payments, type) => {
+  const mine = (payments ?? []).filter((p) => p.type === type);
+  const paid = mine.reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0);
+  const remise = mine.reduce((sum, p) => sum + Number(p.remise || 0), 0);
+  return Math.max(Number(total ?? 0) - paid - remise, 0);
 };
 
 // Les aides de mesure (measureOf, measureQty, measureUnit, declaredOf) viennent de printDocument.js.
@@ -98,6 +108,8 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   // doit : on règle le bon, on verse ce qu'on a en caisse, le reste se paie
   // depuis « Argent ». Vide = tout le dû.
   const [settlePaid, setSettlePaid] = useState('');
+  // Verser en soldant : la différence avec le dû s'inscrit en remise.
+  const [closeSettle, setCloseSettle] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPayment, setConfirmPayment] = useState(null);
@@ -134,12 +146,9 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
       // Les deux formulaires d'argent s'ouvrent sur ce qui RESTE dû, pas sur le
       // total d'origine : payer deux fois un bon à moitié réglé est l'erreur
       // qu'il faut rendre impossible.
-      const paidOf = (type) =>
-        (bon.payments ?? []).filter((p) => p.type === type)
-          .reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0);
-      const due = (total, type) => Math.max(Number(total ?? 0) - paidOf(type), 0).toFixed(2);
-      setFeeForm((f) => ({ ...f, amount: due(bon.transport_fee, 'fee_payment') }));
-      setPayForm((f) => ({ ...f, amount: due(bon.passager_payment, 'passager_payment') }));
+      setFeeForm((f) => ({ ...f, amount: dueAfter(bon.transport_fee, bon.payments, 'fee_payment').toFixed(2), settle: false }));
+      setPayForm((f) => ({ ...f, amount: dueAfter(bon.passager_payment, bon.payments, 'passager_payment').toFixed(2), settle: false }));
+      setCloseSettle(false);
     }
   }, [bon]);
 
@@ -225,12 +234,13 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
         passagerPayment: payment || undefined,
         caisseId: settleCaisse ? Number(settleCaisse) : undefined,
         paidNow: settleCaisse && settlePaid ? settlePaid : undefined,
+        closeWithRemise: settleCaisse && closeSettle ? true : undefined,
       },
     })), settleCaisse ? 'Bon réglé et passager payé.' : 'Bon réglé — passager à payer.');
   const collectFee = () =>
-    act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount } })), 'Frais encaissés.');
+    act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount, settle: feeForm.settle || undefined } })), 'Frais encaissés.');
   const payPassager = () =>
-    act(() => idem((key) => api(`/bons/${id}/pay-passager`, { method: 'POST', idem: key, body: { caisseId: Number(payForm.caisseId), amount: payForm.amount } })), 'Passager payé.');
+    act(() => idem((key) => api(`/bons/${id}/pay-passager`, { method: 'POST', idem: key, body: { caisseId: Number(payForm.caisseId), amount: payForm.amount, settle: payForm.settle || undefined } })), 'Passager payé.');
 
   const isFournisseurBon = bon.order_id != null;
   // L'action que le bandeau propose. Avancer d'un cran passe par le même chemin
@@ -733,6 +743,12 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                     <AmountInput value={settlePaid} onChange={setSettlePaid} /></label>
                 )}
               </div>
+              {settleCaisse && (
+                <RemiseControl
+                  due={payMode === 'manual' && payment !== '' ? Number(payment || 0) : recDeliveredTotal} amount={settlePaid} currency={cur}
+                  onAmount={setSettlePaid} settle={closeSettle} onSettle={setCloseSettle}
+                />
+              )}
               <div className="dt-actions">
                 <button className="btn btn-gold" disabled={busy || (payMode === 'manual' && !(Number(payment) >= 0))} onClick={settle}>
                   <IconEl name="check" />{settleCaisse
@@ -763,10 +779,10 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                     </td>
                     <td>{p.person_name}</td>
                     <td className="muted">{p.caisse_label || '—'}</td>
-                    <td className="right">{formatMoney(p.amount, p.currency_code)}</td>
+                    <td className="right">{formatMoney(p.amount, p.currency_code)}{Number(p.remise) !== 0 && <span className="muted remise-note"> + remise {formatMoney(p.remise, p.currency_code)}</span>}</td>
                     <td className="right nowrap">
-                      <button className="icon-btn" title="Corriger le montant" aria-label="Corriger ce paiement"
-                        disabled={busy} onClick={() => setEditPayment({ id: p.id, amount: String(Math.abs(Number(p.amount))), note: p.note || '', currency: p.currency_code })}>
+                      <button className="icon-btn" title={Number(p.remise) !== 0 ? 'Ce paiement solde avec une remise : annulez-le et refaites-le' : 'Corriger le montant'} aria-label="Corriger ce paiement"
+                        disabled={busy || Number(p.remise) !== 0} onClick={() => setEditPayment({ id: p.id, amount: String(Math.abs(Number(p.amount))), note: p.note || '', currency: p.currency_code })}>
                         <IconEl name="edit" />
                       </button>
                       {/* Annuler un paiement fait ressortir l'argent de la caisse et rouvre la dette : reserve au super-administrateur. */}
@@ -834,6 +850,11 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                 <IconEl name="arrowIn" />Encaisser
               </button>
             </div>
+            <RemiseControl
+              due={dueAfter(bon.transport_fee, bon.payments, 'fee_payment')} amount={feeForm.amount} currency={cur}
+              onAmount={(v) => setFeeForm((f) => ({ ...f, amount: v }))}
+              settle={feeForm.settle} onSettle={(v) => setFeeForm((f) => ({ ...f, settle: v }))}
+            />
           </div>
         ) : (
           <div className="money-block">
@@ -842,6 +863,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
               <span>Vous payez le passager <strong>{bon.passager_name || '—'}</strong>.</span>
             </div>
             {bon.status === 'regle' && bon.passager_id ? (
+              <>
               <div className="wz-money">
                 <div className="field field-grow"><span>Caisse qui paie</span>
                   <EntityPicker
@@ -861,6 +883,12 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                   <IconEl name="arrowOut" />Payer
                 </button>
               </div>
+              <RemiseControl
+                due={dueAfter(bon.passager_payment, bon.payments, 'passager_payment')} amount={payForm.amount} currency={cur}
+                onAmount={(v) => setPayForm((f) => ({ ...f, amount: v }))}
+                settle={payForm.settle} onSettle={(v) => setPayForm((f) => ({ ...f, settle: v }))}
+              />
+              </>
             ) : (
               <p className="dt-hint">
                 <IconEl name="help" />Le montant se fixe au règlement du bon, une fois les manquants connus.

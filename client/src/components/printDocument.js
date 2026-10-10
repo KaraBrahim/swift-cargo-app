@@ -308,6 +308,7 @@ export function orderManifestBody(d, qr) {
       ${Number(t.discount) ? `Remise : − ${money(t.discount)}<br>` : ''}
       <span class="big">À facturer au fournisseur : <strong>${money(t.billed ?? t.transport_fee)}</strong></span><br>
       ${Number(t.collected) ? `Encaissé : ${money(t.collected)}${d.pay ? ` (${num(d.pay.pct)} %)` : ''}<br>` : ''}
+      ${Number(t.remise) !== 0 ? `Remise de règlement : ${money(t.remise)}<br>` : ''}
       ${Number(t.collected) ? `Reste dû : <strong>${money(t.due)}</strong><br>` : ''}
       ${Number(t.loss_total) ? `Valeur des manquants (portée en avoir) : ${money(t.loss_total)}<br>` : ''}
     </div>
@@ -399,7 +400,7 @@ export function bonDocBody(bon, qr) {
       Frais de transport (commandé) : <strong>${formatMoney(bon.transport_fee, cur)}</strong><br>
       Manquants : ${formatMoney(bon.loss_total, cur)}<br>
       ${bon.passager_payment != null ? `Payé au passager (livré) : <strong>${formatMoney(bon.passager_payment, cur)}</strong>` : ''}
-      ${bon.pay && Number(bon.pay.paid) > 0 ? `<br>Versé : ${formatMoney(bon.pay.paid, cur)} (${num(bon.pay.pct)} %) · Reste : <strong>${formatMoney(bon.pay.rest, cur)}</strong>` : ''}
+      ${bon.pay && Number(bon.pay.paid) > 0 ? `<br>Versé : ${formatMoney(bon.pay.paid, cur)} (${num(bon.pay.pct)} %)${Number(bon.pay.remise) !== 0 ? ` · Remise de règlement : ${formatMoney(bon.pay.remise, cur)}` : ''} · Reste : <strong>${formatMoney(bon.pay.rest, cur)}</strong>` : ''}
     </div>
     ${qrBlock(qr, bon.reference)}
     <div class="sign"><div>Signature Fournisseur</div><div>Signature Passager</div></div>`;

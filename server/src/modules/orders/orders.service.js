@@ -263,22 +263,31 @@ export async function listOrders({ status, search, fournisseurId, dateBy, from, 
          FROM bon_lines bl JOIN bons b ON b.id = bl.bon_id
         WHERE b.order_id = ANY($1)`, [ids]),
     getPool().query(
-      `SELECT ref_order_id AS order_id, SUM(ABS(amount)) AS total FROM person_ledger
-        WHERE ref_order_id = ANY($1) AND type = 'fee_payment' GROUP BY ref_order_id`, [ids]),
+      `SELECT ref_order_id AS order_id,
+              SUM(ABS(amount)) FILTER (WHERE type = 'fee_payment') AS total,
+              SUM(amount) FILTER (WHERE type = 'remise') AS remise
+         FROM person_ledger
+        WHERE ref_order_id = ANY($1) AND type IN ('fee_payment', 'remise') GROUP BY ref_order_id`, [ids]),
   ]);
-  const flowOf = new Map(), cashOf = new Map(cash.map((c) => [String(c.order_id), c.total]));
+  const flowOf = new Map(), cashOf = new Map(cash.map((c) => [String(c.order_id), c]));
   for (const l of flow) {
     const k = String(l.order_id);
     if (!flowOf.has(k)) flowOf.set(k, []);
     flowOf.get(k).push(l);
   }
-  return rows.map((o) => ({
-    ...o,
-    progress: orderProgress(flowOf.get(String(o.id)) ?? []),
-    pay: moneyProgress(
-      Decimal.max(new Decimal(o.total_fee).minus(o.total_discount), 0),
-      cashOf.get(String(o.id)) ?? 0),
-  }));
+  return rows.map((o) => {
+    const c = cashOf.get(String(o.id));
+    const remise = new Decimal(c?.remise ?? 0);
+    return {
+      ...o,
+      progress: orderProgress(flowOf.get(String(o.id)) ?? []),
+      // Ce qui reste à encaisser tient compte de la remise de règlement.
+      pay: {
+        ...moneyProgress(Decimal.max(new Decimal(o.total_fee).minus(o.total_discount).minus(remise), 0), c?.total ?? 0),
+        remise: remise.toFixed(2),
+      },
+    };
+  });
 }
 
 export async function getOrderDetail(id, client = getPool()) {
@@ -328,10 +337,14 @@ export async function getOrderDetail(id, client = getPool()) {
   // Ce que le fournisseur a déjà versé sur cet ordre. Sans ce chiffre, la fiche
   // ne peut ni proposer le reste dû ni dire que tout est encaissé.
   const { rows: [cash] } = await client.query(
-    `SELECT COALESCE(SUM(ABS(amount)), 0) AS total FROM person_ledger
-      WHERE ref_order_id = $1 AND type = 'fee_payment'`,
+    `SELECT COALESCE(SUM(ABS(amount)) FILTER (WHERE type = 'fee_payment'), 0) AS total,
+            COALESCE(SUM(amount) FILTER (WHERE type = 'remise'), 0) AS remise
+       FROM person_ledger
+      WHERE ref_order_id = $1 AND type IN ('fee_payment', 'remise')`,
     [id]
   );
+  // Ce qu'on a laissé tomber du dû par remise de règlement.
+  const remise = new Decimal(cash.remise);
 
   // Exact decimals, not doubles: these three numbers are what the recap prints
   // and what the fournisseur is asked to pay.
@@ -365,7 +378,7 @@ export async function getOrderDetail(id, client = getPool()) {
     progress: orderProgress(lines),
     // Ce qui est arrivé à la marchandise, ligne par ligne, dans l'ordre.
     journal: await orderJournal(client, rows[0], lines),
-    pay: moneyProgress(billed, cash.total),
+    pay: { ...moneyProgress(Decimal.max(billed.minus(remise), 0), cash.total), remise: remise.toFixed(2) },
     totals: {
       ...totals,
       discount,
@@ -373,7 +386,8 @@ export async function getOrderDetail(id, client = getPool()) {
       goods: feeTotal.minus(commissionTotal).toFixed(2),
       billed: billed.toFixed(2),
       collected: new Decimal(cash.total).toFixed(2),
-      due: Decimal.max(feeTotal.minus(discountTotal).minus(cash.total), 0).toFixed(2),
+      remise: remise.toFixed(2),
+      due: Decimal.max(feeTotal.minus(discountTotal).minus(cash.total).minus(remise), 0).toFixed(2),
       // What is still sitting in China waiting for a passager.
       unallocated: withRemaining
         .reduce((acc, l) => acc.plus(Decimal.max(l.remaining, 0)), new Decimal(0)).toFixed(3),
