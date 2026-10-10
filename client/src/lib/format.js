@@ -96,3 +96,20 @@ export function relativeTime(iso) {
   const d = Math.round(h / 24);
   return `il y a ${d} j`;
 }
+
+// ── Le jour de la personne qui regarde ───────────────────────────────
+// Aujourd'hui selon l'horloge du POSTE, en AAAA-MM-JJ : à Alger une heure après
+// minuit, le serveur (en UTC) croit encore à hier. Les écrans le transmettent
+// à l'API plutôt que de la laisser deviner.
+const pad2 = (n) => String(n).padStart(2, '0');
+export const todayIso = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`;
+};
+// Un jour plus tard, ou plus tôt, sans passer par un fuseau.
+export const addDaysIso = (iso, days) => {
+  const p = parts(iso);
+  if (!p) return iso;
+  const d = new Date(Date.UTC(p.y, p.m - 1, p.d + days));
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+};

@@ -14,6 +14,7 @@ const BonsPage = lazy(() => import('./pages/BonsPage.jsx'));
 const BonDetailPage = lazy(() => import('./pages/BonDetailPage.jsx'));
 const FournisseursPage = lazy(() => import('./pages/FournisseursPage.jsx'));
 const PassagersPage = lazy(() => import('./pages/PassagersPage.jsx'));
+const AgendaPage = lazy(() => import('./pages/AgendaPage.jsx'));
 const StockPage = lazy(() => import('./pages/StockPage.jsx'));
 const ArticlesPage = lazy(() => import('./pages/ArticlesPage.jsx'));
 const ArticleDetailPage = lazy(() => import('./pages/ArticleDetailPage.jsx'));
@@ -86,6 +87,7 @@ export function AppPages({ path }) {
       <Route path="/articles/:id" element={<ArticleDetailPage />} />
       <Route path="/categories" element={<CategoriesPage />} />
       <Route path="/fournisseurs" element={<FournisseursPage />} />
+      <Route path="/agenda" element={<AgendaPage />} />
       <Route path="/passagers" element={<PassagersPage />} />
       <Route path="/personnes/:id" element={<ProfilePage />} />
       <Route path="/rapports" element={<RapportsPage />} />

@@ -16,6 +16,7 @@ import { EntityPicker, OptionChips, QuickPeople } from '../components/EntityPick
 import { GoodsPicker, pickedValid, pickedTotal, pickedMargin, pickedToLine } from '../components/GoodsPicker.jsx';
 import { usePriceHistory } from '../lib/usePriceHistory.js';
 import { useDraft } from '../lib/draft.js';
+import { TravelFields, emptyTravel } from '../components/TravelFields.jsx';
 
 export default function NewBonPage() {
   const toast = useToast();
@@ -30,8 +31,8 @@ export default function NewBonPage() {
   const [busy, setBusy] = useState(false);
   // Remplir un panier prend du temps : il survit à un onglet fermé, sans que
   // rien ne soit écrit en base tant que le bon n'est pas créé.
-  const [form, setForm, draft] = useDraft('sc_draft_bp',
-    { passagerId: '', transportCurrency: 'DZD', notes: '', lines: [] });
+  const [form, setForm, draft] = useDraft('sc_draft_bp_v2',
+    { passagerId: '', transportCurrency: 'DZD', notes: '', ...emptyTravel(), lines: [] });
 
   const people = passagers.data?.people ?? [];
   const chosen = people.find((p) => String(p.id) === String(form.passagerId)) || null;
@@ -194,6 +195,11 @@ export default function NewBonPage() {
               <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Ex. vol du 12" />
             </label>
           </div>
+
+          {/* Le voyage : la date PROMISE est celle sur laquelle les gens organisent
+              leur venue au bureau. */}
+          <StepHead icon="plane" question="Quand part-il, quand arrive-t-il ?" hint="La date promise est celle que le passager a donnée : c'est elle qui dit qui vient au bureau, et quand." />
+          <TravelFields value={form} onChange={setForm} />
 
           <div className="wz-recap">
             <div className="wz-recap-row">

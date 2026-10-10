@@ -9,6 +9,7 @@ import { applyMovement } from '../stock/stock.service.js';
 import { recomputeOrderStatus, deliverableLines, ARRIVED, QTY } from './orderStatus.js';
 import { orderProgress, moneyProgress } from '../../lib/progress.js';
 import { weightShare } from '../../lib/lineMath.js';
+import { parseDay, fixDates } from '../../lib/calendar.js';
 
 export async function createOrder({ admin, data, ip }) {
   if (!Array.isArray(data.bons) || data.bons.length === 0) {
@@ -19,8 +20,8 @@ export async function createOrder({ admin, data, ip }) {
     if (!f.rows.length) throw errors.notFound('Fournisseur introuvable ou inactif.');
 
     const oRes = await c.query(
-      `INSERT INTO orders (fournisseur_id, notes, created_by) VALUES ($1,$2,$3) RETURNING *`,
-      [data.fournisseurId, data.notes ?? null, admin.id]
+      `INSERT INTO orders (fournisseur_id, notes, created_by, pickup_expected_on) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [data.fournisseurId, data.notes ?? null, admin.id, parseDay(data.pickupExpectedOn, 'pickupExpectedOn')]
     );
     const order = oRes.rows[0];
 
@@ -118,6 +119,20 @@ export async function applyDelivery(c, { admin, lines, allow, note }) {
   return { moved, orders: [...touched] };
 }
 
+// La date à laquelle le fournisseur doit venir prendre sa marchandise : elle se
+// change tant que l'ordre n'est pas clôturé (le fournisseur annonce, puis repousse).
+export async function setPickupDate({ admin, id, date, ip }) {
+  return withTx(async (c) => {
+    const o = (await c.query('SELECT reference, status FROM orders WHERE id=$1 FOR UPDATE', [id])).rows[0];
+    if (!o) throw errors.notFound('Bon fournisseur introuvable.');
+    if (o.status === 'cloturee') throw errors.conflict(`${o.reference} est clôturé : sa date de retrait ne change plus.`);
+    const day = parseDay(date, 'date');
+    await c.query('UPDATE orders SET pickup_expected_on=$2 WHERE id=$1', [id, day]);
+    await writeAudit(c, { adminId: admin.id, action: 'order.pickup_date', entity: 'order', entityId: id, details: { reference: o.reference, date: day }, ip });
+    return getOrderDetail(id, c);
+  });
+}
+
 export async function deliverOrder({ admin, id, lines, ip }) {
   return withTx(async (c) => {
     const order = (await c.query('SELECT reference FROM orders WHERE id=$1', [id])).rows[0];
@@ -209,12 +224,16 @@ const LINE_FLOW = `
   COALESCE((SELECT SUM(${QTY('a')} - COALESCE(a.received_quantity, ${QTY('a')})) FROM bon_lines a JOIN bons ab ON ab.id = a.bon_id
              WHERE a.source_line_id = bl.id AND ab.status IN ('arrive','regle')), 0)::numeric(20,3) AS missing`;
 
-export async function listOrders({ status, search, fournisseurId, limit = 100 } = {}) {
+export async function listOrders({ status, search, fournisseurId, dateBy, from, to, limit = 100 } = {}) {
   const params = [];
   const conds = [];
   if (status) { params.push(status); conds.push(`o.status = $${params.length}`); }
   if (fournisseurId) { params.push(fournisseurId); conds.push(`o.fournisseur_id = $${params.length}`); }
   if (search) { params.push(`%${search}%`); conds.push(`(o.reference ILIKE $${params.length} OR f.name ILIKE $${params.length})`); }
+  // Filtrer par date : la création de l'ordre, ou le retrait prévu par le fournisseur.
+  const dayCol = dateBy === 'pickup' ? 'o.pickup_expected_on' : 'o.created_at::date';
+  if (from) { params.push(parseDay(from, 'from')); conds.push(`${dayCol} >= $${params.length}`); }
+  if (to) { params.push(parseDay(to, 'to')); conds.push(`${dayCol} <= $${params.length}`); }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   params.push(limit);
   const { rows } = await getPool().query(
@@ -232,6 +251,7 @@ export async function listOrders({ status, search, fournisseurId, limit = 100 } 
     params
   );
   if (!rows.length) return rows;
+  rows.forEach((r) => fixDates(r, ['pickup_expected_on']));
 
   // Où en est chaque ordre : un seul aller-retour pour toutes les lignes, un
   // autre pour l'argent déjà versé.
@@ -340,7 +360,7 @@ export async function getOrderDetail(id, client = getPool()) {
   }));
   const billed = Decimal.max(feeTotal.minus(discountTotal), 0);
   return {
-    ...rows[0], bons, carriers, lines: withRemaining,
+    ...fixDates(rows[0], ['pickup_expected_on']), bons, carriers, lines: withRemaining,
     progress: orderProgress(lines),
     pay: moneyProgress(billed, cash.total),
     totals: {

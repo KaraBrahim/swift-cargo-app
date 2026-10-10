@@ -18,6 +18,8 @@ import { DetailHead, Kpis, Kpi, Section, Footnote, ScanBanner, StepFlow } from '
 import { EntityPicker, OptionChips } from '../components/EntityPicker.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
+import { TravelFields, travelOf, travelBody } from '../components/TravelFields.jsx';
+import { ArrivalBadge } from '../components/ArrivalBadge.jsx';
 import { bonDocBody, measureQty, measureUnit, declaredOf, priceUnit } from '../components/printDocument.js';
 import { pricedPart } from '../lib/lineMath.js';
 import { bonTicket } from '../components/printTicket.js';
@@ -25,7 +27,7 @@ import { LineEditor, emptyLine, lineValid, lineTotal } from '../components/LineE
 import { GoodsPicker, pickedValid, pickedTotal, pickedToLine } from '../components/GoodsPicker.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import AmountInput from '../components/AmountInput.jsx';
-import { formatQty } from '../lib/format.js';
+import { formatQty, formatDateFr, todayIso } from '../lib/format.js';
 import { useQr } from '../lib/useQr.js';
 import { useScanHit, clearScanHit } from '../lib/scanSignal.js';
 import { useIdempotent } from '../lib/useIdempotent.js';
@@ -100,6 +102,9 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   const [confirmPayment, setConfirmPayment] = useState(null);
   const [editPayment, setEditPayment] = useState(null);
   const [confirmJump, setConfirmJump] = useState(null);
+  // Le voyage en cours de correction, et le jour réel du prochain cran (départ ou arrivée).
+  const [travel, setTravel] = useState(null);
+  const [stepDate, setStepDate] = useState(todayIso());
 
   // Le code imprimé sur le papier, préparé pendant que la fiche s'affiche.
   const qr = useQr('bon', data?.bon?.uuid);
@@ -162,7 +167,11 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
     finally { setBusy(false); }
   };
 
-  const advance = () => act(() => api(`/bons/${id}/advance`, { method: 'POST', body: {} }), 'Statut mis à jour.');
+  const advance = () => act(() => api(`/bons/${id}/advance`, { method: 'POST', body: { date: stepDate || undefined } }), 'Statut mis à jour.');
+  const saveTravel = () => act(async () => {
+    await api(`/bons/${id}/travel`, { method: 'PATCH', body: travelBody(travel, { actual: true }) });
+    setTravel(null);
+  }, 'Voyage mis à jour.');
   const doJump = (target) =>
     act(() => api(`/bons/${id}/status`, { method: 'POST', body: { target } })
       .then(() => { chinaStock.reload(); catalogue.reload(); }), 'Statut mis à jour.');
@@ -407,6 +416,14 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
 
       {NEXT_LABEL[bon.status] && !edit && (
         <div className="dt-next">
+          {/* Le jour où ça s'est PASSÉ — pas forcément aujourd'hui : on saisit un
+              départ ou une arrivée après coup. */}
+          {!isFournisseurBon && (
+            <label className="field dt-next-date">
+              <span>{bon.status === 'cree' ? 'Date réelle du départ' : 'Date réelle d’arrivée'}</span>
+              <input type="date" value={stepDate} onChange={(e) => setStepDate(e.target.value)} />
+            </label>
+          )}
           <button className="btn btn-gold" disabled={busy} onClick={advance}>
             <IconEl name={NEXT_ICON[bon.status]} />{NEXT_LABEL[bon.status]}
           </button>
@@ -504,6 +521,46 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
             <ProgressBar progress={bon.progress} />
             {bon.pay && <MoneyBar pay={bon.pay} code={cur} label="Versé au passager" />}
           </div>
+        </Section>
+      )}
+
+      {/* Le voyage : les dates prévues et réelles, l'aéroport, la compagnie. La
+          date PROMISE est celle sur laquelle les gens organisent leur venue. */}
+      {!isFournisseurBon && (
+        <Section
+          icon="plane"
+          title="Voyage"
+          right={(
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTravel(travel ? null : travelOf(bon))}>
+              <IconEl name={travel ? 'close' : 'edit'} />{travel ? 'Annuler' : 'Corriger'}
+            </button>
+          )}
+        >
+          {travel ? (
+            <>
+              <TravelFields value={travel} onChange={setTravel} showActual />
+              <div className="dt-actions">
+                <button className="btn btn-gold" disabled={busy} onClick={saveTravel}><IconEl name="check" />Enregistrer le voyage</button>
+              </div>
+            </>
+          ) : (
+            <div className="trip-grid">
+              <div className="trip-item"><span>Départ prévu</span><strong>{bon.departure_planned_on ? formatDateFr(bon.departure_planned_on) : '—'}</strong></div>
+              <div className="trip-item"><span>Départ réel</span><strong>{bon.departure_actual_on ? formatDateFr(bon.departure_actual_on) : '—'}</strong></div>
+              <div className="trip-item promised">
+                <span>Arrivée promise</span>
+                <strong>{bon.arrival_promised_on ? formatDateFr(bon.arrival_promised_on) : '—'}</strong>
+                <ArrivalBadge bon={bon} />
+              </div>
+              <div className="trip-item"><span>Arrivée réelle</span><strong>{bon.arrival_actual_on ? formatDateFr(bon.arrival_actual_on) : '—'}</strong></div>
+              <div className="trip-item">
+                <span>Aéroport d’arrivée</span>
+                <strong>{bon.airport || '—'}</strong>
+                {bon.airport_wilaya && <em>{bon.airport_wilaya}</em>}
+              </div>
+              <div className="trip-item"><span>Compagnie</span><strong>{bon.airline || '—'}</strong></div>
+            </div>
+          )}
         </Section>
       )}
 

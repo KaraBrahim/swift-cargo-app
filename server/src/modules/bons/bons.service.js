@@ -6,6 +6,7 @@ import { getPool, withTx } from '../../db/pool.js';
 import { Decimal, toDecimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { bonProgress, moneyProgress } from '../../lib/progress.js';
+import { parseDay, ymd, fixDates } from '../../lib/calendar.js';
 import { priceBasis, weightShare, pricedPart, perPiece, perMeasureUnit } from '../../lib/lineMath.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendEntry, replayPersonLedger } from '../accounts/accounts.service.js';
@@ -14,6 +15,37 @@ import { ensureStockItem, applyMovement } from '../stock/stock.service.js';
 import { recomputeOrderStatus } from '../orders/orderStatus.js';
 
 const FORWARD = { cree: 'en_transit', en_transit: 'arrive' };
+
+// ── Le voyage d'un bon passager ───────────────────────────────────────
+// Dates prévues et promises, aéroport d'arrivée (et sa wilaya), compagnie. Les
+// dates RÉELLES (départ, arrivée) s'écrivent quand le bon avance, et se corrigent
+// à part : voir updateTravel.
+const TRAVEL_DAYS = [['departurePlannedOn', 'departure_planned_on'], ['arrivalPromisedOn', 'arrival_promised_on']];
+const TRAVEL_TEXT = [['airport', 'airport', 120], ['airportWilaya', 'airport_wilaya', 80], ['airline', 'airline', 120]];
+export const BON_DATE_COLS = ['departure_planned_on', 'departure_actual_on', 'arrival_promised_on', 'arrival_actual_on'];
+
+// Chaque clé absente garde sa valeur d'avant (`existing`) ; une clé présente et
+// vide l'efface.
+function parseTravel(data, existing = {}) {
+  const out = {};
+  for (const [key, col] of TRAVEL_DAYS) out[col] = key in data ? parseDay(data[key], key) : ymd(existing[col]);
+  for (const [key, col, max] of TRAVEL_TEXT) {
+    out[col] = key in data ? (String(data[key] ?? '').trim().slice(0, max) || null) : (existing[col] ?? null);
+  }
+  if (out.departure_planned_on && out.arrival_promised_on && out.arrival_promised_on < out.departure_planned_on) {
+    throw errors.validation([{ field: 'arrivalPromisedOn', message: 'L’arrivée promise ne peut pas précéder le départ prévu.' }]);
+  }
+  return out;
+}
+
+// Les jours de retard, calculés en base : tant que le bon n'est pas arrivé, de
+// combien la date promise est dépassée ; une fois arrivé, de combien il l'a été.
+const TRAVEL_LATE = `
+  CASE WHEN b.order_id IS NULL AND b.status IN ('cree','en_transit')
+        AND b.arrival_promised_on IS NOT NULL AND b.arrival_promised_on < CURRENT_DATE
+       THEN CURRENT_DATE - b.arrival_promised_on END AS days_overdue,
+  CASE WHEN b.arrival_actual_on IS NOT NULL AND b.arrival_promised_on IS NOT NULL
+       THEN b.arrival_actual_on - b.arrival_promised_on END AS days_late`;
 
 function parseMoney(v, field, { allowZero = true } = {}) {
   const d = toDecimal(v ?? '0', field);
@@ -290,10 +322,14 @@ export async function insertChildBon(c, { admin, orderId = null, fournisseurId, 
   const cur = await c.query('SELECT 1 FROM currencies WHERE code=$1 AND active=TRUE', [transportCurrency]);
   if (!cur.rows.length) throw errors.notFound('Devise de transport inconnue.');
 
+  // Le voyage ne concerne que le bon passager : le bon d'un ordre n'a ni vol ni aéroport.
+  const travel = parseTravel(orderId ? {} : data);
   const bonRes = await c.query(
-    `INSERT INTO bons (order_id, fournisseur_id, passager_id, transport_currency, transport_fee, commission, discount, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [orderId, orderId ? fournisseurId : null, data.passagerId ?? null, transportCurrency, transportFee, commission, discount, data.notes ?? null, admin.id]
+    `INSERT INTO bons (order_id, fournisseur_id, passager_id, transport_currency, transport_fee, commission, discount, notes, created_by,
+                       departure_planned_on, arrival_promised_on, airport, airport_wilaya, airline)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [orderId, orderId ? fournisseurId : null, data.passagerId ?? null, transportCurrency, transportFee, commission, discount, data.notes ?? null, admin.id,
+     travel.departure_planned_on, travel.arrival_promised_on, travel.airport, travel.airport_wilaya, travel.airline]
   );
   const bon = bonRes.rows[0];
 
@@ -397,9 +433,12 @@ export async function updateBon({ admin, id, data, ip }) {
     // goods they had allocated are being released.
     const touched = await sourceOrderIds(c, id);
     await c.query('DELETE FROM bon_lines WHERE bon_id=$1', [id]);
+    const travel = parseTravel(bon.order_id != null ? {} : data, bon);
     await c.query(
-      'UPDATE bons SET transport_currency=$2, transport_fee=$3, discount=$4, passager_id=$5, notes=$6, commission=$7 WHERE id=$1',
-      [id, newCur, newFee, newDiscount, newPassagerId, data.notes ?? bon.notes, newCommission]
+      `UPDATE bons SET transport_currency=$2, transport_fee=$3, discount=$4, passager_id=$5, notes=$6, commission=$7,
+              departure_planned_on=$8, arrival_promised_on=$9, airport=$10, airport_wilaya=$11, airline=$12 WHERE id=$1`,
+      [id, newCur, newFee, newDiscount, newPassagerId, data.notes ?? bon.notes, newCommission,
+       travel.departure_planned_on, travel.arrival_promised_on, travel.airport, travel.airport_wilaya, travel.airline]
     );
     const bon2 = (await c.query('SELECT * FROM bons WHERE id=$1', [id])).rows[0];
     await insertResolvedLines(c, { bon: bon2, lines, orderId: bon.order_id, adminId: admin.id });
@@ -552,7 +591,7 @@ export async function deleteBon(args) {
 // `passager_payment` n'est pas calculé, il n'y a pas de montant à comparer.
 const passagerPay = (bon, paid) => (bon.passager_payment == null ? null : moneyProgress(bon.passager_payment, paid ?? 0));
 
-export async function listBons({ status, search, fournisseurId, passagerId, orderId, limit = 100 } = {}) {
+export async function listBons({ status, search, fournisseurId, passagerId, orderId, dateBy, from, to, limit = 100 } = {}) {
   const params = [];
   const conds = [];
   if (orderId) { params.push(orderId); conds.push(`b.order_id = $${params.length}`); }
@@ -569,11 +608,15 @@ export async function listBons({ status, search, fournisseurId, passagerId, orde
         JOIN bons sb ON sb.id = src.bon_id
        WHERE l.bon_id = b.id AND sb.fournisseur_id = $${params.length}))`);
   }
-  if (search) { params.push(`%${search}%`); conds.push(`(b.reference ILIKE $${params.length} OR p.name ILIKE $${params.length})`); }
+  if (search) { params.push(`%${search}%`); conds.push(`(b.reference ILIKE $${params.length} OR p.name ILIKE $${params.length} OR b.airport ILIKE $${params.length} OR b.airline ILIKE $${params.length})`); }
+  // Filtrer par date : la création du bon, le départ prévu, ou l'arrivée promise.
+  const dayCol = { created: 'b.created_at::date', departure: 'b.departure_planned_on', arrival: 'b.arrival_promised_on' }[dateBy] ?? 'b.created_at::date';
+  if (from) { params.push(parseDay(from, 'from')); conds.push(`${dayCol} >= $${params.length}`); }
+  if (to) { params.push(parseDay(to, 'to')); conds.push(`${dayCol} <= $${params.length}`); }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   params.push(limit);
   const { rows } = await getPool().query(
-    `SELECT b.*, p.name AS passager_name, o.reference AS order_reference,
+    `SELECT b.*, p.name AS passager_name, o.reference AS order_reference,${TRAVEL_LATE},
             COALESCE(bf.name, (
               SELECT string_agg(DISTINCT sf.name, ', ' ORDER BY sf.name)
                 FROM bon_lines l JOIN bon_lines src ON src.id = l.source_line_id
@@ -588,6 +631,7 @@ export async function listBons({ status, search, fournisseurId, passagerId, orde
     params
   );
   if (!rows.length) return rows;
+  rows.forEach((r) => fixDates(r, BON_DATE_COLS));
 
   const ids = rows.map((r) => r.id);
   const [{ rows: lines }, { rows: paid }] = await Promise.all([
@@ -614,7 +658,7 @@ export async function getBonDetail(id, client = getPool()) {
   const { rows } = await client.query(
     `SELECT b.*, f.name AS fournisseur_name, f.phone AS fournisseur_phone,
             p.name AS passager_name, p.phone AS passager_phone, p.passager_type,
-            a.full_name AS created_by_name, a.role AS created_by_role, o.reference AS order_reference
+            a.full_name AS created_by_name, a.role AS created_by_role, o.reference AS order_reference,${TRAVEL_LATE}
        FROM bons b
        LEFT JOIN people f ON f.id = b.fournisseur_id
        LEFT JOIN people p ON p.id = b.passager_id
@@ -671,7 +715,7 @@ export async function getBonDetail(id, client = getPool()) {
     .filter((p) => p.type === 'passager_payment')
     .reduce((acc, p) => acc.plus(new Decimal(p.amount).abs()), new Decimal(0));
   return {
-    ...rows[0],
+    ...fixDates(rows[0], BON_DATE_COLS),
     progress: bonProgress(rows[0].status, lines.rows),
     pay: passagerPay(rows[0], paidToPassager),
     fournisseurs: fournisseurs.rows,
@@ -719,7 +763,21 @@ async function shipLinesStock(c, { bon, direction, adminId }) {
   }
 }
 
-export async function advanceStatus({ admin, id, note, ip }) {
+// Un cran de plus : le statut, et — pour un bon passager — la date RÉELLE du
+// départ ou de l'arrivée. `day` est le jour que la personne a dit ; à défaut,
+// aujourd'hui, côté base.
+async function markTravelStep(c, { bon, next, day }) {
+  const dayCol = bon.order_id == null ? ({ en_transit: 'departure_actual_on', arrive: 'arrival_actual_on' })[next] : null;
+  await c.query(
+    `UPDATE bons SET status=$2
+       ${next === 'arrive' ? ', arrived_at = now()' : ''}
+       ${dayCol ? `, ${dayCol} = COALESCE($3::date, CURRENT_DATE)` : ''}
+      WHERE id=$1`,
+    [bon.id, next, day ?? null]
+  );
+}
+
+export async function advanceStatus({ admin, id, note, date, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id]);
     const bon = rows[0];
@@ -733,13 +791,58 @@ export async function advanceStatus({ admin, id, note, ip }) {
       else if (next === 'arrive') await shipLinesStock(c, { bon, direction: 'arrivee', adminId: admin.id });
     }
 
-    const extra = next === 'arrive' ? ', arrived_at = now()' : '';
-    await c.query(`UPDATE bons SET status=$2 ${extra} WHERE id=$1`, [id, next]);
+    const day = parseDay(date, 'date');
+    await markTravelStep(c, { bon, next, day });
     await c.query('INSERT INTO bon_status_history (bon_id, status, admin_id, note) VALUES ($1,$2,$3,$4)', [id, next, admin.id, note ?? null]);
     await recomputeAffectedOrders(c, bon);
     await writeAudit(c, { adminId: admin.id, action: 'bon.status', entity: 'bon', entityId: id, details: { from: bon.status, to: next }, ip });
     return getBonDetail(id, c);
   });
+}
+
+// Corriger le voyage d'un bon passager à tout moment : un vol retardé, une date
+// de départ mal saisie, l'aéroport finalement changé. Ce n'est pas une
+// modification des marchandises — le bon n'a pas besoin d'être « Créé ».
+export async function updateTravel({ admin, id, data, ip }) {
+  return withTx(async (c) => {
+    const bon = (await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id])).rows[0];
+    if (!bon) throw errors.notFound('Bon introuvable.');
+    if (bon.order_id != null) throw errors.conflict('Seul un bon passager voyage : un bon fournisseur n’a ni vol ni aéroport.');
+
+    const travel = parseTravel(data, bon);
+    const departureActual = 'departureActualOn' in data ? parseDay(data.departureActualOn, 'departureActualOn') : ymd(bon.departure_actual_on);
+    const arrivalActual = 'arrivalActualOn' in data ? parseDay(data.arrivalActualOn, 'arrivalActualOn') : ymd(bon.arrival_actual_on);
+    if (departureActual && arrivalActual && arrivalActual < departureActual) {
+      throw errors.validation([{ field: 'arrivalActualOn', message: 'L’arrivée réelle ne peut pas précéder le départ réel.' }]);
+    }
+    await c.query(
+      `UPDATE bons SET departure_planned_on=$2, arrival_promised_on=$3, airport=$4, airport_wilaya=$5, airline=$6,
+              departure_actual_on=$7, arrival_actual_on=$8 WHERE id=$1`,
+      [id, travel.departure_planned_on, travel.arrival_promised_on, travel.airport, travel.airport_wilaya, travel.airline, departureActual, arrivalActual]
+    );
+    await writeAudit(c, { adminId: admin.id, action: 'bon.travel', entity: 'bon', entityId: id, details: { reference: bon.reference, ...travel, departureActual, arrivalActual }, ip });
+    return getBonDetail(id, c);
+  });
+}
+
+// Ce qui s'est déjà écrit : les aéroports (avec leur wilaya) et les compagnies,
+// du plus fréquent au moins fréquent. Rien à entretenir : c'est lu sur les bons.
+export async function travelSuggestions() {
+  const db = getPool();
+  const [airports, airlines] = await Promise.all([
+    db.query(
+      `SELECT airport AS value,
+              (SELECT w.airport_wilaya FROM bons w WHERE w.airport = b.airport AND w.airport_wilaya IS NOT NULL
+                GROUP BY w.airport_wilaya ORDER BY COUNT(*) DESC, MAX(w.id) DESC LIMIT 1) AS wilaya,
+              COUNT(*)::int AS n
+         FROM bons b WHERE airport IS NOT NULL AND airport <> ''
+        GROUP BY airport ORDER BY n DESC, MAX(id) DESC LIMIT 40`),
+    db.query(
+      `SELECT airline AS value, COUNT(*)::int AS n FROM bons
+        WHERE airline IS NOT NULL AND airline <> ''
+        GROUP BY airline ORDER BY n DESC, MAX(id) DESC LIMIT 40`),
+  ]);
+  return { airports: airports.rows, airlines: airlines.rows };
 }
 
 // ── Reconciliation (at "arrive") ──────────────────────────────────────
@@ -1053,7 +1156,7 @@ const STAGES = ['cree', 'en_transit', 'arrive', 'regle'];
 // The stepper's work, running in the CALLER's transaction. An order moving all
 // of its bons at once has to be one transaction: half a shipment advanced and
 // half not is a state nothing in this codebase knows how to read.
-export async function setBonStatusTx(c, { admin, id, target, note, ip }) {
+export async function setBonStatusTx(c, { admin, id, target, note, date, ip }) {
   if (!STAGES.includes(target)) throw errors.validation([{ field: 'target', message: 'Statut invalide.' }]);
   {
     let bon = (await c.query('SELECT * FROM bons WHERE id=$1 FOR UPDATE', [id])).rows[0];
@@ -1073,8 +1176,7 @@ export async function setBonStatusTx(c, { admin, id, target, note, ip }) {
           const owed = net.lt(0) ? net.negated().toFixed(2) : '0';
           await bookSettlement(c, bon, admin, payment, note ?? 'Changement de statut', owed);
         } else {
-          const extra = next === 'arrive' ? ', arrived_at=now()' : '';
-          await c.query(`UPDATE bons SET status=$2 ${extra} WHERE id=$1`, [id, next]);
+          await markTravelStep(c, { bon, next, day: parseDay(date, 'date') });
           await c.query('INSERT INTO bon_status_history (bon_id, status, admin_id, note) VALUES ($1,$2,$3,$4)', [id, next, admin.id, note ?? 'Changement de statut']);
         }
         cur++;
@@ -1090,10 +1192,11 @@ export async function setBonStatusTx(c, { admin, id, target, note, ip }) {
           // stock algérien finirait négatif.
           if (isPassagerBon) await restoreMissingStock(c, bon, admin.id);
           if (isPassagerBon) await reverseShip(c, bon, 'arrivee', admin.id);
-          await c.query('UPDATE bons SET arrived_at=NULL, loss_total=0 WHERE id=$1', [id]);
+          await c.query('UPDATE bons SET arrived_at=NULL, arrival_actual_on=NULL, loss_total=0 WHERE id=$1', [id]);
           await c.query('UPDATE bon_lines SET received_quantity=NULL, loss_value=0, responsible=NULL WHERE bon_id=$1', [id]);
         } else if (leaving === 'en_transit') {
           if (isPassagerBon) await reverseShip(c, bon, 'depart', admin.id);
+          await c.query('UPDATE bons SET departure_actual_on=NULL WHERE id=$1', [id]);
         }
         await c.query('UPDATE bons SET status=$2 WHERE id=$1', [id, prev]);
         await c.query('INSERT INTO bon_status_history (bon_id, status, admin_id, note) VALUES ($1,$2,$3,$4)', [id, prev, admin.id, note ?? 'Retour en arrière']);

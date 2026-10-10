@@ -35,8 +35,8 @@ export default function NewOrderPage() {
   const [busy, setBusy] = useState(false);
   // Ce qu'on a commencé à saisir survit à un onglet fermé — rien n'est écrit en
   // base pour autant : le bon n'existe qu'au clic sur « Créer ».
-  const [form, setForm, draft] = useDraft('sc_draft_bf', {
-    fournisseurId: '', notes: '', transportCurrency: 'DZD', commission: '', lines: [emptyLine()],
+  const [form, setForm, draft] = useDraft('sc_draft_bf_v2', {
+    fournisseurId: '', notes: '', transportCurrency: 'DZD', commission: '', pickupExpectedOn: '', lines: [emptyLine()],
   });
 
   const people = fournisseurs.data?.people ?? [];
@@ -78,6 +78,7 @@ export default function NewOrderPage() {
         body: {
           fournisseurId: form.fournisseurId,
           notes: form.notes,
+          pickupExpectedOn: form.pickupExpectedOn || undefined,
           bons: [{ transportCurrency: form.transportCurrency, commission: form.commission || '0', lines: form.lines }],
         },
       });
@@ -214,6 +215,11 @@ export default function NewOrderPage() {
             <label className="field field-grow">
               <span>Note (optionnel)</span>
               <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Ex. livraison partielle" />
+            </label>
+            <label className="field">
+              <span>Retrait prévu (optionnel)</span>
+              <input type="date" value={form.pickupExpectedOn || ''} onChange={(e) => setForm({ ...form, pickupExpectedOn: e.target.value })} />
+              <em className="field-hint">le jour où le fournisseur vient prendre sa marchandise</em>
             </label>
           </div>
 

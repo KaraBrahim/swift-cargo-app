@@ -13,6 +13,8 @@ import { IconEl } from '../components/icons.jsx';
 import { Who, Sources } from '../components/cells.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { SearchBar } from '../components/SearchBar.jsx';
+import DateRangePicker, { defaultRange } from '../components/DateRangePicker.jsx';
+import { ArrivalCell } from '../components/ArrivalBadge.jsx';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
@@ -25,9 +27,13 @@ export default function BonsPage() {
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const [q, setQ] = useState('');
   const search = useDebounced(q);
+  // Filtrer par jour : la création du bon, le départ prévu, ou l'arrivée promise.
+  const [dateBy, setDateBy] = useState('');
+  const [range, setRange] = useState(defaultRange());
 
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
+  if (dateBy) { qs.set('dateBy', dateBy); qs.set('from', range.from); qs.set('to', range.to); }
   if (search.trim()) qs.set('search', search.trim());
   const bons = useApi(`/bons${qs.toString() ? `?${qs}` : ''}`);
 
@@ -67,6 +73,15 @@ export default function BonsPage() {
             <button key={k} className={status === k ? 'chip active' : 'chip'} onClick={() => setStatus(k)}>{v.label}</button>
           ))}
         </div>
+        <div className="date-filter">
+          <select value={dateBy} onChange={(e) => setDateBy(e.target.value)} aria-label="Filtrer par date">
+            <option value="">Toutes les dates</option>
+            <option value="created">Création</option>
+            <option value="departure">Départ prévu</option>
+            <option value="arrival">Arrivée promise</option>
+          </select>
+          {dateBy && <DateRangePicker value={range} onChange={setRange} />}
+        </div>
       </div>
 
       {bons.loading && !bons.data ? <Spinner /> : (
@@ -76,7 +91,7 @@ export default function BonsPage() {
               <table className="table list-table">
                 <thead>
                   <tr>
-                    <th>Bon</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th>
+                    <th>Bon</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th><th>Arrivée promise</th>
                     <th>Voyage</th><th className="right">À payer</th><th className="right" aria-label="Actions" />
                   </tr>
                 </thead>
@@ -92,6 +107,7 @@ export default function BonsPage() {
                       <td><Who name={b.passager_name} icon="passager" /></td>
                       <td><Sources names={b.fournisseur_name} /></td>
                       <td><span className={`status-badge ${BON_STATUS[b.status].cls}`}>{BON_STATUS[b.status].label}</span></td>
+                      <td><ArrivalCell bon={b} /></td>
                       <td className="bar-cell"><ProgressBar progress={b.progress} compact /></td>
                       <td className="right">
                         <span className="cell-stack">

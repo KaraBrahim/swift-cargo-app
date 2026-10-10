@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi.js';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
+import { PresenceCard } from '../components/PresenceCard.jsx';
 import { ORDER_STATUS } from '../components/orderStatus.js';
 import { api } from '../api/client.js';
 import { Spinner, formatMoney, fitStyle } from '../components/ui.jsx';
@@ -179,6 +180,9 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
+
+      {/* ── faut-il être au bureau aujourd'hui, demain ? ── */}
+      <PresenceCard />
 
       {/* ── pipeline + financial ── */}
       <div className="dash-cols">

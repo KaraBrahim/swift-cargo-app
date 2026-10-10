@@ -9,6 +9,8 @@ import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../com
 import { ORDER_STATUS } from '../components/orderStatus.js';
 import { IconEl } from '../components/icons.jsx';
 import { SearchBar } from '../components/SearchBar.jsx';
+import DateRangePicker, { defaultRange } from '../components/DateRangePicker.jsx';
+import { formatDateFr } from '../lib/format.js';
 import { Who } from '../components/cells.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
@@ -21,9 +23,13 @@ export default function OrdersPage() {
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
   const search = useDebounced(q);
+  // Filtrer par jour : la création de l'ordre, ou le retrait prévu par le fournisseur.
+  const [dateBy, setDateBy] = useState('');
+  const [range, setRange] = useState(defaultRange());
 
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
+  if (dateBy) { qs.set('dateBy', dateBy); qs.set('from', range.from); qs.set('to', range.to); }
   if (search.trim()) qs.set('search', search.trim());
   const orders = useApi(`/orders${qs.toString() ? `?${qs}` : ''}`);
 
@@ -63,6 +69,14 @@ export default function OrdersPage() {
             <button key={k} className={status === k ? 'chip active' : 'chip'} onClick={() => setStatus(k)}>{v.label}</button>
           ))}
         </div>
+        <div className="date-filter">
+          <select value={dateBy} onChange={(e) => setDateBy(e.target.value)} aria-label="Filtrer par date">
+            <option value="">Toutes les dates</option>
+            <option value="created">Création</option>
+            <option value="pickup">Retrait prévu</option>
+          </select>
+          {dateBy && <DateRangePicker value={range} onChange={setRange} />}
+        </div>
       </div>
 
       {orders.loading && !orders.data ? <Spinner /> : (
@@ -72,7 +86,7 @@ export default function OrdersPage() {
               <table className="table list-table">
                 <thead>
                   <tr>
-                    <th>Bon</th><th>Fournisseur</th><th>Statut</th>
+                    <th>Bon</th><th>Fournisseur</th><th>Statut</th><th>Retrait prévu</th>
                     <th>Marchandise</th><th className="right">Facturé</th><th className="right" aria-label="Actions" />
                   </tr>
                 </thead>
@@ -87,6 +101,7 @@ export default function OrdersPage() {
                       </td>
                       <td><Who name={o.fournisseur_name} icon="fournisseur" /></td>
                       <td><span className={`status-badge ${ORDER_STATUS[o.status].cls}`}>{ORDER_STATUS[o.status].label}</span></td>
+                      <td>{o.pickup_expected_on ? formatDateFr(o.pickup_expected_on, { year: false }) : <span className="muted">—</span>}</td>
                       <td className="bar-cell"><ProgressBar progress={o.progress} compact /></td>
                       <td className="right">
                         <span className="cell-stack">

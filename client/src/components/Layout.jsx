@@ -24,6 +24,7 @@ const NAV = [
     items: [
       { to: '/bons-fournisseur', label: 'Bons fournisseurs', icon: 'order' },
       { to: '/bons-passager', label: 'Bons passagers', icon: 'bon' },
+      { to: '/agenda', label: 'Agenda', icon: 'calendar' },
       { to: '/stock', label: 'Stock', icon: 'stock' },
       { to: '/articles', label: 'Articles', icon: 'box' },
       { to: '/categories', label: 'Catégories', icon: 'tag' },

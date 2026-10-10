@@ -4,7 +4,7 @@
 // give, with no dependency. Printing goes through a hidden iframe; the desk
 // app saves PDFs itself (desktop/main.js).
 import { formatMoney } from './ui.jsx';
-import { formatQty } from '../lib/format.js';
+import { formatQty, formatDateFr } from '../lib/format.js';
 import { priceBasis, pricedPart, weightShare, priceUnit } from '../lib/lineMath.js';
 import { BON_STATUS } from './bonStatus.js';
 import { ORDER_STATUS } from './orderStatus.js';
@@ -35,6 +35,8 @@ export const esc = (s) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const num = (v) => formatQty(v);
+// Une date du calendrier, sans passer par new Date() (qui la décale d'un jour).
+const dayFr = (iso) => (iso ? esc(formatDateFr(iso)) : '—');
 
 // Shared stylesheet — matches the printed bon so every document looks like one
 // family, independent of whichever of the four screen themes is active.
@@ -254,6 +256,7 @@ export function orderManifestBody(d, qr) {
       <div><span class="k">Devise :</span>${esc(cur)}</div>
       <div><span class="k">Reçu le :</span>${dt(d.created_at)}${d.created_by_name ? ` <span class="k">par</span> ${esc(d.created_by_name)}` : ''}</div>
       <div><span class="k">Remis le :</span>${dt(d.delivered_at)}</div>
+      ${d.pickup_expected_on ? `<div><span class="k">Retrait prévu :</span><strong>${dayFr(d.pickup_expected_on)}</strong></div>` : ''}
       ${d.note ? `<div style="grid-column:1/-1"><span class="k">Note :</span>${esc(d.note)}</div>` : ''}
     </div>
 
@@ -357,7 +360,10 @@ export function bonDocBody(bon, qr) {
       <div><span class="k">Passager :</span>${esc(bon.passager_name || '—')}</div>
       <div><span class="k">Statut :</span>${esc(BON_STATUS_FR[bon.status] || bon.status)}</div>
       <div><span class="k">Créé le :</span>${new Date(bon.created_at).toLocaleString('fr-FR')}</div>
-      <div><span class="k">Arrivée :</span>${bon.arrived_at ? new Date(bon.arrived_at).toLocaleString('fr-FR') : '—'}</div>
+      <div><span class="k">Départ prévu :</span>${dayFr(bon.departure_planned_on)}${bon.departure_actual_on ? ` <span class="k">· réel</span> ${dayFr(bon.departure_actual_on)}` : ''}</div>
+      <div><span class="k">Arrivée promise :</span><strong>${dayFr(bon.arrival_promised_on)}</strong>${bon.arrival_actual_on ? ` <span class="k">· réelle</span> ${dayFr(bon.arrival_actual_on)}` : ''}${Number(bon.days_late) > 0 ? ` <span class="k">(+${esc(bon.days_late)} j)</span>` : ''}</div>
+      <div><span class="k">Aéroport :</span>${esc(bon.airport || '—')}${bon.airport_wilaya ? ` (${esc(bon.airport_wilaya)})` : ''}</div>
+      <div><span class="k">Compagnie :</span>${esc(bon.airline || '—')}</div>
     </div>
     ${progressBlock(bon.progress, 'Avancement du voyage')}
     <table>

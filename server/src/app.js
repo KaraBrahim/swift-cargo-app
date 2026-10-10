@@ -25,6 +25,7 @@ import { settingsRouter } from './modules/settings/settings.routes.js';
 import { scanRouter } from './modules/scan/scan.routes.js';
 import { maintenanceRouter } from './modules/maintenance/maintenance.routes.js';
 import { employeesRouter } from './modules/employees/employees.routes.js';
+import { agendaRouter } from './modules/agenda/agenda.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { scrubResponses } from './lib/visibility.js';
 import { requireAuth } from './middleware/auth.js';
@@ -118,6 +119,7 @@ export function createApp() {
   app.use('/api', scanRouter);
   app.use('/api', maintenanceRouter);
   app.use('/api', employeesRouter);
+  app.use('/api', agendaRouter);
 
   // After every API route, before the 404 handler.
   serveClient(app);

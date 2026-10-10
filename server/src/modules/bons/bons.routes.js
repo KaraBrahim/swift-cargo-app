@@ -44,8 +44,21 @@ const createSchema = z.object({
   // Bon fournisseur : la marge, saisie a la main une fois les details connus.
   commission: num.optional(),
   notes: z.string().trim().max(1000).optional(),
+  ...travelFields,
   lines: z.array(lineSchema).min(1),
 });
+
+// Le voyage d'un bon passager : les dates prévues et promises, l'aéroport
+// d'arrivée et sa wilaya, la compagnie. Vide = effacer ; absent = inchangé.
+const day = z.string().trim().max(10).nullable().optional();
+const text = (max) => z.string().trim().max(max).nullable().optional();
+const travelFields = {
+  departurePlannedOn: day,
+  arrivalPromisedOn: day,
+  airport: text(120),
+  airportWilaya: text(80),
+  airline: text(120),
+};
 
 // Editing a bon (only while « Créé »): replace lines, fee/currency, passager.
 const updateSchema = z.object({
@@ -54,6 +67,7 @@ const updateSchema = z.object({
   transportFee: num.optional(),
   commission: num.optional(),
   notes: z.string().trim().max(1000).optional(),
+  ...travelFields,
   lines: z.array(lineSchema).min(1),
 });
 
@@ -61,7 +75,7 @@ bonsRouter.get(
   '/bons',
   // Without `orderId` this lists bons PASSAGERS only; with it, the bons held by
   // that order (see listBons).
-  validate({ query: z.object({ status: status.optional(), search: z.string().trim().max(80).optional(), fournisseurId: z.coerce.number().int().positive().optional(), passagerId: z.coerce.number().int().positive().optional(), orderId: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }) }),
+  validate({ query: z.object({ status: status.optional(), search: z.string().trim().max(80).optional(), fournisseurId: z.coerce.number().int().positive().optional(), passagerId: z.coerce.number().int().positive().optional(), orderId: z.coerce.number().int().positive().optional(), dateBy: z.enum(['created', 'departure', 'arrival']).optional(), from: z.string().trim().max(10).optional(), to: z.string().trim().max(10).optional(), limit: z.coerce.number().int().min(1).max(500).optional() }) }),
   asyncHandler(async (req, res) => res.json({ bons: await svc.listBons(req.validatedQuery) }))
 );
 
@@ -77,6 +91,12 @@ bonsRouter.get(
     }),
   }),
   asyncHandler(async (req, res) => res.json(await svc.priceHistory(req.validatedQuery)))
+);
+
+// Les aéroports et compagnies déjà saisis, pour les proposer à la prochaine saisie.
+bonsRouter.get(
+  '/bons/travel-suggestions',
+  asyncHandler(async (_req, res) => res.json(await svc.travelSuggestions()))
 );
 
 // Goods still waiting in a bon fournisseur for a passager to carry them.
@@ -123,16 +143,24 @@ bonsRouter.delete(
 
 bonsRouter.post(
   '/bons/:id/advance',
-  validate({ params: z.object({ id }), body: z.object({ note: z.string().trim().max(300).optional() }) }),
-  asyncHandler(async (req, res) => res.json({ bon: await svc.advanceStatus({ admin: req.admin, id: req.params.id, note: req.body.note, ip: req.ip }) }))
+  // `date` : le jour réel du départ ou de l'arrivée, tel que la personne le dit.
+  validate({ params: z.object({ id }), body: z.object({ note: z.string().trim().max(300).optional(), date: z.string().trim().max(10).optional() }) }),
+  asyncHandler(async (req, res) => res.json({ bon: await svc.advanceStatus({ admin: req.admin, id: req.params.id, note: req.body.note, date: req.body.date, ip: req.ip }) }))
 );
 
 // Jump a bon to any lifecycle stage (clickable stepper); backward reverses stock
 // and money.
 bonsRouter.post(
   '/bons/:id/status',
-  validate({ params: z.object({ id }), body: z.object({ target: z.enum(['cree', 'en_transit', 'arrive', 'regle']), note: z.string().trim().max(300).optional() }) }),
-  asyncHandler(async (req, res) => res.json({ bon: await svc.setBonStatus({ admin: req.admin, id: req.params.id, target: req.body.target, note: req.body.note, ip: req.ip }) }))
+  validate({ params: z.object({ id }), body: z.object({ target: z.enum(['cree', 'en_transit', 'arrive', 'regle']), note: z.string().trim().max(300).optional(), date: z.string().trim().max(10).optional() }) }),
+  asyncHandler(async (req, res) => res.json({ bon: await svc.setBonStatus({ admin: req.admin, id: req.params.id, target: req.body.target, note: req.body.note, date: req.body.date, ip: req.ip }) }))
+);
+
+// Corriger le voyage — dates réelles comprises — à tout moment.
+bonsRouter.patch(
+  '/bons/:id/travel',
+  validate({ params: z.object({ id }), body: z.object({ ...travelFields, departureActualOn: day, arrivalActualOn: day }) }),
+  asyncHandler(async (req, res) => res.json({ bon: await svc.updateTravel({ admin: req.admin, id: req.params.id, data: req.body, ip: req.ip }) }))
 );
 
 bonsRouter.post(

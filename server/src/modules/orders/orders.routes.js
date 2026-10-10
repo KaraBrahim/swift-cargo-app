@@ -43,12 +43,14 @@ const bonSchema = z.object({
 const createSchema = z.object({
   fournisseurId: z.coerce.number().int().positive(),
   notes: z.string().trim().max(1000).optional(),
+  // Le jour où le fournisseur doit venir prendre sa marchandise.
+  pickupExpectedOn: z.string().trim().max(10).nullable().optional(),
   bons: z.array(bonSchema).min(1),
 });
 
 ordersRouter.get(
   '/orders',
-  validate({ query: z.object({ status: status.optional(), search: z.string().trim().max(80).optional(), fournisseurId: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }) }),
+  validate({ query: z.object({ status: status.optional(), search: z.string().trim().max(80).optional(), fournisseurId: z.coerce.number().int().positive().optional(), dateBy: z.enum(['created', 'pickup']).optional(), from: z.string().trim().max(10).optional(), to: z.string().trim().max(10).optional(), limit: z.coerce.number().int().min(1).max(500).optional() }) }),
   asyncHandler(async (req, res) => res.json({ orders: await svc.listOrders(req.validatedQuery) }))
 );
 
@@ -62,6 +64,13 @@ ordersRouter.post(
   '/orders',
   validate({ body: createSchema }),
   asyncHandler(async (req, res) => res.status(201).json({ order: await svc.createOrder({ admin: req.admin, data: req.body, ip: req.ip }) }))
+);
+
+// Le jour où le fournisseur doit venir prendre sa marchandise. Vide = effacer.
+ordersRouter.patch(
+  '/orders/:id/pickup',
+  validate({ params: z.object({ id }), body: z.object({ date: z.string().trim().max(10).nullable().optional() }) }),
+  asyncHandler(async (req, res) => res.json({ order: await svc.setPickupDate({ admin: req.admin, id: req.params.id, date: req.body.date, ip: req.ip }) }))
 );
 
 ordersRouter.delete(

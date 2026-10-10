@@ -22,6 +22,7 @@ import { useIdempotent } from '../lib/useIdempotent.js';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { priceBasis, weightShare, priceUnit } from '../lib/lineMath.js';
+import { formatDateFr } from '../lib/format.js';
 import { orderManifestBody } from '../components/printDocument.js';
 import { orderTicket } from '../components/printTicket.js';
 import { formatQty } from '../lib/format.js';
@@ -44,6 +45,8 @@ export default function OrderDetailPage() {
   // de `data` avant les retours anticipés au-dessus.
   const [deliver, setDeliver] = useState(null);
   const [confirmUndoDeliver, setConfirmUndoDeliver] = useState(false);
+  // Le retrait prévu en cours de saisie ; null = celui de l'ordre, inchangé.
+  const [pickup, setPickup] = useState(null);
   // L'encaissement du fournisseur, sur SA fiche : c'est là qu'on lit ce qu'il
   // doit, donc c'est là qu'on le reçoit. Il vivait sur le bon interne des
   // marchandises, que personne n'a de raison d'ouvrir.
@@ -106,6 +109,17 @@ export default function OrderDetailPage() {
     }
     return step;
   });
+
+  const savePickup = async () => {
+    setBusy(true);
+    try {
+      await api(`/orders/${id}/pickup`, { method: 'PATCH', body: { date: pickup || null } });
+      toast.success(pickup ? 'Date de retrait enregistrée.' : 'Date de retrait effacée.');
+      setPickup(null);
+      reload();
+    } catch (err) { toast.error(errorMessage(err)); }
+    finally { setBusy(false); }
+  };
 
   const collectFee = async () => {
     setBusy(true);
@@ -276,6 +290,25 @@ export default function OrderDetailPage() {
         <div className="pg-panel">
           <ProgressBar progress={o.progress} />
           {Number(o.totals.billed) > 0 && <MoneyBar pay={o.pay} code={cur} label="Encaissé" />}
+          {/* Le jour où le fournisseur doit venir prendre sa marchandise : il
+              apparaît dans l'agenda, et sur le tableau de bord la veille. */}
+          <div className="pickup-row">
+            <label className="field">
+              <span>Retrait prévu par le fournisseur</span>
+              <input
+                type="date"
+                value={pickup ?? o.pickup_expected_on ?? ''}
+                disabled={o.status === 'cloturee'}
+                onChange={(e) => setPickup(e.target.value)}
+              />
+            </label>
+            {pickup !== null && (
+              <button type="button" className="btn btn-gold btn-sm" disabled={busy} onClick={savePickup}>
+                <IconEl name="check" />Enregistrer
+              </button>
+            )}
+            {pickup === null && o.pickup_expected_on && <span className="muted">{formatDateFr(o.pickup_expected_on)}</span>}
+          </div>
         </div>
       </Section>
 
