@@ -9,7 +9,7 @@ import { bonProgress, moneyProgress } from '../../lib/progress.js';
 import { priceBasis, weightShare, pricedPart, perPiece, perMeasureUnit } from '../../lib/lineMath.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendEntry, replayPersonLedger } from '../accounts/accounts.service.js';
-import { postMovement, replayChain } from '../caisse/caisse.service.js';
+import { postMovement, replayChain, assertCaisseOffice } from '../caisse/caisse.service.js';
 import { ensureStockItem, applyMovement } from '../stock/stock.service.js';
 import { recomputeOrderStatus } from '../orders/orderStatus.js';
 
@@ -1140,6 +1140,9 @@ export async function collectFee({ admin, id, caisseId, amount, note, ip }) {
     if (bon.order_id == null) {
       throw errors.conflict('Un bon passager n’encaisse pas de frais : la vente a été facturée au fournisseur à la réception.');
     }
+    // Le fournisseur paie au bureau d'Algérie, et seulement là.
+    await assertCaisseOffice(c, caisseId, 'algeria',
+      'Le fournisseur paie en Algérie : choisissez une caisse du bureau d’Algérie.');
     const paid = await alreadyMoved(c, id, 'fee_payment');
     const due = new Decimal(bon.transport_fee).minus(paid);
     if (due.lte(0)) {

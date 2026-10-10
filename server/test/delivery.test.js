@@ -12,7 +12,7 @@
 // l'ordonnancement.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupTestDb, firstAdminAndCaisse, balanceOf } from './helpers/testdb.js';
+import { setupTestDb, firstAdminAndCaisse, balanceOf, algeriaTestCaisse } from './helpers/testdb.js';
 import * as bons from '../src/modules/bons/bons.service.js';
 import * as orders from '../src/modules/orders/orders.service.js';
 import * as accounts from '../src/modules/accounts/accounts.service.js';
@@ -27,14 +27,10 @@ before(async () => {
   db = await setupTestDb();
   const ctx = await firstAdminAndCaisse();
   admin = ctx.admin;
-  // `office` à NULL, et pas 'algeria' : un index unique partiel
-  // (uniq_office_caisse) n'autorise qu'une seule caisse par bureau. C'est la
-  // façon dont reports.test.js et money-integrity.test.js se donnent déjà une
-  // caisse à eux sur une base partagée par des processus de test parallèles.
-  const { rows } = await getPool().query(
-    "INSERT INTO caisses (kind, office, label) VALUES ('office', NULL, 'Caisse livraison (test)') RETURNING id"
-  );
-  caisseId = rows[0].id;
+  // Le fournisseur ne paie qu'en Algérie : une caisse d'Algérie À SOI, pour que
+  // les soldes vérifiés ici ne bougent pas sous les autres fichiers (voir
+  // algeriaTestCaisse).
+  caisseId = await algeriaTestCaisse('Caisse livraison (test)');
 });
 after(async () => { await db.stop(); });
 

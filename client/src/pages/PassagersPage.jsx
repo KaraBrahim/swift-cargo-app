@@ -5,6 +5,7 @@ import { useApi, useDebounced } from '../api/useApi.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 import { Spinner, errorMessage, useToast, PageHeader, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
+import { WilayaField } from '../components/WilayaField.jsx';
 import { RolePicker, RoleBadges, emptyPerson, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 
 const TYPE_LABEL = { regular: 'Régulier', auto: 'Auto-entrepreneur' };
@@ -64,6 +65,7 @@ export default function PassagersPage() {
             <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label className="field"><span>Téléphone</span>
             <input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+          <WilayaField value={form.wilaya} onChange={(v) => setForm({ ...form, wilaya: v })} />
           <label className="field field-grow"><span>Notes</span>
             <input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
           <RolePicker value={form} onChange={setForm} />
@@ -84,7 +86,7 @@ export default function PassagersPage() {
         {rows.length ? (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Passager</th><th>Type</th><th>Téléphone</th><th>Notes</th><th></th></tr></thead>
+              <thead><tr><th>Passager</th><th>Type</th><th>Téléphone</th><th>Wilaya</th><th>Notes</th><th></th></tr></thead>
               <tbody>
                 {rows.map((p) => (
                   <tr key={p.id} className="clickable" onClick={() => navigate(`/personnes/${p.id}`)}>
@@ -98,6 +100,7 @@ export default function PassagersPage() {
                     </td>
                     <td><span className="type-badge">{TYPE_LABEL[p.passager_type] || '—'}</span></td>
                     <td>{p.phone || '—'}</td>
+                    <td>{p.wilaya || '—'}</td>
                     <td className="muted">{p.notes || '—'}</td>
                     <td className="right nowrap">
                       <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setForm(personToForm(p)); }}>Modifier</button>{' '}

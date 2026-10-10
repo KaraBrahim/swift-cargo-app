@@ -289,6 +289,8 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
     }, 'Bon modifié.');
 
   const offices = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
+  // Le fournisseur paie en Algérie, et seulement là : le serveur le refuse ailleurs.
+  const algeriaOffices = offices.filter((c) => c.office === 'algeria');
   const cur = bon.transport_currency;
   // Le solde de la caisse dans la devise du bon, écrit sous son nom : c'est la
   // question qu'on se pose au moment de choisir laquelle paie.
@@ -761,12 +763,12 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                   icon="caisse"
                   value={feeForm.caisseId}
                   onChange={(v) => setFeeForm({ ...feeForm, caisseId: v })}
-                  options={offices}
+                  options={algeriaOffices}
                   labelOf={(c) => c.label}
                   subOf={caisseSub}
                   searchOf={(c) => c.label}
-                  placeholder="Choisir la caisse"
-                  emptyText="Aucune caisse de bureau."
+                  placeholder="Choisir la caisse d’Algérie"
+                  emptyText="Aucune caisse d’Algérie."
                 /></div>
               <label className="field wz-amount"><span>Montant reçu</span>
                 <AmountInput value={feeForm.amount} onChange={(v) => setFeeForm({ ...feeForm, amount: v })} /></label>

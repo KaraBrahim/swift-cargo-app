@@ -43,3 +43,23 @@ export async function balanceOf(caisseId, currency) {
   );
   return rows[0]?.balance ?? null;
 }
+
+// Une caisse À PART au bureau d'Algérie, pour les tests qui encaissent un
+// fournisseur (qui ne paie qu'en Algérie). L'index `uniq_office_caisse` n'en
+// autorise qu'une par bureau parmi les caisses « office », et `uniq_global_caisse`
+// une seule globale : on passe donc par une caisse d'administrateur, dont le
+// propriétaire est un compte créé pour l'occasion. Chaque fichier de test a ainsi
+// la sienne, et les soldes qu'il vérifie ne bougent pas sous un autre fichier.
+export async function algeriaTestCaisse(label) {
+  const db = getPool();
+  const username = `test_alger_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
+  const { rows: [a] } = await db.query(
+    `INSERT INTO admins (username, full_name, password_hash, role) VALUES ($1, $2, 'x', 'admin') RETURNING id`,
+    [username, label]
+  );
+  const { rows: [c] } = await db.query(
+    `INSERT INTO caisses (kind, owner_admin_id, office, label) VALUES ('admin', $1, 'algeria', $2) RETURNING id`,
+    [a.id, label]
+  );
+  return c.id;
+}

@@ -6,7 +6,7 @@ import { getPool, withTx } from '../../db/pool.js';
 import { Decimal, toDecimal, MAX_AMOUNT } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
-import { postMovement, replayChain } from '../caisse/caisse.service.js';
+import { assertCaisseOffice, postMovement, replayChain } from '../caisse/caisse.service.js';
 // orderStatus.js ne dépend que de la lib money : l'importer ici n'introduit
 // aucun cycle, là où importer orders.service.js en aurait créé un.
 import { recomputeOrderStatus } from '../orders/orderStatus.js';
@@ -149,7 +149,7 @@ export async function getAccount(personType, personId) {
 export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, note, ip }) {
   const personType = 'personne';
   return withTx(async (c) => {
-    const person = await c.query('SELECT 1 FROM people WHERE id=$1 AND active=TRUE', [personId]);
+    const person = await c.query('SELECT is_fournisseur FROM people WHERE id=$1 AND active=TRUE', [personId]);
     if (!person.rows.length) throw errors.notFound('Personne introuvable ou inactive.');
 
     const amt = new Decimal(amount);
@@ -164,6 +164,11 @@ export async function settleAccount({ admin, personId, caisseId, amount, currenc
         [personType, personId, currency]
       );
       incoming = new Decimal(rows[0]?.balance ?? 0).lte(0);
+    }
+    // Un fournisseur qui règle sa dette paie au bureau d'Algérie.
+    if (incoming && person.rows[0].is_fournisseur) {
+      await assertCaisseOffice(c, caisseId, 'algeria',
+        'Le fournisseur paie en Algérie : choisissez une caisse du bureau d’Algérie.');
     }
     const { txId } = await postMovement(c, {
       caisseId, currency, direction: incoming ? 'in' : 'out', amount: amt.toFixed(2),

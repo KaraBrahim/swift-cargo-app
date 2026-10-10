@@ -60,7 +60,8 @@ export default function OrderDetailPage() {
   const o = data.order;
   const cur = o.bons?.[0]?.transport_currency || 'DZD';
   const goodsBonId = o.bons?.[0]?.id;
-  const offices = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
+  // Le fournisseur paie en Algérie, et seulement là : le serveur le refuse ailleurs.
+  const offices = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office' && c.office === 'algeria');
   const caisseSub = (c) => `${formatMoney(c.balances?.[cur] ?? 0, cur)} disponible`;
   const locked = o.status === 'livree' || o.status === 'cloturee';
   const due = Number(o.totals?.due ?? 0);
@@ -370,7 +371,7 @@ export default function OrderDetailPage() {
                     subOf={caisseSub}
                     searchOf={(c) => c.label}
                     placeholder="Encaisser plus tard (choisir une caisse pour encaisser maintenant)"
-                    emptyText="Aucune caisse de bureau."
+                    emptyText="Aucune caisse d’Algérie."
                   /></div>
                 <label className="field wz-amount"><span>Montant reçu ({cur})</span>
                   <AmountInput value={cash.amount} onChange={(v) => setCash({ ...cash, amount: v })} /></label>

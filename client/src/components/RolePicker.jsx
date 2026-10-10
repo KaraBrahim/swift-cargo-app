@@ -8,7 +8,7 @@ import { IconEl } from './icons.jsx';
 // on, because it means nothing otherwise.
 
 export const emptyPerson = (roles = {}) => ({
-  name: '', phone: '', notes: '',
+  name: '', phone: '', wilaya: '', notes: '',
   isFournisseur: Boolean(roles.isFournisseur),
   isPassager: Boolean(roles.isPassager),
   passagerType: 'regular',
@@ -19,6 +19,7 @@ export const personToForm = (p) => ({
   id: p.id,
   name: p.name || '',
   phone: p.phone || '',
+  wilaya: p.wilaya || '',
   notes: p.notes || '',
   isFournisseur: Boolean(p.is_fournisseur),
   isPassager: Boolean(p.is_passager),
@@ -29,6 +30,7 @@ export const personToForm = (p) => ({
 export const personBody = (f) => ({
   name: f.name.trim(),
   phone: f.phone || undefined,
+  wilaya: f.wilaya || undefined,
   notes: f.notes || undefined,
   isFournisseur: Boolean(f.isFournisseur),
   isPassager: Boolean(f.isPassager),

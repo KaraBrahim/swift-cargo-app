@@ -5,6 +5,7 @@ import { useApi, useDebounced } from '../api/useApi.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 import { Spinner, errorMessage, useToast, PageHeader, EmptyState } from '../components/ui.jsx';
 import { IconEl, initialsOf } from '../components/icons.jsx';
+import { WilayaField } from '../components/WilayaField.jsx';
 import { RolePicker, RoleBadges, emptyPerson, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 
 const ACCENT = 'var(--c-people)';
@@ -63,6 +64,7 @@ export default function FournisseursPage() {
             <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label className="field"><span>Téléphone</span>
             <input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+          <WilayaField value={form.wilaya} onChange={(v) => setForm({ ...form, wilaya: v })} />
           <label className="field field-grow"><span>Notes</span>
             <input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
           <RolePicker value={form} onChange={setForm} />
@@ -80,7 +82,7 @@ export default function FournisseursPage() {
         {rows.length ? (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Fournisseur</th><th>Téléphone</th><th>Notes</th><th></th></tr></thead>
+              <thead><tr><th>Fournisseur</th><th>Téléphone</th><th>Wilaya</th><th>Notes</th><th></th></tr></thead>
               <tbody>
                 {rows.map((f) => (
                   <tr key={f.id} className="clickable" onClick={() => navigate(`/personnes/${f.id}`)}>
@@ -93,6 +95,7 @@ export default function FournisseursPage() {
                       </span>
                     </td>
                     <td>{f.phone || '—'}</td>
+                    <td>{f.wilaya || '—'}</td>
                     <td className="muted">{f.notes || '—'}</td>
                     <td className="right nowrap">
                       <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setForm(personToForm(f)); }}>Modifier</button>{' '}

@@ -10,6 +10,7 @@ import { BON_STATUS } from '../components/bonStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor } from '../lib/offices.js';
 import AmountInput from '../components/AmountInput.jsx';
+import { WilayaField } from '../components/WilayaField.jsx';
 import { RolePicker, RoleBadges, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
@@ -140,7 +141,7 @@ export default function ProfilePage() {
   const bonList = [...bonMap.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const orderList = orders.data?.orders ?? [];
 
-  const officeCaisses = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
+  const allOfficeCaisses = (caisses.data?.caisses ?? []).filter((c) => c.kind === 'office');
   const personPayments = (allPayments.data?.payments ?? []).filter((p) => String(p.person_id) === String(id));
   const dzd = balances.find((b) => b.currency_code === 'DZD')?.balance ?? '0';
   const state = balanceState(dzd);
@@ -152,6 +153,10 @@ export default function ProfilePage() {
   // payer » sur le seul solde DZD se trompait alors de sens, et de montant.
   const selBalance = balanceIn(balances, pay.currency);
   const incoming = selBalance <= 0;
+  // Un fournisseur paie en Algérie, et seulement là : le serveur le refuse ailleurs.
+  const officeCaisses = incoming && person.is_fournisseur
+    ? allOfficeCaisses.filter((c) => c.office === 'algeria')
+    : allOfficeCaisses;
   const totalFees = bonList.reduce((s, b) => s + Number(b.transport_fee || 0), 0);
   const activeBons = bonList.filter((b) => b.status !== 'regle').length;
 
@@ -275,6 +280,7 @@ export default function ProfilePage() {
             <input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
           <label className="field"><span>Téléphone</span>
             <input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></label>
+          <WilayaField value={edit.wilaya} onChange={(v) => setEdit({ ...edit, wilaya: v })} />
           <label className="field field-grow"><span>Notes</span>
             <input value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></label>
           {/* Ajouter le rôle manquant se fait ici, en un clic : la fiche, les
@@ -475,7 +481,7 @@ export default function ProfilePage() {
                     icon="caisse"
                     value={txForm.caisseId}
                     onChange={(v) => setTxForm({ ...txForm, caisseId: v })}
-                    options={officeCaisses}
+                    options={allOfficeCaisses}
                     labelOf={(c) => c.label}
                     searchOf={(c) => c.label}
                     placeholder="Écriture seule, sans argent"

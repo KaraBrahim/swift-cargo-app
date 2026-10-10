@@ -2,7 +2,7 @@
 // Chaque test a d'abord été écrit pour ÉCHOUER contre l'ancien code.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupTestDb, firstAdminAndCaisse } from './helpers/testdb.js';
+import { setupTestDb, firstAdminAndCaisse, algeriaTestCaisse } from './helpers/testdb.js';
 import * as caisse from '../src/modules/caisse/caisse.service.js';
 import * as bons from '../src/modules/bons/bons.service.js';
 import * as orders from '../src/modules/orders/orders.service.js';
@@ -18,10 +18,7 @@ before(async () => {
   // caisse.test.js y convertissait des yuans et vérifiait le solde obtenu :
   // selon l'ordre d'exécution, l'un des deux échouait. Une caisse à soi, et la
   // course disparaît.
-  const own = await getPool().query(
-    `INSERT INTO caisses (kind, office, label) VALUES ('office', NULL, 'Caisse intégrité (test)') RETURNING id`
-  );
-  ctx = { ...ctx, caisseId: own.rows[0].id };
+  ctx = { ...ctx, caisseId: await algeriaTestCaisse('Caisse intégrité (test)') };
   fournisseur = (await getPool().query(
     "INSERT INTO people (name, is_fournisseur, is_passager) VALUES ('Audit F', TRUE, FALSE) RETURNING id"
   )).rows[0].id;

@@ -23,7 +23,7 @@ export async function listPeople({ role, search, passagerType, includeInactive }
   }
   if (search) {
     params.push(`%${search}%`);
-    conds.push(`(name ILIKE $${params.length} OR phone ILIKE $${params.length})`);
+    conds.push(`(name ILIKE $${params.length} OR phone ILIKE $${params.length} OR wilaya ILIKE $${params.length})`);
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   const { rows } = await getPool().query(`SELECT * FROM people ${where} ORDER BY name`, params);
@@ -44,10 +44,10 @@ const passagerTypeFor = (data) => (data.isPassager ? data.passagerType || 'regul
 export async function createPerson({ admin, data, ip }) {
   return withTx(async (c) => {
     const { rows } = await c.query(
-      `INSERT INTO people (name, phone, notes, is_fournisseur, is_passager, passager_type)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      `INSERT INTO people (name, phone, notes, is_fournisseur, is_passager, passager_type, wilaya)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [data.name, data.phone ?? null, data.notes ?? null,
-       Boolean(data.isFournisseur), Boolean(data.isPassager), passagerTypeFor(data)]
+       Boolean(data.isFournisseur), Boolean(data.isPassager), passagerTypeFor(data), data.wilaya || null]
     );
     await writeAudit(c, {
       adminId: admin.id, action: 'person.create', entity: 'person', entityId: rows[0].id,
@@ -61,10 +61,10 @@ export async function updatePerson({ admin, id, data, ip }) {
   return withTx(async (c) => {
     const before = await getPerson(id, c);
     const { rows } = await c.query(
-      `UPDATE people SET name=$2, phone=$3, notes=$4, is_fournisseur=$5, is_passager=$6, passager_type=$7
+      `UPDATE people SET name=$2, phone=$3, notes=$4, is_fournisseur=$5, is_passager=$6, passager_type=$7, wilaya=$8
         WHERE id=$1 RETURNING *`,
       [id, data.name, data.phone ?? null, data.notes ?? null,
-       Boolean(data.isFournisseur), Boolean(data.isPassager), passagerTypeFor(data)]
+       Boolean(data.isFournisseur), Boolean(data.isPassager), passagerTypeFor(data), data.wilaya || null]
     );
     // Retirer un rôle ne supprime pas ce qui a été fait sous ce rôle : les bons
     // et les écritures restent, ils appartiennent à la personne.

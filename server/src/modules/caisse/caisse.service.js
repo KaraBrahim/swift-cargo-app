@@ -150,6 +150,19 @@ export async function ledger(caisseId, { limit = 100, currency, adminId } = {}) 
 // person-account entry). Locks the balance, guards overdraft, writes the ledger.
 // `allowNegative` is opt-in and has exactly one caller: confirming a transfer
 // whose sending caisse has since been emptied. See 019_transfer_forced.sql.
+// Certaines opérations n'ont lieu qu'à un bureau : le fournisseur paie en Algérie.
+// Le contrôle est ICI, au serveur, et pas seulement dans la liste de l'écran —
+// un client qui contourne l'écran ne doit pas pouvoir encaisser dans la caisse
+// d'un autre pays. Une caisse sans bureau est refusée : on ne sait pas où est
+// l'argent.
+export async function assertCaisseOffice(client, caisseId, office, message) {
+  const { rows: [c] } = await client.query('SELECT office, label FROM caisses WHERE id = $1', [caisseId]);
+  if (!c) throw errors.notFound('Caisse introuvable.');
+  if (c.office !== office) {
+    throw errors.conflict(message ?? `Cette opération se fait dans une caisse du bureau « ${office} » : « ${c.label} » n'en est pas une.`);
+  }
+}
+
 export async function postMovement(client, { caisseId, currency, direction, amount, type, note, adminId, allowNegative = false }) {
   await loadCaisse(client, caisseId);
   const cur = await loadCurrency(client, currency);

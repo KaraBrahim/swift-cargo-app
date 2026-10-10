@@ -69,6 +69,7 @@ const body = z
   .object({
     name: z.string().trim().min(1).max(160),
     phone: z.string().trim().max(40).optional(),
+    wilaya: z.string().trim().max(80).optional(),
     notes: z.string().trim().max(1000).optional(),
     isFournisseur: z.boolean().default(false),
     isPassager: z.boolean().default(false),
