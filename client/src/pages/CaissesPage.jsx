@@ -10,8 +10,15 @@ import { useIsSuper } from '../auth/AuthContext.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { DebtSummary } from '../components/DebtSummary.jsx';
+import { QuickSettle } from '../components/QuickSettle.jsx';
+import { MoneyConfirm } from '../components/MoneyConfirm.jsx';
 import AmountInput from '../components/AmountInput.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
+
+// La fiche où une dette se règle. Un membre de l'équipe n'a pas de fiche « personne » :
+// ses avances et salaires se règlent dans Charges → Salaires. Le lier à
+// /personnes/<id> ouvrirait la fiche d'une autre personne portant le même numéro.
+const openDebtOf = (d) => (d.person_type === 'personne' ? `/personnes/${d.person_id}` : '/charges');
 
 const OFFICE_LABEL = { china: 'Bureau Chine', algeria: 'Bureau Algérie' };
 
@@ -44,6 +51,8 @@ export default function CaissesPage() {
   const [confirmTransfer, setConfirmTransfer] = useState(null); // { mode:'delete'|'unreceive', t }
   const [editPayment, setEditPayment] = useState(null);
   const [confirmPayment, setConfirmPayment] = useState(null);
+  const [settleDebt, setSettleDebt] = useState(null); // une ligne de « Dettes en cours »
+  const [confirmReceive, setConfirmReceive] = useState(null); // un transfert à confirmer
 
   // Transfer corrections all touch caisse balances, so they share one runner.
   const runTransfer = async (fn, okMsg) => {
@@ -137,6 +146,7 @@ export default function CaissesPage() {
   // Awaiting confirmation — surfaced at the top of the page, and the same rows
   // the Transferts table lists below.
   const pending = (transfers.data?.transfers ?? []).filter((t) => t.status === 'envoye');
+  const debtCount = (debts.data?.toPay?.length ?? 0) + (debts.data?.toCollect?.length ?? 0);
 
   const cancelPending = (t) =>
     runTransfer(async () => {
@@ -150,6 +160,14 @@ export default function CaissesPage() {
         <h1>Caisses</h1>
         <p className="muted">Deux caisses de bureau · le DZD est la devise de référence.</p>
       </div>
+
+      {/* Cinq panneaux, une longue page : des raccourcis, toujours à portée. */}
+      <nav className="page-jump" aria-label="Aller à">
+        <a href="#dettes">Dettes{debtCount > 0 && <span className="jump-n out">{debtCount}</span>}</a>
+        {pending.length > 0 && <a href="#a-confirmer">À confirmer<span className="jump-n">{pending.length}</span></a>}
+        <a href="#transferts">Transferts</a>
+        <a href="#paiements">Paiements</a>
+      </nav>
 
       {/* L'argent qui reste dû, dans les deux sens : en tête, pas derrière un onglet. */}
       <DebtSummary linkToList={false} />
@@ -178,7 +196,7 @@ export default function CaissesPage() {
           panels down. So it also appears here, directly under the caisses, with
           the button that settles it. */}
       {pending.length > 0 && (
-        <div className="pending-strip">
+        <div className="pending-strip" id="a-confirmer">
           <div className="pending-title">
             <IconEl name="swap" />
             {pending.length === 1 ? '1 transfert à confirmer' : `${pending.length} transferts à confirmer`}
@@ -188,8 +206,8 @@ export default function CaissesPage() {
               <span className="gold">{t.reference}</span>
               <span className="muted">{OFFICE_LABEL[t.from_office]} → {OFFICE_LABEL[t.to_office]}</span>
               <strong>{formatMoney(t.amount, t.currency_code)}</strong>
-              <button className="btn btn-sm btn-gold" disabled={busy} onClick={() => receive(t)}>
-                Confirmer la réception
+              <button className="btn btn-sm btn-gold" disabled={busy} onClick={() => setConfirmReceive(t)}>
+                Vérifier et confirmer
               </button>
             </div>
           ))}
@@ -223,14 +241,17 @@ export default function CaissesPage() {
                 <tbody>
                   {(debts.data?.[key] ?? []).map((d) => (
                     <tr key={`${d.person_type}-${d.person_id}-${d.currency_code}`} className="clickable"
-                      onClick={() => navigate(`/personnes/${d.person_id}`)}>
-                      <td><span className="gold">{d.person_name}</span></td>
-                      <td className="nowrap"><RoleBadges person={d} /></td>
+                      onClick={() => navigate(openDebtOf(d))}>
+                      <td><span className="gold">{d.person_name || `Compte #${d.person_id}`}</span></td>
+                      <td className="nowrap">{d.person_type === 'personne' ? <RoleBadges person={d} /> : <span className="badge">Équipe</span>}</td>
                       <td className="muted">{d.phone || '—'}</td>
                       <td className="muted">{d.last_activity ? new Date(d.last_activity).toLocaleDateString('fr-FR') : '—'}</td>
                       <td className="right"><strong className={dir === 'out' ? 'neg' : 'gold'}>{formatMoney(Math.abs(Number(d.balance)), d.currency_code)}</strong></td>
                       <td className="right" onClick={(e) => e.stopPropagation()}>
-                        <button className="btn btn-sm" onClick={() => navigate(`/personnes/${d.person_id}`)}>{action}</button>
+                        <button className={`btn btn-sm ${dir === 'out' ? 'btn-danger-soft' : 'btn-gold'}`}
+                          onClick={() => (d.person_type === 'personne' ? setSettleDebt(d) : navigate(openDebtOf(d)))}>
+                          {action}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -245,7 +266,7 @@ export default function CaissesPage() {
       </div>
 
       {/* ── Everything already settled in cash ── */}
-      <div className="panel" style={{ marginTop: 24 }}>
+      <div className="panel" id="paiements" style={{ marginTop: 24 }}>
         <div className="page-head" style={{ marginBottom: 12 }}>
           <h2 className="panel-title">Paiements effectués</h2>
           <div className="seg">
@@ -373,7 +394,7 @@ export default function CaissesPage() {
       )}
 
       {/* ── Cash transfers between caisses — the only kind there is ── */}
-      <div className="panel" style={{ marginTop: 24 }}>
+      <div className="panel" id="transferts" style={{ marginTop: 24 }}>
         <h2 className="panel-title">Transferts</h2>
         <div className="money-head">
           <span className="money-dir out">En attente de confirmation</span>
@@ -457,7 +478,7 @@ export default function CaissesPage() {
                   <td className="right nowrap">
                     {t.status === 'envoye' ? (
                       <>
-                        <button className="btn btn-sm" onClick={() => receive(t)}>Confirmer réception</button>
+                        <button className="btn btn-sm" disabled={busy} onClick={() => setConfirmReceive(t)}>Confirmer réception</button>
                         <button className="icon-btn" title="Corriger le montant" aria-label="Corriger"
                           disabled={busy} onClick={() => setEditTransfer({ id: t.id, reference: t.reference, amount: t.amount, note: t.note || '' })}>
                           <IconEl name="edit" />
@@ -488,6 +509,45 @@ export default function CaissesPage() {
           </table>
         </div>
       </div>
+
+      {/* Confirmer une réception déplace l'argent des DEUX caisses : on montre les
+          deux soldes, avant et après, avant de le faire. */}
+      {confirmReceive && (() => {
+        const t = confirmReceive;
+        const amt = Number(t.amount);
+        const cur = t.currency_code;
+        const from = (caisses.data?.caisses ?? []).find((c) => c.id === t.sent_caisse_id);
+        const to = (caisses.data?.caisses ?? []).find((c) => c.id === t.received_caisse_id);
+        const fromBal = Number(from?.balances?.[cur] ?? 0);
+        const toBal = Number(to?.balances?.[cur] ?? 0);
+        return (
+          <MoneyConfirm
+            open
+            kind="move"
+            title={`Confirmer la réception de ${t.reference}`}
+            amount={amt} currency={cur}
+            rows={[
+              { label: `Sort de « ${t.sent_caisse_label} »`, before: fromBal, after: fromBal - amt, currency: cur, tone: 'caisse' },
+              { label: `Entre dans « ${t.received_caisse_label} »`, before: toBal, after: toBal + amt, currency: cur, tone: 'caisse' },
+            ]}
+            warn={fromBal < amt ? [`La caisse d’origine ne contient que ${formatMoney(fromBal, cur)} : elle passerait en négatif. Vérifiez que l’argent a bien été envoyé.`] : []}
+            confirmLabel={`Confirmer ${formatMoney(amt, cur)} reçus`}
+            busy={busy}
+            onCancel={() => setConfirmReceive(null)}
+            onConfirm={() => { setConfirmReceive(null); receive(t); }}
+          />
+        );
+      })()}
+
+      {/* Régler une dette directement depuis la liste. */}
+      {settleDebt && (
+        <QuickSettle
+          debt={settleDebt}
+          caisses={caisses.data?.caisses ?? []}
+          onClose={() => setSettleDebt(null)}
+          onDone={reload}
+        />
+      )}
 
       {/* The sending caisse no longer covers the amount. Neither answer is
           obviously right — the cash may really have arrived, or the transfer may

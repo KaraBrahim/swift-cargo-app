@@ -6,6 +6,7 @@ import { useTabTitle } from '../components/TabsContext.jsx';
 import { Spinner, Money, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import { MoneyConfirm } from '../components/MoneyConfirm.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
@@ -136,6 +137,8 @@ export default function CaisseDetailPage() {
       <OperationsPanel
         caisseId={Number(id)}
         office={caisse.office}
+        label={caisse.label}
+        balances={caisse.balances}
         currencies={curList}
         caisses={(caisses.data?.caisses ?? []).filter((c) => c.id !== Number(id))}
         onDone={reloadAll}
@@ -221,7 +224,7 @@ export default function CaisseDetailPage() {
 }
 
 // ── Operations ─────────────────────────────────────────────────────────
-function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
+function OperationsPanel({ caisseId, office, label, balances, currencies, caisses, onDone }) {
   const toast = useToast();
   const [op, setOp] = useState('deposit');
   const [busy, setBusy] = useState(false);
@@ -241,6 +244,7 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
   const [toCaisseId, setToCaisseId] = useState('');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [check, setCheck] = useState(false); // la boîte « avant → après »
 
   useEffect(() => {
     if (!toCaisseId && caisses.length) setToCaisseId(caisses[0].id);
@@ -273,9 +277,46 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
     return true;
   };
 
-  const submit = async (e) => {
+  // Valider le formulaire n'enregistre rien : ça ouvre la vérification.
+  const submit = (e) => {
     e.preventDefault();
-    if (!valid()) return;
+    if (valid()) setCheck(true);
+  };
+
+  const balOf = (code) => Number(balances?.find((b) => b.currency_code === code)?.balance ?? 0);
+
+  // Ce que la vérification montre : chaque solde touché, avant → après.
+  const amt = Number(amount) || 0;
+  const confirmView = (() => {
+    if (op === 'deposit') {
+      return { kind: 'in', cur: currency, confirmLabel: `Déposer ${formatMoney(amt, currency)}`, rows: [{ label: `Caisse « ${label} »`, before: balOf(currency), after: balOf(currency) + amt, currency, tone: 'caisse' }], warn: [] };
+    }
+    if (op === 'withdraw') {
+      return {
+        kind: 'out', cur: currency, confirmLabel: `Retirer ${formatMoney(amt, currency)}`,
+        rows: [{ label: `Caisse « ${label} »`, before: balOf(currency), after: balOf(currency) - amt, currency, tone: 'caisse' }],
+        warn: amt > balOf(currency) ? [`La caisse ne contient que ${formatMoney(balOf(currency), currency)} : le retrait sera refusé.`] : [],
+      };
+    }
+    if (op === 'convert') {
+      const rows = [{ label: `${fromCurrency} sortent`, before: balOf(fromCurrency), after: balOf(fromCurrency) - amt, currency: fromCurrency, tone: 'caisse' }];
+      if (preview) rows.push({ label: `${toCurrency} entrent (estimation)`, before: balOf(toCurrency), after: balOf(toCurrency) + preview.to, currency: toCurrency, tone: 'caisse' });
+      return {
+        kind: 'move', cur: fromCurrency, rows,
+        warn: amt > balOf(fromCurrency) ? [`La caisse ne contient que ${formatMoney(balOf(fromCurrency), fromCurrency)} en ${fromCurrency} : la conversion sera refusée.`] : [],
+        note: 'Le montant reçu est calculé par le serveur, aux taux du moment.',
+      };
+    }
+    const dest = caisses.find((c) => String(c.id) === String(toCaisseId));
+    return {
+      kind: 'move', cur: currency, rows: [], warn: [],
+      title: `Annoncer un transfert vers « ${dest?.label ?? ''} »`,
+      confirmLabel: 'Annoncer le transfert',
+      note: 'Aucun argent ne bouge maintenant : les deux caisses changeront quand le bureau destinataire confirmera la réception.',
+    };
+  })();
+
+  const run = async () => {
     setBusy(true);
     try {
       // Chaque opération porte une clé d'idempotence : un réessai après un
@@ -304,8 +345,10 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
       }
       setAmount('');
       setNote('');
+      setCheck(false);
       onDone();
     } catch (err) {
+      setCheck(false);
       toast.error(errorMessage(err));
     } finally {
       setBusy(false);
@@ -401,6 +444,19 @@ function OperationsPanel({ caisseId, office, currencies, caisses, onDone }) {
       {op === 'convert' && !preview && Number(amount) > 0 && fromCurrency !== toCurrency && (
         <div className="preview muted">Taux manquant pour l'estimation — l'opération utilisera les taux du serveur.</div>
       )}
+
+      <MoneyConfirm
+        open={check}
+        kind={confirmView.kind}
+        title={confirmView.title || `${OPS.find((o) => o.key === op).label} — vérifiez`}
+        amount={amt} currency={confirmView.cur}
+        rows={confirmView.rows} warn={confirmView.warn} note={confirmView.note}
+        confirmLabel={confirmView.confirmLabel}
+        confirmDisabled={op === 'withdraw' && amt > balOf(currency)}
+        busy={busy}
+        onCancel={() => setCheck(false)}
+        onConfirm={run}
+      />
     </div>
   );
 }

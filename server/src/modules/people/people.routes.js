@@ -59,6 +59,8 @@ peopleRouter.post(
       direction: z.enum(['in', 'out']).optional(),
       // Solder le compte : la différence entre le dû et ce qu'on règle s'inscrit en remise.
       settle: z.boolean().optional(),
+      // Régler PLUS que le dû (une avance) : doit être demandé en toutes lettres.
+      allowExcess: z.boolean().optional(),
       note: z.string().trim().max(300).optional(),
     }),
   }),

@@ -147,7 +147,7 @@ export async function getAccount(personType, personId) {
 // a fournisseur and be owed as a passager. The caller states it; left unsaid it
 // follows the sign of the balance — negative means they owe us, so money comes
 // IN — which is exactly what the button on the profile offers.
-export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, settle = false, note, ip }) {
+export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, settle = false, allowExcess = false, note, ip }) {
   const personType = 'personne';
   return withTx(async (c) => {
     const person = await c.query('SELECT is_fournisseur FROM people WHERE id=$1 AND active=TRUE', [personId]);
@@ -175,6 +175,24 @@ export async function settleAccount({ admin, personId, caisseId, amount, currenc
       );
       const balance = new Decimal(bal?.balance ?? 0);
       diff = await remiseDiff(c, { due: incoming ? balance.negated() : balance, amount: amt, currency });
+    }
+    // Garde-fou : on ne règle pas plus que ce qui est dû dans ce sens. Payer 475 000
+    // quand on doit 47 500 ferait de l'autre un débiteur sans que personne l'ait
+    // voulu. « Solder » a déjà son propre plafond (un pas d'arrondi) ; sinon, un
+    // dépassement ne passe que s'il est confirmé (`allowExcess`) — une avance.
+    if (!settle && !allowExcess) {
+      const { rows: [cur] } = await c.query(
+        'SELECT balance FROM person_balances WHERE person_type=$1 AND person_id=$2 AND currency_code=$3',
+        [personType, personId, currency]
+      );
+      const bal = new Decimal(cur?.balance ?? 0);
+      const open = Decimal.max(incoming ? bal.negated() : bal, 0);
+      if (amt.gt(open)) {
+        throw errors.amountExceedsDebt({
+          currency, incoming, open: open.toFixed(2), amount: amt.toFixed(2),
+          excess: amt.minus(open).toFixed(2),
+        });
+      }
     }
     // Un fournisseur qui règle sa dette paie au bureau d'Algérie.
     if (incoming && person.rows[0].is_fournisseur) {
@@ -440,12 +458,16 @@ export async function deletePayment({ admin, entryId, ip }) {
 export async function listDebts() {
   const { rows } = await getPool().query(
     `SELECT pb.person_type, pb.person_id, pb.currency_code, pb.balance,
-            pe.name AS person_name, pe.phone, pe.is_fournisseur, pe.is_passager,
+            -- Une dette peut être celle d'un membre de l'équipe (avance sur salaire) :
+            -- son nom est dans admins, pas dans people. Sans ce repli la ligne
+            -- sortait sans nom, et l'écran la liait à la fiche d'une AUTRE personne.
+            COALESCE(pe.name, ad.full_name) AS person_name, pe.phone, pe.is_fournisseur, pe.is_passager,
             (SELECT MAX(pl.created_at) FROM person_ledger pl
               WHERE pl.person_type = pb.person_type AND pl.person_id = pb.person_id
                 AND pl.currency_code = pb.currency_code) AS last_activity
        FROM person_balances pb
        LEFT JOIN people pe ON pb.person_type='personne' AND pe.id = pb.person_id
+       LEFT JOIN admins ad ON pb.person_type='utilisateur' AND ad.id = pb.person_id
       WHERE pb.balance <> 0
       ORDER BY ABS(pb.balance) DESC`
   );

@@ -14,6 +14,8 @@ import { WilayaField } from '../components/WilayaField.jsx';
 import { RolePicker, RoleBadges, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { MoneyConfirm, afterPayment, debtRow } from '../components/MoneyConfirm.jsx';
+import { useStep } from '../lib/rounding.js';
 import { DebtBanner } from '../components/DebtBanner.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
@@ -119,6 +121,9 @@ export default function ProfilePage() {
 
   // Correcting a payment touches both the caisse and this account.
   const idem = useIdempotent();
+  const roundStep = useStep(pay.currency);
+  const [checkPay, setCheckPay] = useState(false); // vérification avant de payer / encaisser
+  const [excessOk, setExcessOk] = useState(false);
   const runPay = async (fn, okMsg) => {
     setBusy(true);
     try {
@@ -215,24 +220,42 @@ export default function ProfilePage() {
 
   // Settle the running balance directly from the profile: a fournisseur pays
   // down their debt (cash in), or we pay a passager what we owe (cash out).
-  const submitPayment = async (e) => {
+  const submitPayment = (e) => {
     e.preventDefault();
+    setExcessOk(false);
+    setCheckPay(true);
+  };
+
+  // Le montant, la dette et la caisse tels que la vérification les montre.
+  const dueNow = Math.abs(selBalance);
+  const amtNow = Number(pay.amount) || 0;
+  const settling = Boolean(pay.settle) && amtNow > 0 && amtNow !== dueNow && amtNow - dueNow <= roundStep;
+  const after = afterPayment(dueNow, amtNow, settling);
+  const payCaisse = officeCaisses.find((c) => String(c.id) === String(pay.caisseId));
+  const cash = Number(payCaisse?.balances?.[pay.currency] ?? 0);
+  const lowFunds = !incoming && Boolean(payCaisse) && amtNow > cash;
+
+  const doPayment = async () => {
     setBusy(true);
     try {
       await idem((key) => api(`/people/${id}/payment`, {
         method: 'POST', idem: key,
         body: {
           caisseId: Number(pay.caisseId), amount: pay.amount, currency: pay.currency,
-          direction: incoming ? 'in' : 'out', note: pay.note || undefined, settle: pay.settle || undefined,
+          direction: incoming ? 'in' : 'out', note: pay.note || undefined, settle: settling || undefined,
+          allowExcess: after.excess > 0 || undefined,
         },
       }));
-      toast.success(incoming ? 'Encaissement enregistré.' : 'Paiement enregistré.');
+      setCheckPay(false);
+      toast.success(`${incoming ? 'Encaissement' : 'Paiement'} enregistré. ${after.excess === 0 && after.left > 0
+        ? `Il reste ${formatMoney(after.left, pay.currency)} ${incoming ? 'à encaisser' : 'à payer'} : la dette reste ouverte.`
+        : after.excess === 0 ? 'Dette soldée.' : ''}`.trim());
       // La devise n'est pas remise au dinar : le rechargement du compte, juste
       // après, reproposera la devise et le montant qui restent à régler. La
       // forcer ici ne ferait que faire clignoter « 0.00 DZD » entre les deux.
       setPay((p) => ({ ...p, caisseId: '', amount: '', note: '', settle: false }));
       account.reload();
-    } catch (err) { toast.error(errorMessage(err)); }
+    } catch (err) { setCheckPay(false); toast.error(errorMessage(err)); }
     finally { setBusy(false); }
   };
 
@@ -496,6 +519,33 @@ export default function ProfilePage() {
             <p className="muted line-hint">
               Un montant partiel est accepté : le solde restant reste {incoming ? 'dû par cette personne' : 'dû à cette personne'}.
             </p>
+
+            <MoneyConfirm
+              open={checkPay}
+              kind={incoming ? 'in' : 'out'}
+              title={incoming ? `Encaisser de ${person.name}` : `Payer ${person.name}`}
+              amount={amtNow} currency={pay.currency}
+              rows={payCaisse ? [
+                { label: `Caisse « ${payCaisse.label} »`, before: cash, after: incoming ? cash + amtNow : cash - amtNow, currency: pay.currency, tone: 'caisse' },
+                debtRow({ who: person.name, out: !incoming, before: dueNow, after: after.excess > 0 ? after.excess : after.left, currency: pay.currency }),
+              ] : []}
+              warn={[
+                ...(after.excess > 0 ? [`${formatMoney(after.excess, pay.currency)} de plus que la dette : le compte sera retourné (${incoming ? 'vous lui devrez ensuite' : 'il vous devra ensuite'} cette différence).`] : []),
+                ...(settling && amtNow !== dueNow ? [`Remise de règlement de ${formatMoney(Math.abs(dueNow - amtNow), pay.currency)} : le compte tombe à zéro.`] : []),
+                ...(lowFunds ? [`La caisse ne contient que ${formatMoney(cash, pay.currency)} : le paiement sera refusé.`] : []),
+              ]}
+              confirmDisabled={lowFunds || (after.excess > 0 && !excessOk)}
+              busy={busy}
+              onCancel={() => setCheckPay(false)}
+              onConfirm={doPayment}
+            >
+              {after.excess > 0 && (
+                <label className="remise-line on">
+                  <input type="checkbox" checked={excessOk} onChange={(e) => setExcessOk(e.target.checked)} />
+                  <span>Je veux régler <strong>{formatMoney(after.excess, pay.currency)}</strong> de plus que la dette (avance).</span>
+                </label>
+              )}
+            </MoneyConfirm>
 
             {/* Anything that is not a plain settlement: an advance, a refund, a
                 bonus — in either direction, with or without touching a caisse. */}

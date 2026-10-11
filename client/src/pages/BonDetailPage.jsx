@@ -23,6 +23,7 @@ import { ArrivalBadge } from '../components/ArrivalBadge.jsx';
 import { Journal } from '../components/Journal.jsx';
 import { DebtBanner } from '../components/DebtBanner.jsx';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { PaymentCheck } from '../components/PaymentCheck.jsx';
 import { bonDocBody, measureQty, measureUnit, declaredOf, priceUnit } from '../components/printDocument.js';
 import { pricedPart } from '../lib/lineMath.js';
 import { bonTicket } from '../components/printTicket.js';
@@ -101,6 +102,8 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   const [payMode, setPayMode] = useState('auto');
   const [feeForm, setFeeForm] = useState({ caisseId: '', amount: '' });
   const [payForm, setPayForm] = useState({ caisseId: '', amount: '' });
+  // Avant que l'argent bouge : 'fee' (le fournisseur règle) ou 'pay' (on paie le passager).
+  const [moneyCheck, setMoneyCheck] = useState(null);
   // La caisse qui paie au règlement. Vide = régler sans payer tout de suite.
   const [settleCaisse, setSettleCaisse] = useState('');
   // Ce qu'on donne au passager TOUT DE SUITE. Peut être moins que ce qu'on lui
@@ -232,10 +235,14 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
         closeWithRemise: settleCaisse && closeSettle ? true : undefined,
       },
     })), settleCaisse ? 'Bon réglé. Le versement est enregistré — vérifiez le reste dû.' : 'Bon réglé. La DETTE envers le passager reste ouverte : rien n’est sorti de la caisse, il faut encore le payer.');
-  const collectFee = () =>
-    act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount, settle: feeForm.settle || undefined } })), 'Frais encaissés.');
-  const payPassager = () =>
-    act(() => idem((key) => api(`/bons/${id}/pay-passager`, { method: 'POST', idem: key, body: { caisseId: Number(payForm.caisseId), amount: payForm.amount, settle: payForm.settle || undefined } })), 'Passager payé.');
+  const collectFee = () => {
+    setMoneyCheck(null);
+    return act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount, settle: feeForm.settle || undefined } })), 'Frais encaissés.');
+  };
+  const payPassager = () => {
+    setMoneyCheck(null);
+    return act(() => idem((key) => api(`/bons/${id}/pay-passager`, { method: 'POST', idem: key, body: { caisseId: Number(payForm.caisseId), amount: payForm.amount, settle: payForm.settle || undefined } })), 'Passager payé.');
+  };
 
   const isFournisseurBon = bon.order_id != null;
   const toPickedLine = (l, index) => {
@@ -859,7 +866,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                 /></div>
               <label className="field wz-amount"><span>Montant reçu</span>
                 <AmountInput value={feeForm.amount} onChange={(v) => setFeeForm({ ...feeForm, amount: v })} /></label>
-              <button className="btn btn-gold" disabled={busy || !feeForm.caisseId || !(Number(feeForm.amount) > 0)} onClick={collectFee}>
+              <button className="btn btn-gold" disabled={busy || !feeForm.caisseId || !(Number(feeForm.amount) > 0)} onClick={() => setMoneyCheck('fee')}>
                 <IconEl name="arrowIn" />Encaisser
               </button>
             </div>
@@ -892,7 +899,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                   /></div>
                 <label className="field wz-amount"><span>Montant versé</span>
                   <AmountInput value={payForm.amount} onChange={(v) => setPayForm({ ...payForm, amount: v })} /></label>
-                <button className="btn btn-gold" disabled={busy || !payForm.caisseId || !(Number(payForm.amount) > 0)} onClick={payPassager}>
+                <button className="btn btn-gold" disabled={busy || !payForm.caisseId || !(Number(payForm.amount) > 0)} onClick={() => setMoneyCheck('pay')}>
                   <IconEl name="arrowOut" />Payer
                 </button>
               </div>
@@ -908,6 +915,23 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
               </p>
             )}
           </div>
+        )}
+
+        {moneyCheck === 'fee' && (
+          <PaymentCheck
+            incoming who={bon.fournisseur_name} currency={cur}
+            caisse={algeriaOffices.find((c) => String(c.id) === String(feeForm.caisseId))}
+            due={dueAfter(bon.transport_fee, bon.payments, 'fee_payment')} amount={feeForm.amount} settle={feeForm.settle}
+            busy={busy} onConfirm={collectFee} onCancel={() => setMoneyCheck(null)}
+          />
+        )}
+        {moneyCheck === 'pay' && (
+          <PaymentCheck
+            who={bon.passager_name} currency={cur}
+            caisse={offices.find((c) => String(c.id) === String(payForm.caisseId))}
+            due={dueAfter(bon.passager_payment, bon.payments, 'passager_payment')} amount={payForm.amount} settle={payForm.settle}
+            busy={busy} onConfirm={payPassager} onCancel={() => setMoneyCheck(null)}
+          />
         )}
       </Section>
 

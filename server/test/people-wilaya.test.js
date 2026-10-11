@@ -66,5 +66,6 @@ test('le règlement au comptoir d’un fournisseur suit la même règle, pas cel
 
   // Un passager qui nous rembourse n'est pas un fournisseur : aucune règle de bureau.
   const p = (await getPool().query('INSERT INTO people (name, is_passager) VALUES ($1, true) RETURNING id', ['Passager Alger B'])).rows[0];
-  await accounts.settleAccount({ admin, personId: p.id, caisseId: china, amount: '10', currency: 'DZD', direction: 'in' });
+  // (Il ne doit rien : le montant est donc une avance, à confirmer en toutes lettres.)
+  await accounts.settleAccount({ admin, personId: p.id, caisseId: china, amount: '10', currency: 'DZD', direction: 'in', allowExcess: true });
 });

@@ -14,7 +14,7 @@ function Card({ kind, rows, totals }) {
   const navigate = useNavigate();
   const out = kind === 'toPay';
   const entries = Object.entries(totals ?? {});
-  const people = new Set(rows.map((r) => r.person_id)).size;
+  const people = new Set(rows.map((r) => `${r.person_type}-${r.person_id}`)).size;
   return (
     <section className={`debt-card ${out ? 'out' : 'in'}`}>
       <header>
@@ -40,12 +40,12 @@ function Card({ kind, rows, totals }) {
 
       {rows.slice(0, MAX).map((r) => (
         <button
-          key={`${r.person_id}-${r.currency_code}`}
+          key={`${r.person_type}-${r.person_id}-${r.currency_code}`}
           type="button"
           className="debt-row"
-          onClick={() => navigate(`/personnes/${r.person_id}`)}
+          onClick={() => navigate(r.person_type === 'personne' ? `/personnes/${r.person_id}` : '/charges')}
         >
-          <span>{r.person_name}</span>
+          <span>{r.person_name || `Compte #${r.person_id}`}</span>
           <strong>{formatMoney(Math.abs(Number(r.balance)), r.currency_code)}</strong>
         </button>
       ))}

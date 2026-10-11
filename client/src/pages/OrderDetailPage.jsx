@@ -24,6 +24,7 @@ import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { Journal } from '../components/Journal.jsx';
 import { DebtBanner } from '../components/DebtBanner.jsx';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { PaymentCheck } from '../components/PaymentCheck.jsx';
 import { priceBasis, weightShare, priceUnit } from '../lib/lineMath.js';
 import { formatDateFr } from '../lib/format.js';
 import { orderManifestBody } from '../components/printDocument.js';
@@ -52,6 +53,7 @@ export default function OrderDetailPage() {
   // doit, donc c'est là qu'on le reçoit. Il vivait sur le bon interne des
   // marchandises, que personne n'a de raison d'ouvrir.
   const [cash, setCash] = useState({ caisseId: '', amount: '' });
+  const [checkCash, setCheckCash] = useState(false); // vérification avant d'encaisser
   const caisses = useApi('/caisses');
   const idem = useIdempotent();
   useTabTitle(data?.order?.reference);
@@ -121,6 +123,7 @@ export default function OrderDetailPage() {
   };
 
   const collectFee = async () => {
+    setCheckCash(false);
     setBusy(true);
     try {
       await idem((key) => api(`/bons/${goodsBonId}/collect-fee`, {
@@ -423,7 +426,7 @@ export default function OrderDetailPage() {
                   /></div>
                 <label className="field wz-amount"><span>Montant reçu ({cur})</span>
                   <AmountInput value={cash.amount} onChange={(v) => setCash({ ...cash, amount: v })} /></label>
-                <button className="btn btn-gold" disabled={busy || !cash.caisseId || !(Number(cash.amount) > 0)} onClick={collectFee}>
+                <button className="btn btn-gold" disabled={busy || !cash.caisseId || !(Number(cash.amount) > 0)} onClick={() => setCheckCash(true)}>
                   <IconEl name="arrowIn" />Encaisser {formatMoney(Number(cash.amount || 0), cur)}
                 </button>
               </div>
@@ -432,6 +435,14 @@ export default function OrderDetailPage() {
                 onAmount={(v) => setCash((f) => ({ ...f, amount: v }))}
                 settle={cash.settle} onSettle={(v) => setCash((f) => ({ ...f, settle: v }))}
               />
+              {checkCash && (
+                <PaymentCheck
+                  incoming who={o.fournisseur_name} currency={cur}
+                  caisse={offices.find((c) => String(c.id) === String(cash.caisseId))}
+                  due={due} amount={cash.amount} settle={cash.settle}
+                  busy={busy} onConfirm={collectFee} onCancel={() => setCheckCash(false)}
+                />
+              )}
               <Footnote>
                 Un versement partiel est accepté : corrigez le montant, le reste dû suivra.
                 Tant qu'aucune caisse n'est choisie, rien n'est encaissé — le fournisseur paiera plus tard.

@@ -31,6 +31,11 @@ export const errors = {
       status: 409,
       details,
     }),
+  // Un règlement plus grand que la dette : presque toujours une faute de frappe
+  // (475 000 pour 47 500), et il retournerait la dette dans l'autre sens. Le poste
+  // doit le dire en clair et demander une confirmation explicite.
+  amountExceedsDebt: (details) =>
+    new AppError('AMOUNT_EXCEEDS_DEBT', 'Le montant dépasse ce qui est dû.', { status: 409, details }),
   noRate: (currency) =>
     new AppError(
       'NO_RATE',
