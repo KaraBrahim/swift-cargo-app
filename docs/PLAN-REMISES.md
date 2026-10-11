@@ -11,7 +11,7 @@ Une remise est une **décision prise au règlement** : on laisse tomber une part
 | `amount` — Montant | 400 | on laisse tomber 400 ; le versement proposé devient dû − 400 |
 | `percent` — Pourcentage | 5 | 5 % du dû, **recalculé par le serveur** |
 | `round` — Arrondir | un clic (52 000 / 52 500) | la différence est la remise ; arrondi au-dessus plafonné au pas de la devise |
-| `settle` — Solder | le versement | la différence entre le dû et le versé |
+| `settle` — Total convenu (option principale) | le total réglé | la remise est la différence avec le dû ; le compte est soldé |
 
 Portée : tous les règlements — fiche de la personne, règlement direct depuis Caisses, bon fournisseur (encaisser), bon passager (payer, régler et verser), salaires. Pas les dépôts / retraits / conversions (aucune dette à solder).
 

@@ -4,14 +4,15 @@
 //   amount  — un montant libre        on laisse tomber 400
 //   percent — un pourcentage du dû    5 % de 52 340
 //   round   — arrondir                52 340 → 52 000 ou 52 500
-//   settle  — solder                  la différence entre le dû et le versé
+//   settle  — total convenu           on dit le total réglé, la remise est la différence
+//                                     avec le dû (l'option principale à l'écran)
 //
 // L'écran calcule pour MONTRER ; c'est le serveur qui recalcule et qui fait foi.
 // Un pourcentage n'est jamais envoyé sous forme de montant : on envoie « 5 % » et
 // le serveur en tire la somme.
 export const NO_REMISE = { kind: 'none', value: '', reasonId: null, note: '' };
 
-export const KIND_LABEL = { amount: 'Montant', percent: 'Pourcentage', round: 'Arrondi', settle: 'Solde' };
+export const KIND_LABEL = { amount: 'Montant', percent: 'Pourcentage', round: 'Arrondi', settle: 'Total convenu' };
 
 const r2 = (n) => Math.round(n * 100) / 100;
 

@@ -31,7 +31,7 @@ const DIRECTION = {
   obtenue: { label: 'Obtenue', hint: 'on a payé moins', cls: 'rm-got' },
 };
 
-const kindText = (r) => (r.kind === 'percent' && r.percent != null ? `${Number(r.percent)} %` : KIND_LABEL[r.kind] ?? 'Solde');
+const kindText = (r) => (r.kind === 'percent' && r.percent != null ? `${Number(r.percent)} %` : KIND_LABEL[r.kind] ?? 'Total convenu');
 
 export default function RemisesPage() {
   const navigate = useNavigate();

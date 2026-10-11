@@ -139,3 +139,5 @@
 .rb input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-glow); }
 .rb-note { width: 100%; }
 .rb-pct-in b { color: var(--text-2); }
+.rb .seg button.rb-main { font-weight: 700; }
+.rb .seg button.rb-main:not(.active) { color: var(--brand-text); }

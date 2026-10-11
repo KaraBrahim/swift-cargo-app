@@ -1,7 +1,11 @@
 // La remise, au comptoir : un seul bloc, le même partout où l'on règle une dette
 // (fiche de la personne, bon, ordre, salaire, règlement direct).
 //
-//   Aucune · Montant · % · Arrondir · Solder
+//   Aucune · Total · Montant · % · Arrondir
+//
+// « Total » est l'option principale : on tape ce que la personne règle au total
+// et la remise en découle (dû − total), le compte étant soldé. On ne calcule pas
+// la remise, on dit seulement le prix final.
 //
 // Choisir une sorte suffit : le versement se recalcule tout seul (dû − remise),
 // et une ligne dit en chiffres « Dû 52 340 − remise 2 617 (5 %) = à verser
@@ -16,10 +20,10 @@ import AmountInput from './AmountInput.jsx';
 
 const KINDS = [
   ['none', 'Aucune'],
-  ['amount', 'Montant'],
-  ['percent', '%'],
+  ['settle', 'Total'],
+  ['amount', 'Remise en montant'],
+  ['percent', 'Remise en %'],
   ['round', 'Arrondir'],
-  ['settle', 'Solder'],
 ];
 const PERCENT_CHIPS = [5, 10, 15, 20];
 const fmt = (v) => formatNumber(v, { decimals: 2, trim: true });
@@ -64,7 +68,7 @@ export function RemiseBlock({ due, amount, currency, onAmount, value: rm = NO_RE
         <span className="rb-title">Remise</span>
         <div className="seg" role="group" aria-label="Sorte de remise">
           {KINDS.map(([k, label]) => (
-            <button key={k} type="button" className={rm.kind === k ? 'active' : ''} aria-pressed={rm.kind === k} onClick={() => setKind(k)}>{label}</button>
+            <button key={k} type="button" className={`${rm.kind === k ? 'active' : ''} ${k === 'settle' ? 'rb-main' : ''}`} aria-pressed={rm.kind === k} onClick={() => setKind(k)}>{label}</button>
           ))}
         </div>
       </div>
@@ -109,7 +113,10 @@ export function RemiseBlock({ due, amount, currency, onAmount, value: rm = NO_RE
       )}
 
       {rm.kind === 'settle' && (
-        <p className="muted rb-hint">Tapez ce que vous recevez ou versez : la différence avec le dû est inscrite en remise et le compte tombe à zéro.</p>
+        <p className="muted rb-hint">
+          <strong>Total convenu</strong> : tapez dans « Montant » le total que la personne règle vraiment. La différence avec
+          le dû devient la remise, et le compte est soldé.
+        </p>
       )}
 
       {rm.kind !== 'none' && (
@@ -117,7 +124,7 @@ export function RemiseBlock({ due, amount, currency, onAmount, value: rm = NO_RE
           <div className="rb-sum" role="status">
             {figures.pending ? (
               <span className="muted">
-                {rm.kind === 'settle' ? 'Retapez le versement : la différence deviendra la remise.' : 'Indiquez la remise : le versement se recalcule.'}
+                {rm.kind === 'settle' ? 'Tapez le total convenu dans « Montant » : la remise s’en déduit.' : 'Indiquez la remise : le versement se recalcule.'}
               </span>
             ) : (
               <>
