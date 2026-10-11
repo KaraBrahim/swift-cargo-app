@@ -7,14 +7,14 @@ import { Decimal, toDecimal, MAX_AMOUNT } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
 import { writeAudit } from '../../lib/audit.js';
 import { assertCaisseOffice, postMovement, replayChain } from '../caisse/caisse.service.js';
-import { remiseDiff } from '../../lib/remise.js';
+import { resolveRemise, normalizeRemise } from '../../lib/remise.js';
 // orderStatus.js ne dépend que de la lib money : l'importer ici n'introduit
 // aucun cycle, là où importer orders.service.js en aurait créé un.
 import { recomputeOrderStatus } from '../orders/orderStatus.js';
 
 export async function appendEntry(client, {
   personType, personId, currency, amount, type,
-  refOrderId, refBonId, caisseTxId, adminId, note,
+  refOrderId, refBonId, caisseTxId, adminId, note, remise,
 }) {
   // Callers compute this amount themselves, which is exactly why it is checked
   // here: a NaN reaching the ledger writes a balance nothing can ever repair.
@@ -41,10 +41,12 @@ export async function appendEntry(client, {
   const ins = await client.query(
     `INSERT INTO person_ledger
        (person_type, person_id, currency_code, amount, balance_after, type,
-        ref_order_id, ref_bon_id, caisse_tx_id, admin_id, note)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        ref_order_id, ref_bon_id, caisse_tx_id, admin_id, note,
+        remise_kind, remise_percent, remise_reason_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
     [personType, personId, currency, amt.toFixed(2), newBalance, type,
-     refOrderId ?? null, refBonId ?? null, caisseTxId ?? null, adminId, note ?? null]
+     refOrderId ?? null, refBonId ?? null, caisseTxId ?? null, adminId, note ?? null,
+     remise?.kind ?? null, remise?.percent != null ? remise.percent.toFixed(4) : null, remise?.reasonId ?? null]
   );
   return ins.rows[0];
 }
@@ -124,11 +126,13 @@ export async function getAccount(personType, personId) {
     ),
     getPool().query(
       `SELECT pl.*, a.full_name AS admin_name, a.role AS admin_role,
-              o.reference AS order_reference, b.reference AS bon_reference
+              o.reference AS order_reference, b.reference AS bon_reference,
+              rr.label AS remise_reason
          FROM person_ledger pl
          JOIN admins a ON a.id = pl.admin_id
          LEFT JOIN orders o ON o.id = pl.ref_order_id
          LEFT JOIN bons b ON b.id = pl.ref_bon_id
+         LEFT JOIN remise_reasons rr ON rr.id = pl.remise_reason_id
         WHERE pl.person_type=$1 AND pl.person_id=$2
         ORDER BY pl.created_at DESC, pl.id DESC LIMIT 200`,
       [personType, personId]
@@ -147,7 +151,7 @@ export async function getAccount(personType, personId) {
 // a fournisseur and be owed as a passager. The caller states it; left unsaid it
 // follows the sign of the balance — negative means they owe us, so money comes
 // IN — which is exactly what the button on the profile offers.
-export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, settle = false, allowExcess = false, note, ip }) {
+export async function settleAccount({ admin, personId, caisseId, amount, currency = 'DZD', direction, settle = false, remise: remiseSpec, allowExcess = false, note, ip }) {
   const personType = 'personne';
   return withTx(async (c) => {
     const person = await c.query('SELECT is_fournisseur FROM people WHERE id=$1 AND active=TRUE', [personId]);
@@ -166,21 +170,23 @@ export async function settleAccount({ admin, personId, caisseId, amount, currenc
       );
       incoming = new Decimal(rows[0]?.balance ?? 0).lte(0);
     }
-    // `settle` : solder le compte avec la différence, en remise de règlement.
-    let diff = null;
-    if (settle) {
+    // La remise : un montant, un pourcentage, un arrondi ou un solde — avec son motif.
+    const spec = normalizeRemise({ remise: remiseSpec, settle });
+    let rem = null;
+    if (spec) {
       const { rows: [bal] } = await c.query(
         'SELECT balance FROM person_balances WHERE person_type=$1 AND person_id=$2 AND currency_code=$3 FOR UPDATE',
         [personType, personId, currency]
       );
       const balance = new Decimal(bal?.balance ?? 0);
-      diff = await remiseDiff(c, { due: incoming ? balance.negated() : balance, amount: amt, currency });
+      rem = await resolveRemise(c, { due: incoming ? balance.negated() : balance, amount: amt, currency, spec });
     }
+    const diff = rem?.diff ?? null;
     // Garde-fou : on ne règle pas plus que ce qui est dû dans ce sens. Payer 475 000
     // quand on doit 47 500 ferait de l'autre un débiteur sans que personne l'ait
     // voulu. « Solder » a déjà son propre plafond (un pas d'arrondi) ; sinon, un
     // dépassement ne passe que s'il est confirmé (`allowExcess`) — une avance.
-    if (!settle && !allowExcess) {
+    if (!spec && !allowExcess) {
       const { rows: [cur] } = await c.query(
         'SELECT balance FROM person_balances WHERE person_type=$1 AND person_id=$2 AND currency_code=$3',
         [personType, personId, currency]
@@ -219,13 +225,13 @@ export async function settleAccount({ admin, personId, caisseId, amount, currenc
       await appendEntry(c, {
         personType, personId, currency,
         amount: (incoming ? diff : diff.negated()).toFixed(2),
-        type: 'remise', caisseTxId: txId, adminId: admin.id, note: 'Remise de règlement',
+        type: 'remise', caisseTxId: txId, adminId: admin.id, note: rem.note ?? 'Remise de règlement', remise: rem,
       });
     }
     await recomputePersonOrders(c, personType, personId);
     await writeAudit(c, {
       adminId: admin.id, action: 'person.settle', entity: 'person', entityId: personId,
-      details: { amount: amt.toFixed(2), currency, caisseId, remise: diff ? diff.toFixed(2) : undefined }, ip,
+      details: { amount: amt.toFixed(2), currency, caisseId, remise: diff ? diff.toFixed(2) : undefined, remiseKind: rem?.kind, remiseReasonId: rem?.reasonId }, ip,
     });
     const after = (await c.query('SELECT balance FROM person_balances WHERE person_type=$1 AND person_id=$2 AND currency_code=$3', [personType, personId, currency])).rows[0];
     return { entry, balance: after?.balance ?? entry.balance_after };

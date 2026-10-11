@@ -13,9 +13,11 @@ import AmountInput from '../components/AmountInput.jsx';
 import { WilayaField } from '../components/WilayaField.jsx';
 import { RolePicker, RoleBadges, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
-import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
-import { MoneyConfirm, afterPayment, debtRow } from '../components/MoneyConfirm.jsx';
-import { useStep } from '../lib/rounding.js';
+import { RoundChips } from '../components/RemiseControl.jsx';
+import { RemiseBlock } from '../components/RemiseBlock.jsx';
+import { MoneyConfirm, debtRow } from '../components/MoneyConfirm.jsx';
+import { NO_REMISE, remiseLabel } from '../lib/remise.js';
+import { useRemiseView } from '../lib/useRemise.js';
 import { DebtBanner } from '../components/DebtBanner.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
@@ -37,6 +39,11 @@ const ENTRY_LABEL = {
   prime: 'Prime',
   autre: 'Autre',
 };
+// Le nom d'une ligne du compte. Une remise dit sa sorte et son motif : « Remise · 5 % · Geste commercial ».
+const entryName = (e) => (e.type === 'remise'
+  ? `Remise · ${remiseLabel({ kind: e.remise_kind ?? 'settle', percent: e.remise_percent, reason: e.remise_reason })}`
+  : ENTRY_LABEL[e.type] || e.type);
+
 const TYPE_LABEL = { regular: 'Régulier', auto: 'Auto-entrepreneur' };
 
 // One account, whichever role the movement came from. The sign says everything:
@@ -121,7 +128,12 @@ export default function ProfilePage() {
 
   // Correcting a payment touches both the caisse and this account.
   const idem = useIdempotent();
-  const roundStep = useStep(pay.currency);
+  // La remise du règlement en cours, et ce qu'elle donne en chiffres. Un hook : il
+  // lit donc le compte avant même qu'il soit chargé (dette nulle d'ici là).
+  const [payRm, setPayRm] = useState(NO_REMISE);
+  const view = useRemiseView(payRm, Math.abs(balanceIn(account.data?.account?.balances, pay.currency)), Number(pay.amount) || 0, pay.currency);
+  // Une autre devise, c'est une autre dette : la remise d'avant ne s'y applique pas.
+  useEffect(() => { setPayRm(NO_REMISE); }, [pay.currency]);
   const [checkPay, setCheckPay] = useState(false); // vérification avant de payer / encaisser
   const [excessOk, setExcessOk] = useState(false);
   const runPay = async (fn, okMsg) => {
@@ -229,8 +241,7 @@ export default function ProfilePage() {
   // Le montant, la dette et la caisse tels que la vérification les montre.
   const dueNow = Math.abs(selBalance);
   const amtNow = Number(pay.amount) || 0;
-  const settling = Boolean(pay.settle) && amtNow > 0 && amtNow !== dueNow && amtNow - dueNow <= roundStep;
-  const after = afterPayment(dueNow, amtNow, settling);
+  const after = view.figures;
   const payCaisse = officeCaisses.find((c) => String(c.id) === String(pay.caisseId));
   const cash = Number(payCaisse?.balances?.[pay.currency] ?? 0);
   const lowFunds = !incoming && Boolean(payCaisse) && amtNow > cash;
@@ -242,7 +253,7 @@ export default function ProfilePage() {
         method: 'POST', idem: key,
         body: {
           caisseId: Number(pay.caisseId), amount: pay.amount, currency: pay.currency,
-          direction: incoming ? 'in' : 'out', note: pay.note || undefined, settle: settling || undefined,
+          direction: incoming ? 'in' : 'out', note: pay.note || undefined, remise: view.api,
           allowExcess: after.excess > 0 || undefined,
         },
       }));
@@ -253,7 +264,8 @@ export default function ProfilePage() {
       // La devise n'est pas remise au dinar : le rechargement du compte, juste
       // après, reproposera la devise et le montant qui restent à régler. La
       // forcer ici ne ferait que faire clignoter « 0.00 DZD » entre les deux.
-      setPay((p) => ({ ...p, caisseId: '', amount: '', note: '', settle: false }));
+      setPay((p) => ({ ...p, caisseId: '', amount: '', note: '' }));
+      setPayRm(NO_REMISE);
       account.reload();
     } catch (err) { setCheckPay(false); toast.error(errorMessage(err)); }
     finally { setBusy(false); }
@@ -511,10 +523,10 @@ export default function ProfilePage() {
                 {busy ? '…' : incoming ? 'Encaisser' : 'Payer'}
               </button>
             </form>
-            <RemiseControl
+            <RemiseBlock
               due={Math.abs(Number(owedIn(balances, pay.currency)))} amount={pay.amount} currency={pay.currency}
               onAmount={(v) => setPay((p) => ({ ...p, amount: v }))}
-              settle={pay.settle} onSettle={(v) => setPay((p) => ({ ...p, settle: v }))}
+              value={payRm} onChange={setPayRm}
             />
             <p className="muted line-hint">
               Un montant partiel est accepté : le solde restant reste {incoming ? 'dû par cette personne' : 'dû à cette personne'}.
@@ -525,16 +537,17 @@ export default function ProfilePage() {
               kind={incoming ? 'in' : 'out'}
               title={incoming ? `Encaisser de ${person.name}` : `Payer ${person.name}`}
               amount={amtNow} currency={pay.currency}
+              remise={view.line}
               rows={payCaisse ? [
                 { label: `Caisse « ${payCaisse.label} »`, before: cash, after: incoming ? cash + amtNow : cash - amtNow, currency: pay.currency, tone: 'caisse' },
                 debtRow({ who: person.name, out: !incoming, before: dueNow, after: after.excess > 0 ? after.excess : after.left, currency: pay.currency }),
               ] : []}
               warn={[
                 ...(after.excess > 0 ? [`${formatMoney(after.excess, pay.currency)} de plus que la dette : le compte sera retourné (${incoming ? 'vous lui devrez ensuite' : 'il vous devra ensuite'} cette différence).`] : []),
-                ...(settling && amtNow !== dueNow ? [`Remise de règlement de ${formatMoney(Math.abs(dueNow - amtNow), pay.currency)} : le compte tombe à zéro.`] : []),
+                ...(after.error ? [after.error] : []),
                 ...(lowFunds ? [`La caisse ne contient que ${formatMoney(cash, pay.currency)} : le paiement sera refusé.`] : []),
               ]}
-              confirmDisabled={lowFunds || (after.excess > 0 && !excessOk)}
+              confirmDisabled={lowFunds || Boolean(after.error) || (after.excess > 0 && !excessOk)}
               busy={busy}
               onCancel={() => setCheckPay(false)}
               onConfirm={doPayment}
@@ -672,7 +685,7 @@ export default function ProfilePage() {
               <ul className="timeline">
                 {entries.slice(0, 8).map((e) => (
                   <li key={e.id}>
-                    <span className="type-badge">{ENTRY_LABEL[e.type] || e.type}</span>
+                    <span className="type-badge">{entryName(e)}</span>
                     <span className={Number(e.amount) >= 0 ? 'pos' : 'neg'}>
                       {Number(e.amount) >= 0 ? '+' : '−'}{formatMoney(Math.abs(Number(e.amount)))} {e.currency_code}
                     </span>
@@ -697,7 +710,7 @@ export default function ProfilePage() {
                   {entries.map((e) => (
                     <tr key={e.id}>
                       <td>{new Date(e.created_at).toLocaleString('fr-FR')}</td>
-                      <td>{ENTRY_LABEL[e.type] || e.type}</td>
+                      <td>{entryName(e)}</td>
                       <td className="gold">{e.order_reference || e.bon_reference || '—'}</td>
                       <td className={`right ${Number(e.amount) >= 0 ? 'pos' : 'neg'}`}>
                         {Number(e.amount) >= 0 ? '+' : '−'}{formatMoney(Math.abs(Number(e.amount)))} {e.currency_code}

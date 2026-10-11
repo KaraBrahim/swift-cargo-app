@@ -5,6 +5,7 @@ import { Spinner, errorMessage, useToast, PageHeader } from '../components/ui.js
 import { IconEl } from '../components/icons.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
 import { ThemeGrid } from '../components/ThemePicker.jsx';
+import { RemiseReasons } from '../components/RemiseReasons.jsx';
 
 const ACCENT = 'var(--c-audit)';
 
@@ -123,7 +124,7 @@ export default function ParametresPage() {
             });
           }}
         >
-          <h2 className="panel-title">Arrondi des règlements</h2>
+          <h2 className="panel-title">Remises — arrondi des règlements</h2>
           <p className="muted" style={{ fontSize: '0.78rem', marginTop: -4 }}>
             Quand on solde une dette, le montant proposé est arrondi à ce pas : 52 340 devient 52 000 ou 52 500 avec un pas de 500.
             La différence s’inscrit en remise ; la caisse ne bouge que du montant réel.
@@ -144,6 +145,8 @@ export default function ParametresPage() {
           </div>
         </form>
       )}
+
+      <RemiseReasons />
 
       {societe && (
         <form className="panel" onSubmit={(e) => { e.preventDefault(); save('societe', societe); }}>

@@ -22,7 +22,8 @@ import { TravelFields, travelOf, travelBody } from '../components/TravelFields.j
 import { ArrivalBadge } from '../components/ArrivalBadge.jsx';
 import { Journal } from '../components/Journal.jsx';
 import { DebtBanner } from '../components/DebtBanner.jsx';
-import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { RemiseBlock } from '../components/RemiseBlock.jsx';
+import { NO_REMISE, remiseBody, remiseLabel } from '../lib/remise.js';
 import { PaymentCheck } from '../components/PaymentCheck.jsx';
 import { bonDocBody, measureQty, measureUnit, declaredOf, priceUnit } from '../components/printDocument.js';
 import { pricedPart } from '../lib/lineMath.js';
@@ -110,8 +111,10 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   // doit : on règle le bon, on verse ce qu'on a en caisse, le reste se paie
   // depuis « Argent ». Vide = tout le dû.
   const [settlePaid, setSettlePaid] = useState('');
-  // Verser en soldant : la différence avec le dû s'inscrit en remise.
-  const [closeSettle, setCloseSettle] = useState(false);
+  // La remise de chaque geste d'argent : montant, %, arrondi ou solde, avec son motif.
+  const [settleRm, setSettleRm] = useState(NO_REMISE);
+  const [feeRm, setFeeRm] = useState(NO_REMISE);
+  const [payRm, setPayRm] = useState(NO_REMISE);
   const [edit, setEdit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPayment, setConfirmPayment] = useState(null);
@@ -144,9 +147,11 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
       // Les deux formulaires d'argent s'ouvrent sur ce qui RESTE dû, pas sur le
       // total d'origine : payer deux fois un bon à moitié réglé est l'erreur
       // qu'il faut rendre impossible.
-      setFeeForm((f) => ({ ...f, amount: dueAfter(bon.transport_fee, bon.payments, 'fee_payment').toFixed(2), settle: false }));
-      setPayForm((f) => ({ ...f, amount: dueAfter(bon.passager_payment, bon.payments, 'passager_payment').toFixed(2), settle: false }));
-      setCloseSettle(false);
+      setFeeForm((f) => ({ ...f, amount: dueAfter(bon.transport_fee, bon.payments, 'fee_payment').toFixed(2) }));
+      setPayForm((f) => ({ ...f, amount: dueAfter(bon.passager_payment, bon.payments, 'passager_payment').toFixed(2) }));
+      setSettleRm(NO_REMISE);
+      setFeeRm(NO_REMISE);
+      setPayRm(NO_REMISE);
     }
   }, [bon]);
 
@@ -171,7 +176,8 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
       await fn();
       if (okMsg) toast.success(okMsg);
       reload();
-    } catch (err) { toast.error(errorMessage(err)); }
+      return true;
+    } catch (err) { toast.error(errorMessage(err)); return false; }
     finally { setBusy(false); }
   };
 
@@ -232,16 +238,20 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
         passagerPayment: payment || undefined,
         caisseId: settleCaisse ? Number(settleCaisse) : undefined,
         paidNow: settleCaisse && settlePaid ? settlePaid : undefined,
-        closeWithRemise: settleCaisse && closeSettle ? true : undefined,
+        remise: settleCaisse ? remiseBody(settleRm, settleDue, settlePaid) : undefined,
       },
     })), settleCaisse ? 'Bon réglé. Le versement est enregistré — vérifiez le reste dû.' : 'Bon réglé. La DETTE envers le passager reste ouverte : rien n’est sorti de la caisse, il faut encore le payer.');
-  const collectFee = () => {
+  const collectFee = async () => {
     setMoneyCheck(null);
-    return act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount, settle: feeForm.settle || undefined } })), 'Frais encaissés.');
+    const due = dueAfter(bon.transport_fee, bon.payments, 'fee_payment');
+    const ok = await act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount, remise: remiseBody(feeRm, due, feeForm.amount) } })), 'Frais encaissés.');
+    if (ok) setFeeRm(NO_REMISE);
   };
-  const payPassager = () => {
+  const payPassager = async () => {
     setMoneyCheck(null);
-    return act(() => idem((key) => api(`/bons/${id}/pay-passager`, { method: 'POST', idem: key, body: { caisseId: Number(payForm.caisseId), amount: payForm.amount, settle: payForm.settle || undefined } })), 'Passager payé.');
+    const due = dueAfter(bon.passager_payment, bon.payments, 'passager_payment');
+    const ok = await act(() => idem((key) => api(`/bons/${id}/pay-passager`, { method: 'POST', idem: key, body: { caisseId: Number(payForm.caisseId), amount: payForm.amount, remise: remiseBody(payRm, due, payForm.amount) } })), 'Passager payé.');
+    if (ok) setPayRm(NO_REMISE);
   };
 
   const isFournisseurBon = bon.order_id != null;
@@ -346,6 +356,8 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   );
   const recNet = Number(bon.transport_fee) - recMissingTotal;
   const recDeliveredTotal = Math.max(recNet, 0);
+  // Ce qu'on doit au passager à ce règlement : le montant saisi à la main, sinon le livré.
+  const settleDue = payMode === 'manual' && payment !== '' ? Number(payment || 0) : recDeliveredTotal;
   const recOwedByPassager = Math.max(-recNet, 0);
 
   const fourns = bon.fournisseurs ?? [];
@@ -758,9 +770,9 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                 )}
               </div>
               {settleCaisse && (
-                <RemiseControl
-                  due={payMode === 'manual' && payment !== '' ? Number(payment || 0) : recDeliveredTotal} amount={settlePaid} currency={cur}
-                  onAmount={setSettlePaid} settle={closeSettle} onSettle={setCloseSettle}
+                <RemiseBlock
+                  due={settleDue} amount={settlePaid} currency={cur}
+                  onAmount={setSettlePaid} value={settleRm} onChange={setSettleRm}
                 />
               )}
               <div className="dt-actions">
@@ -799,7 +811,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                     </td>
                     <td>{p.person_name}</td>
                     <td className="muted">{p.caisse_label || '—'}</td>
-                    <td className="right">{formatMoney(p.amount, p.currency_code)}{Number(p.remise) !== 0 && <span className="muted remise-note"> + remise {formatMoney(p.remise, p.currency_code)}</span>}</td>
+                    <td className="right">{formatMoney(p.amount, p.currency_code)}{Number(p.remise) !== 0 && <span className="muted remise-note"> + remise {formatMoney(p.remise, p.currency_code)}</span>}{p.remise_info && <span className="remise-tag" title={p.remise_info.note || undefined}>{remiseLabel({ kind: p.remise_info.kind ?? 'settle', percent: p.remise_info.percent, reason: p.remise_info.reason })}</span>}</td>
                     <td className="right nowrap">
                       <button className="icon-btn" title={Number(p.remise) !== 0 ? 'Ce paiement solde avec une remise : annulez-le et refaites-le' : 'Corriger le montant'} aria-label="Corriger ce paiement"
                         disabled={busy || Number(p.remise) !== 0} onClick={() => setEditPayment({ id: p.id, amount: String(Math.abs(Number(p.amount))), note: p.note || '', currency: p.currency_code })}>
@@ -870,10 +882,10 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                 <IconEl name="arrowIn" />Encaisser
               </button>
             </div>
-            <RemiseControl
+            <RemiseBlock
               due={dueAfter(bon.transport_fee, bon.payments, 'fee_payment')} amount={feeForm.amount} currency={cur}
               onAmount={(v) => setFeeForm((f) => ({ ...f, amount: v }))}
-              settle={feeForm.settle} onSettle={(v) => setFeeForm((f) => ({ ...f, settle: v }))}
+              value={feeRm} onChange={setFeeRm}
             />
           </div>
         ) : (
@@ -903,10 +915,10 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                   <IconEl name="arrowOut" />Payer
                 </button>
               </div>
-              <RemiseControl
+              <RemiseBlock
                 due={dueAfter(bon.passager_payment, bon.payments, 'passager_payment')} amount={payForm.amount} currency={cur}
                 onAmount={(v) => setPayForm((f) => ({ ...f, amount: v }))}
-                settle={payForm.settle} onSettle={(v) => setPayForm((f) => ({ ...f, settle: v }))}
+                value={payRm} onChange={setPayRm}
               />
               </>
             ) : (
@@ -921,7 +933,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
           <PaymentCheck
             incoming who={bon.fournisseur_name} currency={cur}
             caisse={algeriaOffices.find((c) => String(c.id) === String(feeForm.caisseId))}
-            due={dueAfter(bon.transport_fee, bon.payments, 'fee_payment')} amount={feeForm.amount} settle={feeForm.settle}
+            due={dueAfter(bon.transport_fee, bon.payments, 'fee_payment')} amount={feeForm.amount} remise={feeRm}
             busy={busy} onConfirm={collectFee} onCancel={() => setMoneyCheck(null)}
           />
         )}
@@ -929,7 +941,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
           <PaymentCheck
             who={bon.passager_name} currency={cur}
             caisse={offices.find((c) => String(c.id) === String(payForm.caisseId))}
-            due={dueAfter(bon.passager_payment, bon.payments, 'passager_payment')} amount={payForm.amount} settle={payForm.settle}
+            due={dueAfter(bon.passager_payment, bon.payments, 'passager_payment')} amount={payForm.amount} remise={payRm}
             busy={busy} onConfirm={payPassager} onCancel={() => setMoneyCheck(null)}
           />
         )}

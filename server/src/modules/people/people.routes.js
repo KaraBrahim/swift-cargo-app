@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { remiseSchema } from '../../lib/remiseSchema.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
 import { idempotent } from '../../middleware/idempotent.js';
@@ -59,6 +60,8 @@ peopleRouter.post(
       direction: z.enum(['in', 'out']).optional(),
       // Solder le compte : la différence entre le dû et ce qu'on règle s'inscrit en remise.
       settle: z.boolean().optional(),
+      // Une remise complète : montant, pourcentage, arrondi ou solde — avec son motif.
+      remise: remiseSchema.optional(),
       // Régler PLUS que le dû (une avance) : doit être demandé en toutes lettres.
       allowExcess: z.boolean().optional(),
       note: z.string().trim().max(300).optional(),

@@ -4,6 +4,7 @@ import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
 import { idempotent } from '../../middleware/idempotent.js';
 import * as svc from './bons.service.js';
+import { remiseSchema } from '../../lib/remiseSchema.js';
 
 export const bonsRouter = Router();
 // Un réessai après un timeout ne doit pas rejouer l'opération : voir
@@ -181,14 +182,14 @@ bonsRouter.post(
 
 bonsRouter.post(
   '/bons/:id/settle',
-  validate({ params: z.object({ id }), body: z.object({ passagerPayment: num.optional(), caisseId: id.optional(), paidNow: num.optional(), closeWithRemise: z.boolean().optional(), note: z.string().trim().max(300).optional() }) }),
+  validate({ params: z.object({ id }), body: z.object({ passagerPayment: num.optional(), caisseId: id.optional(), paidNow: num.optional(), closeWithRemise: z.boolean().optional(), remise: remiseSchema.optional(), note: z.string().trim().max(300).optional() }) }),
   asyncHandler(async (req, res) => res.json({ bon: await svc.settle({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))
 );
 
 const moneyAction = {
   params: z.object({ id }),
   // `settle` : solder le reste dû avec la différence, en remise de règlement.
-  body: z.object({ caisseId: z.coerce.number().int().positive(), amount: num.optional(), settle: z.boolean().optional(), note: z.string().trim().max(300).optional() }),
+  body: z.object({ caisseId: z.coerce.number().int().positive(), amount: num.optional(), settle: z.boolean().optional(), remise: remiseSchema.optional(), note: z.string().trim().max(300).optional() }),
 };
 
 bonsRouter.post(

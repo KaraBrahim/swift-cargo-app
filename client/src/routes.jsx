@@ -27,6 +27,7 @@ const NewOrderPage = lazy(() => import('./pages/NewOrderPage.jsx'));
 const NewBonPage = lazy(() => import('./pages/NewBonPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
 const RapportsPage = lazy(() => import('./pages/RapportsPage.jsx'));
+const RemisesPage = lazy(() => import('./pages/RemisesPage.jsx'));
 const ImpressionsPage = lazy(() => import('./pages/ImpressionsPage.jsx'));
 const UtilisateursPage = lazy(() => import('./pages/UtilisateursPage.jsx'));
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage.jsx'));
@@ -91,6 +92,7 @@ export function AppPages({ path }) {
       <Route path="/passagers" element={<PassagersPage />} />
       <Route path="/personnes/:id" element={<ProfilePage />} />
       <Route path="/rapports" element={<RapportsPage />} />
+      <Route path="/remises" element={<RemisesPage />} />
       <Route path="/impressions" element={<ImpressionsPage />} />
       <Route path="/utilisateurs" element={<SuperAdminOnly><UtilisateursPage /></SuperAdminOnly>} />
       <Route path="/maintenance" element={<SuperAdminOnly><MaintenancePage /></SuperAdminOnly>} />

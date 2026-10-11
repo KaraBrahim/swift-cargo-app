@@ -9,7 +9,7 @@ import { Spinner, PageHeader, EmptyState, formatMoney, errorMessage, useToast } 
 import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { defaultCurrencyFor } from '../lib/offices.js';
-import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { RoundChips } from '../components/RemiseControl.jsx';
 import AmountInput from '../components/AmountInput.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';

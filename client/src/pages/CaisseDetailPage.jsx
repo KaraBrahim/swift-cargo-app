@@ -8,7 +8,7 @@ import { IconEl } from '../components/icons.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { MoneyConfirm } from '../components/MoneyConfirm.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
-import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { RoundChips } from '../components/RemiseControl.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { tableDocBody } from '../components/printDocument.js';
 import { listTicket } from '../components/printTicket.js';

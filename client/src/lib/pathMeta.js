@@ -16,6 +16,7 @@ const PAGES = [
   ['/fournisseurs', 'Fournisseurs', 'fournisseur'],
   ['/personnes', 'Fiche', 'users'],
   ['/rapports', 'Rapports', 'report'],
+  ['/remises', 'Remises', 'coins'],
   ['/impressions', 'Impressions', 'print'],
   ['/taux', 'Taux de change', 'taux'],
   ['/utilisateurs', 'Utilisateurs', 'users'],

@@ -40,6 +40,7 @@ const NAV = [
     group: 'Analyse',
     items: [
       { to: '/rapports', label: 'Rapports', icon: 'report' },
+      { to: '/remises', label: 'Remises', icon: 'coins' },
       { to: '/impressions', label: 'Impressions', icon: 'print' },
     ],
   },

@@ -23,7 +23,8 @@ import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { Journal } from '../components/Journal.jsx';
 import { DebtBanner } from '../components/DebtBanner.jsx';
-import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { RemiseBlock } from '../components/RemiseBlock.jsx';
+import { NO_REMISE, remiseBody } from '../lib/remise.js';
 import { PaymentCheck } from '../components/PaymentCheck.jsx';
 import { priceBasis, weightShare, priceUnit } from '../lib/lineMath.js';
 import { formatDateFr } from '../lib/format.js';
@@ -53,6 +54,7 @@ export default function OrderDetailPage() {
   // doit, donc c'est là qu'on le reçoit. Il vivait sur le bon interne des
   // marchandises, que personne n'a de raison d'ouvrir.
   const [cash, setCash] = useState({ caisseId: '', amount: '' });
+  const [cashRm, setCashRm] = useState(NO_REMISE); // la remise de l'encaissement
   const [checkCash, setCheckCash] = useState(false); // vérification avant d'encaisser
   const caisses = useApi('/caisses');
   const idem = useIdempotent();
@@ -128,10 +130,11 @@ export default function OrderDetailPage() {
     try {
       await idem((key) => api(`/bons/${goodsBonId}/collect-fee`, {
         method: 'POST', idem: key,
-        body: { caisseId: Number(cash.caisseId), amount: cash.amount || undefined, settle: cash.settle || undefined },
+        body: { caisseId: Number(cash.caisseId), amount: cash.amount || undefined, remise: remiseBody(cashRm, due, cash.amount) },
       }));
       toast.success('Encaissé.');
-      setCash({ caisseId: '', amount: '', settle: false });
+      setCash({ caisseId: '', amount: '' });
+      setCashRm(NO_REMISE);
       reload();
     } catch (err) { toast.error(errorMessage(err)); }
     finally { setBusy(false); }
@@ -430,16 +433,16 @@ export default function OrderDetailPage() {
                   <IconEl name="arrowIn" />Encaisser {formatMoney(Number(cash.amount || 0), cur)}
                 </button>
               </div>
-              <RemiseControl
+              <RemiseBlock
                 due={due} amount={cash.amount} currency={cur}
                 onAmount={(v) => setCash((f) => ({ ...f, amount: v }))}
-                settle={cash.settle} onSettle={(v) => setCash((f) => ({ ...f, settle: v }))}
+                value={cashRm} onChange={setCashRm}
               />
               {checkCash && (
                 <PaymentCheck
                   incoming who={o.fournisseur_name} currency={cur}
                   caisse={offices.find((c) => String(c.id) === String(cash.caisseId))}
-                  due={due} amount={cash.amount} settle={cash.settle}
+                  due={due} amount={cash.amount} remise={cashRm}
                   busy={busy} onConfirm={collectFee} onCancel={() => setCheckCash(false)}
                 />
               )}

@@ -16,7 +16,7 @@
 // Le salaire configuré fait foi pour tous les mois écoulés : le changer
 // recalcule le passé. C'est voulu — une personne qui corrige un salaire mal
 // noté veut que son compte dise la vérité, pas qu'il garde l'erreur.
-import { remiseDiff } from '../../lib/remise.js';
+import { resolveRemise, normalizeRemise } from '../../lib/remise.js';
 import { getPool, withTx } from '../../db/pool.js';
 import { Decimal } from '../../lib/money.js';
 import { errors } from '../../lib/AppError.js';
@@ -166,7 +166,7 @@ export async function updateEmployee({ admin, id, ip, ...data }) {
 // Un versement : une charge « salaire » qui sort de la caisse choisie, datée du
 // mois. Rien d'autre à décider. Verser plus que prévu est permis — une prime,
 // un rattrapage : c'est de l'argent réellement sorti, on l'enregistre.
-export async function payEmployee({ admin, id, amount, caisseId, period, settle = false, note, ip }) {
+export async function payEmployee({ admin, id, amount, caisseId, period, settle = false, remise: remiseSpec, note, ip }) {
   const { rows } = await getPool().query('SELECT * FROM employees WHERE id = $1', [id]);
   const e = rows[0];
   if (!e) throw errors.notFound('Salarié introuvable.');
@@ -176,14 +176,16 @@ export async function payEmployee({ admin, id, amount, caisseId, period, settle 
   if (!caisse) throw errors.validation([{ field: 'caisseId', message: 'Choisissez la caisse qui paie.' }]);
 
   // Le solde AVANT ce versement : c'est lui qu'une remise vient solder.
+  const spec = normalizeRemise({ remise: remiseSpec, settle });
   let before = null;
-  if (settle) {
+  if (spec) {
     const { employees } = await listEmployees({ period: month });
     before = new Decimal(employees.find((x) => x.id === Number(id))?.balance ?? 0);
   }
 
   return withTx(async (c) => {
-    const diff = settle ? await remiseDiff(c, { due: before, amount, currency: e.currency_code }) : null;
+    const rem = await resolveRemise(c, { due: before, amount, currency: e.currency_code, spec });
+    const diff = rem?.diff ?? null;
     const charge = await createCharge({
       admin, category: 'salaire', label: `Salaire ${month} — ${e.name}`, amount, currency: e.currency_code,
       caisseId: caisse, period: month, recurring: true, note, ip,
@@ -191,8 +193,9 @@ export async function payEmployee({ admin, id, amount, caisseId, period, settle 
     await c.query('UPDATE charges SET employee_id = $2 WHERE id = $1', [charge.id, id]);
     if (diff && !diff.isZero()) {
       await c.query(
-        'INSERT INTO employee_remises (employee_id, charge_id, amount, admin_id) VALUES ($1,$2,$3,$4)',
-        [id, charge.id, diff.toFixed(2), admin.id]
+        `INSERT INTO employee_remises (employee_id, charge_id, amount, admin_id, kind, percent, reason_id, note)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [id, charge.id, diff.toFixed(2), admin.id, rem.kind, rem.percent != null ? rem.percent.toFixed(4) : null, rem.reasonId, rem.note]
       );
     }
     return { ...charge, employee_id: id, remise: diff ? diff.toFixed(2) : '0.00' };

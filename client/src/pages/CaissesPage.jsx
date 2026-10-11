@@ -8,7 +8,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { RoleBadges } from '../components/RolePicker.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
-import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { RoundChips } from '../components/RemiseControl.jsx';
 import { DebtSummary } from '../components/DebtSummary.jsx';
 import { QuickSettle } from '../components/QuickSettle.jsx';
 import { MoneyConfirm } from '../components/MoneyConfirm.jsx';

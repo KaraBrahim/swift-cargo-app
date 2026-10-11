@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { validate } from '../../middleware/validate.js';
 import * as svc from './employees.service.js';
+import { remiseSchema } from '../../lib/remiseSchema.js';
 
 export const employeesRouter = Router();
 
@@ -64,6 +65,7 @@ employeesRouter.post(
     period: z.string().trim().regex(/^\d{4}-\d{2}$/).optional(),
     // Solder le salaire : la différence entre le dû et le versé s'inscrit en remise.
     settle: z.boolean().optional(),
+    remise: remiseSchema.optional(),
     note: z.string().trim().max(300).optional(),
   }) }),
   asyncHandler(async (req, res) => res.status(201).json({ payment: await svc.payEmployee({ admin: req.admin, id: req.params.id, ...req.body, ip: req.ip }) }))

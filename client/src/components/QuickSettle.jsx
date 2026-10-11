@@ -12,11 +12,12 @@
 import { useState } from 'react';
 import { api } from '../api/client.js';
 import { useIdempotent } from '../lib/useIdempotent.js';
-import { useStep } from '../lib/rounding.js';
+import { NO_REMISE } from '../lib/remise.js';
+import { useRemiseView } from '../lib/useRemise.js';
 import { formatMoney } from '../lib/format.js';
 import { ConfirmDialog } from './ConfirmDialog.jsx';
-import { MoneyConfirm, afterPayment, debtRow } from './MoneyConfirm.jsx';
-import { RemiseControl } from './RemiseControl.jsx';
+import { MoneyConfirm, debtRow } from './MoneyConfirm.jsx';
+import { RemiseBlock } from './RemiseBlock.jsx';
 import AmountInput from './AmountInput.jsx';
 import { errorMessage, useToast } from './ui.jsx';
 
@@ -26,7 +27,6 @@ export function QuickSettle({ debt, caisses, onClose, onDone }) {
   const toast = useToast();
   const idem = useIdempotent();
   const cur = debt.currency_code;
-  const step = useStep(cur);
   const incoming = Number(debt.balance) < 0; // ils nous doivent : l'argent ENTRE
   const out = !incoming;
   const due = Math.abs(Number(debt.balance));
@@ -36,7 +36,7 @@ export function QuickSettle({ debt, caisses, onClose, onDone }) {
     && !(incoming && debt.is_fournisseur && c.office !== 'algeria'));
   const [caisseId, setCaisseId] = useState(candidates.length === 1 ? String(candidates[0].id) : '');
   const [amount, setAmount] = useState(due.toFixed(2));
-  const [settle, setSettle] = useState(false);
+  const [rm, setRm] = useState(NO_REMISE);
   const [excessOk, setExcessOk] = useState(false);
   const [note, setNote] = useState('');
   const [stage, setStage] = useState('form'); // 'form' | 'check'
@@ -45,11 +45,12 @@ export function QuickSettle({ debt, caisses, onClose, onDone }) {
   const a = Number(amount) || 0;
   const caisse = candidates.find((c) => String(c.id) === caisseId);
   const cash = Number(caisse?.balances?.[cur] ?? 0);
-  // « Solder » n'a de sens que dans la limite d'un pas d'arrondi au-dessus du dû.
-  const settling = settle && a > 0 && a !== due && a - due <= step;
-  const { left, excess } = afterPayment(due, a, settling);
+  // La remise (montant, %, arrondi, solde) et ce qu'elle laisse dû.
+  const view = useRemiseView(rm, due, a, cur);
+  const { left, excess } = view.figures;
   const lowFunds = out && Boolean(caisse) && a > cash;
-  const ready = Boolean(caisse) && a > 0 && !lowFunds && (excess === 0 || excessOk);
+  const ready = Boolean(caisse) && a > 0 && !lowFunds && !view.figures.error && !view.figures.pending
+    && (excess === 0 || excessOk);
 
   const rows = caisse ? [
     {
@@ -63,7 +64,7 @@ export function QuickSettle({ debt, caisses, onClose, onDone }) {
   ] : [];
   const warn = [];
   if (excess > 0) warn.push(`${formatMoney(excess, cur)} de plus que la dette : le compte de ${debt.person_name} sera retourné (c’est ${out ? 'lui' : 'vous'} qui devrez ensuite).`);
-  if (settling && a !== due) warn.push(`Remise de règlement de ${formatMoney(Math.abs(due - a), cur)} : le compte tombe à zéro, la caisse ne bouge que de ${formatMoney(a, cur)}.`);
+  if (view.figures.error) warn.push(view.figures.error);
 
   const submit = async () => {
     setBusy(true);
@@ -73,7 +74,7 @@ export function QuickSettle({ debt, caisses, onClose, onDone }) {
         body: {
           caisseId: Number(caisseId), amount: String(amount), currency: cur,
           direction: incoming ? 'in' : 'out', note: note || undefined,
-          settle: settling || undefined, allowExcess: excess > 0 || undefined,
+          remise: view.api, allowExcess: excess > 0 || undefined,
         },
       }));
       const rest = excess > 0 ? 0 : left;
@@ -94,7 +95,7 @@ export function QuickSettle({ debt, caisses, onClose, onDone }) {
         open
         kind={incoming ? 'in' : 'out'}
         title={incoming ? `Encaisser de ${debt.person_name}` : `Payer ${debt.person_name}`}
-        amount={a} currency={cur} rows={rows} warn={warn}
+        amount={a} currency={cur} rows={rows} remise={view.line} warn={warn}
         busy={busy} onConfirm={submit} onCancel={() => setStage('form')}
       />
     );
@@ -140,12 +141,12 @@ export function QuickSettle({ debt, caisses, onClose, onDone }) {
         <label className="field">
           <span>Montant ({cur})</span>
           <AmountInput autoFocus value={amount} onChange={(v) => { setAmount(v); setExcessOk(false); }} />
-          <button type="button" className="btn btn-ghost btn-sm qs-full" onClick={() => { setAmount(due.toFixed(2)); setSettle(false); }}>
+          <button type="button" className="btn btn-ghost btn-sm qs-full" onClick={() => { setAmount(due.toFixed(2)); setRm(NO_REMISE); }}>
             Tout régler : {formatMoney(due, cur)}
           </button>
         </label>
 
-        <RemiseControl due={due} amount={amount} currency={cur} onAmount={setAmount} settle={settle} onSettle={setSettle} />
+        <RemiseBlock due={due} amount={amount} currency={cur} onAmount={setAmount} value={rm} onChange={setRm} />
 
         {excess > 0 && (
           <label className="remise-line on">

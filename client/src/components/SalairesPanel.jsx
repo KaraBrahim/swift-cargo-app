@@ -16,7 +16,8 @@ import AmountInput from './AmountInput.jsx';
 import { EntityPicker } from './EntityPicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { defaultCurrencyFor } from '../lib/offices.js';
-import { RemiseControl, RoundChips } from './RemiseControl.jsx';
+import { RemiseBlock } from './RemiseBlock.jsx';
+import { NO_REMISE, remiseBody } from '../lib/remise.js';
 
 const monthLabel = (p) => new Date(`${p}-01T00:00:00`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 const dt = (v) => (v ? new Date(v).toLocaleDateString('fr-FR') : '—');
@@ -56,7 +57,7 @@ export function SalairesPanel({ offices, currencies }) {
     // Le cas ordinaire : solder le mois. Tout le reste est une correction du
     // chiffre, pas un autre mode à choisir.
     amount: Number(e.remaining) > 0 ? e.remaining : e.salary,
-    caisseId: e.caisse_id || offices[0]?.id || '', note: '',
+    caisseId: e.caisse_id || offices[0]?.id || '', note: '', rm: NO_REMISE,
   });
 
   const saveEmployee = (ev) => {
@@ -75,7 +76,7 @@ export function SalairesPanel({ offices, currencies }) {
     ev.preventDefault();
     run(() => idem((key) => api(`/employees/${pay.id}/pay`, {
       method: 'POST', idem: key,
-      body: { amount: pay.amount, caisseId: Number(pay.caisseId), note: pay.note || undefined, settle: pay.settle || undefined },
+      body: { amount: pay.amount, caisseId: Number(pay.caisseId), note: pay.note || undefined, remise: remiseBody(pay.rm, Number(pay.remaining), pay.amount) },
     })), `${formatMoney(pay.amount, pay.currency)} versés à ${pay.name}.`);
   };
 
@@ -150,10 +151,10 @@ export function SalairesPanel({ offices, currencies }) {
             <IconEl name="arrowOut" />Verser {formatMoney(Number(pay.amount || 0), pay.currency)}
           </button>
           <div className="field-grow">
-            <RemiseControl
+            <RemiseBlock
               due={Number(pay.remaining)} amount={pay.amount} currency={pay.currency}
               onAmount={(v) => setPay((p) => ({ ...p, amount: v }))}
-              settle={pay.settle} onSettle={(v) => setPay((p) => ({ ...p, settle: v }))}
+              value={pay.rm} onChange={(rm) => setPay((p) => ({ ...p, rm }))}
             />
           </div>
           <button type="button" className="btn btn-ghost" onClick={() => setPay(null)}>Annuler</button>

@@ -50,7 +50,7 @@ function Flow({ row }) {
 }
 
 export function MoneyConfirm({
-  open, kind = 'move', title, amount, currency, rows = [], warn = [], note,
+  open, kind = 'move', title, amount, currency, rows = [], remise, warn = [], note,
   confirmLabel, busy, confirmDisabled, onConfirm, onCancel, children,
 }) {
   const label = confirmLabel
@@ -86,6 +86,12 @@ export function MoneyConfirm({
                 <Flow row={r} />
               </div>
             ))}
+          </div>
+        )}
+        {remise && (
+          <div className="mc-remise">
+            <span>Remise<small>{remise.text}</small></span>
+            <b>{formatMoney(remise.amount, currency)}</b>
           </div>
         )}
         {children}

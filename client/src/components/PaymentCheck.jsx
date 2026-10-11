@@ -6,22 +6,24 @@
 //
 //   incoming : l'argent ENTRE (fournisseur qui règle) · sinon il SORT (passager payé)
 //   due      : ce qui reste dû sur ce bon, avant ce versement
-import { useStep } from '../lib/rounding.js';
+//   remise   : l'état du bloc Remise ({ kind, value, reasonId, note })
 import { formatMoney } from '../lib/format.js';
-import { MoneyConfirm, afterPayment, debtRow } from './MoneyConfirm.jsx';
+import { useRemiseView } from '../lib/useRemise.js';
+import { MoneyConfirm, debtRow } from './MoneyConfirm.jsx';
 
-export function PaymentCheck({ incoming, who, caisse, due, amount, currency, settle, busy, onConfirm, onCancel }) {
-  const step = useStep(currency);
+export function PaymentCheck({ incoming, who, caisse, due, amount, currency, remise, busy, onConfirm, onCancel }) {
   const a = Number(amount) || 0;
   const d = Number(due) || 0;
-  const settling = Boolean(settle) && a > 0 && a !== d && a - d <= step;
-  const { left, excess } = afterPayment(d, a, settling);
+  const { figures, line } = useRemiseView(remise, d, a, currency);
   const cash = Number(caisse?.balances?.[currency] ?? 0);
   const lowFunds = !incoming && Boolean(caisse) && a > cash;
+  // Plus que le dû, et sans remise qui l'explique : une erreur à corriger.
+  const excess = figures.error ? 0 : figures.excess;
+  const left = figures.left;
 
   const warn = [];
   if (excess > 0) warn.push(`${formatMoney(excess, currency)} de plus que le reste dû (${formatMoney(d, currency)}) : corrigez le montant.`);
-  if (settling && a !== d) warn.push(`Remise de règlement de ${formatMoney(Math.abs(d - a), currency)} : le bon est soldé, la caisse ne bouge que de ${formatMoney(a, currency)}.`);
+  if (figures.error) warn.push(figures.error);
   if (lowFunds) warn.push(`La caisse ne contient que ${formatMoney(cash, currency)} : le paiement sera refusé.`);
 
   return (
@@ -34,8 +36,9 @@ export function PaymentCheck({ incoming, who, caisse, due, amount, currency, set
         { label: `Caisse « ${caisse.label} »`, before: cash, after: incoming ? cash + a : cash - a, currency, tone: 'caisse' },
         debtRow({ who, out: !incoming, before: d, after: left, currency }),
       ] : []}
+      remise={line}
       warn={warn}
-      confirmDisabled={excess > 0 || lowFunds || !caisse}
+      confirmDisabled={excess > 0 || Boolean(figures.error) || lowFunds || !caisse}
       busy={busy}
       onConfirm={onConfirm}
       onCancel={onCancel}
