@@ -257,6 +257,25 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   const isFournisseurBon = bon.order_id != null;
   const toPickedLine = (l, index) => {
     const e = toEditLine(l);
+    // Du stock libre : pas de lot derrière, l'article se retrouve dans la liste du stock.
+    if (!l.source_line_id && l.item_id) {
+      const own = index.get(`item-${l.item_id}`);
+      const have = own ? Number(own.remaining) : 0;
+      return {
+        ...e,
+        pickKey: `item-${l.item_id}`, manual: true, itemId: l.item_id, sourceLineId: null,
+        lot: { measure: 'quantite', quantity: Math.max(have, Number(l.quantity)), weight_kg: Number(own?.weight_kg ?? l.weight_kg) },
+        weightTouched: true, missingTouched: true,
+        // La liste (forBonId) compte déjà ce que CE bon tient comme libre pour lui : il peut
+        // en reprendre autant, ni plus ni moins. (Sans la ligne, on ne retient que ce qu'il tient.)
+        remaining: own ? have : Number(l.quantity),
+        salePrice: 0,
+        missingPrice: String(l.missing_unit_price ?? ''),
+        fournisseurId: null,
+        fournisseurName: 'Stock en Chine (ajouté à la main)',
+        sourceLabel: 'Stock Chine',
+      };
+    }
     const src = index.get(String(l.source_line_id));
     return {
       ...e,

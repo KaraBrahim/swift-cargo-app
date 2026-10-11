@@ -23,6 +23,13 @@ import { priceBasis, weightShare, perPiece, perMeasureUnit, priceUnit } from '..
 
 export const lotKey = (l) => String(l.line_id);
 
+// Un article du stock de Chine entré à la main (« Entrer du stock ») se présente
+// comme un lot — même liste, même panier — mais n'a ni fournisseur, ni prix de
+// vente, ni bon fournisseur derrière : `manual`. Il se désigne par son article
+// (`itemId`), pas par une ligne de lot ; il n'a donc pas de marge à calculer, et
+// la valeur du manquant n'a pas de prix convenu où aller la chercher.
+const pickKeyOf = (l) => l.pickKey ?? String(l.sourceLineId);
+
 // Une ligne du panier tire en QUANTITÉ sur un lot ; son poids en est la part, et
 // `measure` dit seulement si le prix se multiplie par la quantité ou par le poids.
 const round2 = (v) => String(Math.round(Number(v) * 100) / 100);
@@ -30,7 +37,8 @@ const lotOf = (l) => l.lot; // { measure, quantity, weight_kg } — la ligne du 
 
 export const pickedTotal = (l) => priceBasis(l) * Number(l.unitPrice || 0);
 // Ce que le fournisseur paie pour ces pièces, moins ce qu'on paie le passager.
-export const pickedMargin = (l) => perPiece(lotOf(l), l.salePrice) * Number(l.quantity || 0) - pickedTotal(l);
+// Du stock sans fournisseur n'a pas de prix de vente : pas de marge à annoncer.
+export const pickedMargin = (l) => (l.manual ? 0 : perPiece(lotOf(l), l.salePrice) * Number(l.quantity || 0) - pickedTotal(l));
 
 // Complet : une quantité positive qui tient dans ce qui reste, un poids, un prix
 // de transport, et une valeur du manquant renseignée (zéro compris : un lot sans
@@ -45,6 +53,8 @@ export const pickedValid = (l) =>
 // DU LOT ; ce bon peut tarifer autrement (au kilo ce que le lot vend à la pièce).
 // On la ramène à la pièce, puis à la mesure de cette ligne.
 export const defaultMissing = (l) => {
+  // Pas de prix convenu pour du stock libre : la valeur du manquant se décide, elle ne se devine pas.
+  if (l.manual) return '';
   const lot = lotOf(l);
   if (lot.measure === l.measure) return String(l.salePrice);
   return round2(perMeasureUnit(l, perPiece(lot, l.salePrice)));
@@ -59,8 +69,12 @@ export const lotToPicked = (o, suggestion = null) => {
   const lot = { measure: o.measure, quantity: Number(o.quantity), weight_kg: Number(o.weight_kg) };
   const measure = suggestion?.suggested_measure ?? o.measure ?? 'quantite';
   const quantity = Number(o.remaining);
+  const manual = Boolean(o.manual);
   const line = {
-    sourceLineId: o.line_id,
+    pickKey: lotKey(o),
+    manual,
+    itemId: manual ? o.item_id : undefined,
+    sourceLineId: manual ? null : o.line_id,
     designation: o.designation,
     measure,
     unit: o.unit,
@@ -81,7 +95,8 @@ export const lotToPicked = (o, suggestion = null) => {
 
 // Ce que POST /bons attend d'une ligne.
 export const pickedToLine = (l) => ({
-  sourceLineId: l.sourceLineId,
+  // Un lot se désigne par sa ligne ; du stock libre par son article.
+  ...(l.manual ? { itemId: l.itemId, designation: l.designation } : { sourceLineId: l.sourceLineId }),
   measure: l.measure,
   quantity: l.quantity,
   weight_kg: l.weight_kg,
@@ -133,7 +148,7 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
   const [openCatalogue, setOpenCatalogue] = useState(true);
   const [confirmClear, setConfirmClear] = useState(false);
 
-  const taken = useMemo(() => new Set(picked.map((l) => String(l.sourceLineId))), [picked]);
+  const taken = useMemo(() => new Set(picked.map(pickKeyOf)), [picked]);
 
   // La recherche porte sur l'article, la référence du bon fournisseur et le nom
   // du fournisseur — les trois façons dont on cherche un lot.
@@ -189,14 +204,14 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
             <p className="gp-empty">
               {options.length
                 ? 'Aucun lot ne correspond à cette recherche.'
-                : 'Aucune marchandise disponible : tout ce qui est arrivé est déjà confié.'}
+                : 'Aucune marchandise disponible : tout ce qui est arrivé est déjà confié, et il n’y a pas de stock libre en Chine.'}
             </p>
           )}
 
           {byFournisseur.map(([name, lots]) => (
             <div key={name} className="gp-group">
               <div className="gp-group-head">
-                <IconEl name="fournisseur" />
+                <IconEl name={lots[0]?.manual ? 'stock' : 'fournisseur'} />
                 <span>{name}</span>
                 <span className="gp-group-n">{lots.length}</span>
               </div>
@@ -219,7 +234,7 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
                       {formatQty(o.remaining)} {o.unit}
                       <em> · {formatQty(weightShare({ quantity: o.quantity, weight_kg: o.weight_kg }, o.remaining))} kg</em>
                     </span>
-                    <span className="gp-lot-price">{formatMoney(o.sale_price)}</span>
+                    <span className="gp-lot-price">{o.manual ? '—' : formatMoney(o.sale_price)}</span>
                     <IconEl name={isTaken ? 'check' : 'plus'} />
                   </button>
                 );
@@ -261,7 +276,7 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
           {pickedByFournisseur.map(([name, lots]) => (
             <div key={name} className="gp-group">
               <div className="gp-group-head">
-                <IconEl name="fournisseur" />
+                <IconEl name={lots[0]?.manual ? 'stock' : 'fournisseur'} />
                 <span>{name}</span>
                 {/* Ce que ce fournisseur-là met dans la valise. */}
                 <span className="gp-group-sum">{formatMoney(lots.reduce((s, l) => s + pickedTotal(l), 0), currency)}</span>
@@ -272,7 +287,7 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
                 const over = Number(l.quantity) > Number(l.remaining);
                 const m = pickedMargin(l);
                 return (
-                  <div key={l.sourceLineId} className="gp-row">
+                  <div key={pickKeyOf(l)} className="gp-row">
                     <div className="gp-row-head">
                       <span className="gp-row-name">{l.designation}</span>
                       <button type="button" className="icon-btn" aria-label="Retirer du panier" onClick={() => drop(i)}>
@@ -330,10 +345,12 @@ export function GoodsPicker({ options, picked, currency, onChange, loading, sugg
                     <div className="gp-row-foot">
                       {over
                         ? <span className="neg">Il ne reste que {formatQty(l.remaining)} {u}.</span>
-                        : <span className="muted">Fournisseur {formatMoney(l.salePrice)} / {priceUnit({ measure: l.lot.measure, unit: l.unit })} · {l.sourceLabel}</span>}
+                        : l.manual
+                          ? <span className="muted">{l.sourceLabel} · pas de prix fournisseur : indiquez la valeur du manquant</span>
+                          : <span className="muted">Fournisseur {formatMoney(l.salePrice)} / {priceUnit({ measure: l.lot.measure, unit: l.unit })} · {l.sourceLabel}</span>}
                       <span className="gp-row-total">
                         {formatMoney(pickedTotal(l), currency)}
-                        <em className={m < 0 ? 'neg' : 'pos'}>marge {formatMoney(m, currency)}</em>
+                        {!l.manual && <em className={m < 0 ? 'neg' : 'pos'}>marge {formatMoney(m, currency)}</em>}
                       </span>
                     </div>
                   </div>

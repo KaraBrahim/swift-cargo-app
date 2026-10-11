@@ -174,6 +174,98 @@ export async function listAllocatable({ fournisseurId, orderId, forBonId } = {})
     .filter((r) => new Decimal(r.remaining).gt(0));
 }
 
+// ── Le stock libre en Chine ───────────────────────────────────────────
+// Ce qui est dans le stock de Chine SANS appartenir à un lot d'un bon fournisseur :
+// ce qu'on a entré à la main (« Entrer du stock »), qui n'a ni fournisseur ni prix
+// d'achat. Un passager peut l'emporter comme n'importe quel lot.
+//
+// Le niveau du stock de Chine mélange trois choses : les lots reçus et pas encore
+// partis, ce qu'on a entré à la main, et ce que des bons passagers « créés »
+// comptent déjà emporter. Le libre est ce qui reste quand on retire les lots (leur
+// part non partie) et les réservations des bons pas encore partis.
+//   libre = niveau Chine − lots non partis − réservé par les bons « créé » sans lot
+const FREE_STOCK_SQL = `
+  WITH held AS (
+    SELECT bl.item_id,
+           SUM(bl.quantity - dep.q) AS q,
+           SUM(CASE WHEN bl.quantity > 0 THEN COALESCE(bl.weight_kg, 0) * (bl.quantity - dep.q) / bl.quantity ELSE 0 END) AS w
+      FROM bon_lines bl
+      JOIN bons b ON b.id = bl.bon_id
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(SUM(a.quantity), 0) AS q
+          FROM bon_lines a JOIN bons ab ON ab.id = a.bon_id
+         WHERE a.source_line_id = bl.id AND ab.status IN ('en_transit', 'arrive', 'regle')
+      ) dep
+     WHERE b.order_id IS NOT NULL AND bl.item_id IS NOT NULL
+     GROUP BY bl.item_id
+  ), resv AS (
+    SELECT m.item_id, SUM(m.quantity) AS q, SUM(COALESCE(m.weight_kg, 0)) AS w
+      FROM bon_lines m JOIN bons mb ON mb.id = m.bon_id
+     WHERE m.source_line_id IS NULL AND m.item_id IS NOT NULL
+       AND mb.order_id IS NULL AND mb.status = 'cree' __EXCEPT__
+     GROUP BY m.item_id
+  )
+  SELECT i.id AS item_id, i.name AS designation, c.name AS category_name,
+         l.quantity - COALESCE(h.q, 0) - COALESCE(r.q, 0) AS free_q,
+         l.weight_kg - COALESCE(h.w, 0) - COALESCE(r.w, 0) AS free_w
+    FROM stock_items i
+    JOIN stock_levels l ON l.item_id = i.id AND l.office = 'china'
+    LEFT JOIN stock_categories c ON c.id = i.category_id
+    LEFT JOIN held h ON h.item_id = i.id
+    LEFT JOIN resv r ON r.item_id = i.id
+   WHERE i.active = TRUE __ITEM__`;
+
+async function freeStockRows(client, { itemId = null, exceptBonId = null } = {}) {
+  const params = [];
+  let except = '';
+  let item = '';
+  if (exceptBonId) { params.push(exceptBonId); except = `AND mb.id <> $${params.length}`; }
+  if (itemId) { params.push(itemId); item = `AND i.id = $${params.length}`; }
+  const { rows } = await client.query(
+    `${FREE_STOCK_SQL.replace('__EXCEPT__', except).replace('__ITEM__', item)} ORDER BY i.name`, params
+  );
+  return rows
+    .map((r) => ({ ...r, free_q: new Decimal(r.free_q), free_w: Decimal.max(new Decimal(r.free_w), 0) }))
+    .filter((r) => r.free_q.gt(0));
+}
+
+// Ce que le stock libre propose, SOUS LA FORME d'un lot : le sélecteur de
+// marchandises n'a ainsi qu'une seule liste à montrer. `manual` les distingue — il
+// n'y a ni fournisseur, ni prix de vente, ni bon fournisseur derrière.
+export async function listManualStock({ forBonId } = {}) {
+  const rows = await freeStockRows(getPool(), { exceptBonId: forBonId });
+  return rows.map((r) => ({
+    line_id: `item-${r.item_id}`,
+    manual: true,
+    item_id: r.item_id,
+    designation: r.designation,
+    category_name: r.category_name,
+    measure: 'quantite',
+    unit: 'pièce',
+    sale_price: '0',
+    quantity: r.free_q.toFixed(3),
+    weight_kg: r.free_w.toFixed(3),
+    allocated: '0',
+    remaining: r.free_q.toFixed(3),
+    source_bon_id: null,
+    source_bon_reference: null,
+    order_id: null,
+    order_reference: 'Stock Chine',
+    fournisseur_id: null,
+    fournisseur_name: 'Stock en Chine (ajouté à la main)',
+  }));
+}
+
+// Les lots des bons fournisseurs, puis le stock libre. Filtrer par fournisseur ou
+// par ordre n'a de sens que pour les lots : le stock libre n'est à personne.
+export async function listPickable({ fournisseurId, orderId, forBonId } = {}) {
+  const lots = await listAllocatable({ fournisseurId, orderId, forBonId });
+  if (fournisseurId || orderId) return lots;
+  // Le stock libre en tête : c'est ce qu'on vient d'entrer à la main, et il ne doit pas se perdre
+  // en bas d'une liste de lots.
+  return [...(await listManualStock({ forBonId })), ...lots];
+}
+
 // Resolve each line, insert the bon_line, and — for a bon fournisseur (orderId
 // set) — post the China reception movement. A bon passager line instead DRAWS
 // from a bon fournisseur line: the article comes from the source, the quantity
@@ -232,6 +324,18 @@ async function insertResolvedLines(c, { bon, lines, orderId, adminId }) {
       if (!it.rows.length) throw errors.notFound('Article introuvable ou inactif.');
       itemId = it.rows[0].id;
       designation = it.rows[0].name;
+      // Un bon PASSAGER qui nomme un article sans lot emporte du stock libre : il ne
+      // peut pas en prendre plus qu'il n'y en a (les lignes déjà posées de ce bon
+      // comptent comme réservées, donc deux lignes du même article s'additionnent).
+      if (!orderId) {
+        const [free] = await freeStockRows(c, { itemId });
+        const have = free ? free.free_q : new Decimal(0);
+        if (new Decimal(l.quantity).gt(have)) {
+          throw errors.conflict(
+            `Stock libre insuffisant en Chine pour « ${designation} » : il reste ${have.toFixed(3)}, demandé ${new Decimal(l.quantity).toFixed(3)}.`
+          );
+        }
+      }
     } else if ((l.createItem || orderId) && designation) {
       itemId = await ensureStockItem(c, { name: designation, categoryId: l.categoryId, adminId });
     }

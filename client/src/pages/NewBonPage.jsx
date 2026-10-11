@@ -156,13 +156,13 @@ export default function NewBonPage() {
           <StepHead
             icon="box"
             question="Que met-il dans sa valise ?"
-            hint="Cherchez un lot, cliquez pour l'ajouter. Un bon peut porter la marchandise de plusieurs fournisseurs."
+            hint="Cherchez un lot ou un article du stock de Chine, cliquez pour l'ajouter. Un bon peut porter la marchandise de plusieurs fournisseurs."
           />
           {!allocatable.loading && !lots.length ? (
             <EmptyState
               icon="box"
               title="Rien à confier pour l'instant"
-              sub="Toute la marchandise arrivée est déjà partie. Créez un bon fournisseur pour en recevoir."
+              sub="Toute la marchandise arrivée est déjà partie, et le stock de Chine est vide. Créez un bon fournisseur pour en recevoir, ou entrez du stock depuis la page Stock."
             />
           ) : (
             <GoodsPicker

@@ -105,7 +105,7 @@ bonsRouter.get(
 bonsRouter.get(
   '/bons/allocatable',
   validate({ query: z.object({ fournisseurId: z.coerce.number().int().positive().optional(), orderId: z.coerce.number().int().positive().optional(), forBonId: z.coerce.number().int().positive().optional() }) }),
-  asyncHandler(async (req, res) => res.json({ lines: await svc.listAllocatable(req.validatedQuery) }))
+  asyncHandler(async (req, res) => res.json({ lines: await svc.listPickable(req.validatedQuery) }))
 );
 
 bonsRouter.get(
