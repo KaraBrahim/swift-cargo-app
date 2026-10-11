@@ -9,6 +9,7 @@ import { RoleBadges } from '../components/RolePicker.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 import { defaultCurrencyFor, leadCurrencyFor, sortByImportance } from '../lib/offices.js';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { DebtSummary } from '../components/DebtSummary.jsx';
 import AmountInput from '../components/AmountInput.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 
@@ -28,7 +29,6 @@ export default function CaissesPage() {
   const currencies = useApi('/currencies');
   const transfers = useApi('/office-transfers');
   const debts = useApi('/accounts/debts');
-  const [debtTab, setDebtTab] = useState('toPay');
   // Le compte ne distingue plus fournisseur et passager — une même personne
   // peut être les deux — donc on filtre sur le SENS de l'argent, qui reste vrai.
   const [payFilter, setPayFilter] = useState('');
@@ -151,6 +151,9 @@ export default function CaissesPage() {
         <p className="muted">Deux caisses de bureau · le DZD est la devise de référence.</p>
       </div>
 
+      {/* L'argent qui reste dû, dans les deux sens : en tête, pas derrière un onglet. */}
+      <DebtSummary linkToList={false} />
+
       <div className="caisse-list">
         {(caisses.data?.caisses ?? []).map((c) => (
           <Link key={c.id} to={`/caisses/${c.id}`} className="caisse-card">
@@ -196,64 +199,49 @@ export default function CaissesPage() {
         </div>
       )}
 
-      {/* ── What is still owed, both directions ── */}
-      <div className="panel" style={{ marginTop: 24 }}>
+      {/* ── What is still owed, both directions — les deux listes, côte à côte de lecture ── */}
+      <div className="panel" id="dettes" style={{ marginTop: 24 }}>
         <div className="page-head" style={{ marginBottom: 12 }}>
           <h2 className="panel-title">Dettes en cours</h2>
-          <div className="seg">
-            {[['toPay', 'À payer'], ['toCollect', 'À encaisser']].map(([k, label]) => (
-              <button key={k} type="button" className={debtTab === k ? 'active' : ''} onClick={() => setDebtTab(k)}>{label}</button>
-            ))}
-          </div>
         </div>
 
-        <div className="money-head">
-          <span className={`money-dir ${debtTab === 'toPay' ? 'out' : 'in'}`}>
-            {debtTab === 'toPay' ? 'Sortie à venir' : 'Entrée à venir'}
-          </span>
-          <span>
-            {debtTab === 'toPay'
-              ? <>Ce que vous <strong>devez encore</strong> — principalement aux passagers pour les services rendus.</>
-              : <>Ce qu’on vous <strong>doit encore</strong> — principalement les fournisseurs pour le transport.</>}
-          </span>
-          <span className="debt-total">
-            {Object.entries(debts.data?.totals?.[debtTab] ?? {}).map(([cur, v]) => (
-              <strong key={cur} className={debtTab === 'toPay' ? 'pos' : 'neg'}>{formatMoney(v, cur)}</strong>
-            ))}
-            {!Object.keys(debts.data?.totals?.[debtTab] ?? {}).length && <strong className="muted">0,00</strong>}
-          </span>
-        </div>
-
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th>Personne</th><th>Type</th><th>Téléphone</th><th>Dernier mouvement</th><th className="right">Montant</th><th className="right">Action</th></tr></thead>
-            <tbody>
-              {(debts.data?.[debtTab] ?? []).map((d) => (
-                <tr key={`${d.person_type}-${d.person_id}-${d.currency_code}`} className="clickable"
-                  onClick={() => navigate(`/personnes/${d.person_id}`)}>
-                  <td><span className="gold">{d.person_name}</span></td>
-                  <td className="nowrap"><RoleBadges person={d} /></td>
-                  <td className="muted">{d.phone || '—'}</td>
-                  <td className="muted">{d.last_activity ? new Date(d.last_activity).toLocaleDateString('fr-FR') : '—'}</td>
-                  <td className={`right ${debtTab === 'toPay' ? 'pos' : 'neg'}`}>
-                    {formatMoney(Math.abs(Number(d.balance)), d.currency_code)}
-                  </td>
-                  <td className="right" onClick={(e) => e.stopPropagation()}>
-                    <button className="btn btn-sm"
+        {[
+          ['toCollect', 'in', 'On vous doit', 'Ce qu’on vous doit encore — principalement les fournisseurs pour le transport.', 'Encaisser', 'Personne ne vous doit rien.'],
+          ['toPay', 'out', 'Vous devez', 'Ce que vous devez encore — principalement aux passagers pour les services rendus.', 'Payer', 'Vous ne devez rien à personne.'],
+        ].map(([key, dir, title, hint, action, none]) => (
+          <section key={key} className={`debt-section ${dir}`}>
+            <div className="debt-section-head">
+              <h3>{title}</h3>
+              <span className="muted">{hint}</span>
+              <span className="debt-section-total">
+                {Object.entries(debts.data?.totals?.[key] ?? {}).map(([cur, v]) => <strong key={cur}>{formatMoney(v, cur)}</strong>)}
+              </span>
+            </div>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Personne</th><th>Type</th><th>Téléphone</th><th>Dernier mouvement</th><th className="right">Reste dû</th><th className="right">Action</th></tr></thead>
+                <tbody>
+                  {(debts.data?.[key] ?? []).map((d) => (
+                    <tr key={`${d.person_type}-${d.person_id}-${d.currency_code}`} className="clickable"
                       onClick={() => navigate(`/personnes/${d.person_id}`)}>
-                      {debtTab === 'toPay' ? 'Payer' : 'Encaisser'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!(debts.data?.[debtTab] ?? []).length && (
-                <tr><td colSpan="6" className="muted pad">
-                  {debtTab === 'toPay' ? 'Vous ne devez rien à personne.' : 'Personne ne vous doit rien.'}
-                </td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                      <td><span className="gold">{d.person_name}</span></td>
+                      <td className="nowrap"><RoleBadges person={d} /></td>
+                      <td className="muted">{d.phone || '—'}</td>
+                      <td className="muted">{d.last_activity ? new Date(d.last_activity).toLocaleDateString('fr-FR') : '—'}</td>
+                      <td className="right"><strong className={dir === 'out' ? 'neg' : 'gold'}>{formatMoney(Math.abs(Number(d.balance)), d.currency_code)}</strong></td>
+                      <td className="right" onClick={(e) => e.stopPropagation()}>
+                        <button className="btn btn-sm" onClick={() => navigate(`/personnes/${d.person_id}`)}>{action}</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!(debts.data?.[key] ?? []).length && (
+                    <tr><td colSpan="6" className="muted pad">{none}</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
       </div>
 
       {/* ── Everything already settled in cash ── */}

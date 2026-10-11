@@ -148,9 +148,8 @@ export function TabsProvider({ children, onRefused }) {
     return tab.id;
   }, [navigate, onRefused]);
 
-  // Retrouver une fiche, pas en empiler une copie. Un scan au comptoir doit
-  // ouvrir le bon — et s'il est deja ouvert, y aller : scanner deux fois le meme
-  // papier ne doit pas remplir la barre, ni buter sur la limite d'onglets.
+  // Retrouver une fiche, pas en empiler une copie : ouvrir un bon déjà ouvert doit
+  // y aller, pas remplir la barre ni buter sur la limite d'onglets.
   const openOrFocus = useCallback((rawPath) => {
     const path = normalizePath(rawPath);
     const s = stateRef.current;

@@ -1,0 +1,112 @@
+/* La dette, en grand. Deux sens, deux couleurs :
+     out → VOUS devez   (rouge : une sortie d'argent à venir)
+     in  → on VOUS doit (or    : une entrée d'argent attendue)
+   et un état soldé, vert, pour qu'un compte à zéro se dise aussi. */
+
+/* ── bannière en tête d'une fiche ── */
+.debt-banner {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  margin: 0 0 14px; padding: 14px 18px;
+  border-radius: 14px; border: 1px solid var(--border);
+  border-left-width: 6px; background: var(--surface-2);
+}
+.debt-banner .debt-ico {
+  display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 12px;
+  background: var(--surface-1);
+}
+.debt-banner .debt-ico svg { width: 20px; height: 20px; }
+.debt-main { flex: 1 1 280px; min-width: 0; display: grid; gap: 3px; }
+.debt-kicker { font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.debt-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.debt-amount { font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.debt-who { font-size: 14px; color: var(--text-2); }
+.debt-who b { color: var(--text); font-weight: 600; }
+.debt-title { font-size: 15px; font-weight: 600; }
+.debt-sub { font-size: 12.5px; color: var(--text-2); }
+.debt-sub b { color: var(--text); font-weight: 600; }
+.debt-bar { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin-top: 4px; max-width: 460px; }
+.debt-bar span { display: block; height: 100%; border-radius: inherit; }
+
+.debt-banner.out { border-color: var(--red-border); border-left-color: var(--red); background: linear-gradient(90deg, var(--red-bg), var(--surface-2) 70%); }
+.debt-banner.out .debt-ico { color: var(--red); }
+.debt-banner.out .debt-kicker, .debt-banner.out .debt-amount { color: var(--red-text); }
+.debt-banner.out .debt-bar span { background: var(--red); }
+
+.debt-banner.in { border-color: var(--brand-glow); border-left-color: var(--brand); background: linear-gradient(90deg, var(--brand-tint-strong), var(--surface-2) 70%); }
+.debt-banner.in .debt-ico { color: var(--brand-text); }
+.debt-banner.in .debt-kicker, .debt-banner.in .debt-amount { color: var(--brand-text); }
+.debt-banner.in .debt-bar span { background: var(--brand); }
+
+.debt-banner.ok { border-color: var(--green-border); border-left-color: var(--green); background: linear-gradient(90deg, var(--green-bg), var(--surface-2) 70%); }
+.debt-banner.ok .debt-ico { color: var(--green); }
+.debt-banner.ok .debt-title { color: var(--green-text); }
+
+.debt-banner.pending { border-left-color: var(--border-strong); }
+.debt-banner.pending .debt-ico { color: var(--muted); }
+
+.btn-danger-soft { color: var(--red-text); border-color: var(--red-border); background: var(--red-bg); }
+.btn-danger-soft:hover:not(:disabled) { background: var(--red); color: #fff; border-color: var(--red); }
+
+/* ── cellule de liste ── */
+.debt-cell { display: inline-grid; gap: 1px; text-align: right; }
+.debt-cell strong { font-size: 13px; font-variant-numeric: tabular-nums; }
+.debt-cell-sub { font-size: 11px; color: var(--muted); }
+.debt-cell.out strong { color: var(--red-text); }
+.debt-cell.in strong { color: var(--brand-text); }
+.debt-cell.ok strong { color: var(--green-text); font-weight: 600; }
+.debt-idle { font-size: 12px; }
+
+/* ── résumé : ce qu'on vous doit, ce que vous devez ── */
+.debt-summary { margin: 0 0 16px; }
+.debt-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.debt-card {
+  display: grid; gap: 8px; align-content: start; padding: 16px 18px;
+  border-radius: 14px; border: 1px solid var(--border); border-top-width: 4px; background: var(--surface-2);
+}
+.debt-card header { display: flex; gap: 12px; align-items: center; }
+.debt-card h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+.debt-card header p { margin: 1px 0 0; font-size: 12px; }
+.debt-card-ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--surface-1); flex: none; }
+.debt-card-ico svg { width: 17px; height: 17px; }
+.debt-card-totals { display: flex; gap: 6px 18px; flex-wrap: wrap; }
+.debt-card-totals strong { font-size: 26px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.debt-card-count { margin: 0; font-size: 12.5px; }
+.debt-card.out { border-top-color: var(--red); }
+.debt-card.out .debt-card-ico, .debt-card.out .debt-card-totals strong { color: var(--red-text); }
+.debt-card.in { border-top-color: var(--brand); }
+.debt-card.in .debt-card-ico, .debt-card.in .debt-card-totals strong { color: var(--brand-text); }
+.debt-row {
+  display: flex; justify-content: space-between; gap: 12px; padding: 7px 4px;
+  border: 0; border-top: 1px solid var(--border); background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.debt-row:hover { background: var(--surface-hover); }
+.debt-row strong { font-variant-numeric: tabular-nums; }
+.debt-card.out .debt-row strong { color: var(--red-text); }
+.debt-card.in .debt-row strong { color: var(--brand-text); }
+.debt-card-more { margin: 0; font-size: 12px; }
+.debt-all { display: inline-block; margin-top: 8px; }
+
+/* ── la liste détaillée des dettes (page caisses) ── */
+.debt-section + .debt-section { margin-top: 18px; }
+.debt-section-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.debt-section-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
+.debt-section-total { margin-left: auto; display: flex; gap: 14px; }
+.debt-section-total strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.debt-section.out .debt-section-head h3, .debt-section.out .debt-section-total strong { color: var(--red-text); }
+.debt-section.in .debt-section-head h3, .debt-section.in .debt-section-total strong { color: var(--brand-text); }
+
+/* ── la dette d'une personne, par devise ── */
+.person-debt { display: grid; gap: 12px; margin-bottom: 16px; }
+.person-debt-open { display: grid; gap: 2px; }
+.person-debt-open h3 { margin: 4px 0 6px; font-size: 13px; font-weight: 700; }
+.person-debt-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 4px;
+  border: 0; border-top: 1px solid var(--border); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.person-debt-row:hover { background: var(--surface-hover); }
+.person-debt-row .ref { color: var(--brand-text); font-weight: 600; }
+.person-debt-row .what { font-size: 12px; color: var(--muted); margin-left: 8px; }
+
+/* Les mots d'une dette : jamais le vert de « tout va bien ». */
+.debt-out { color: var(--red-text); }
+.debt-in { color: var(--brand-text); }

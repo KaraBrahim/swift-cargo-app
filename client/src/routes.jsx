@@ -5,7 +5,7 @@ import { EmptyState, Spinner } from './components/ui.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 // Chaque page arrive quand on l'ouvre, pas toutes au premier écran : le serveur
 // est loin, et un seul fichier d'un mégaoctet retardait le tableau de bord de
-// tout ce qu'on n'y utilise pas (graphiques des taux, calendrier, QR…).
+// tout ce qu'on n'y utilise pas (graphiques des taux, calendrier…).
 const CaissesPage = lazy(() => import('./pages/CaissesPage.jsx'));
 const CaisseDetailPage = lazy(() => import('./pages/CaisseDetailPage.jsx'));
 const RatesPage = lazy(() => import('./pages/RatesPage.jsx'));

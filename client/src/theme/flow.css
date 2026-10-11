@@ -368,27 +368,6 @@
    sa hauteur double desaligne toute la rangee. */
 .field-full { flex: 1 0 100%; }
 
-/* ── Le papier revient : bandeau de scan ──────────────────────────────
-   La douchette a ouvert cette fiche. Le bandeau le dit et propose la seule
-   action attendue au comptoir ; il ne fait rien tout seul. */
-.dt-scan {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin-bottom: 8px; padding: 8px 11px;
-  border-radius: var(--radius-card);
-  background: var(--brand-tint); border: 1px solid var(--brand-deep);
-  animation: fade 0.2s ease;
-}
-.dt-scan-ico {
-  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; flex-shrink: 0;
-  background: var(--surface-1); color: var(--brand-text);
-}
-.dt-scan-ico svg { width: 15px; height: 15px; }
-.dt-scan-txt {
-  display: flex; flex-direction: column; min-width: 0; flex: 1;
-  font-size: 0.8rem; font-weight: 600; color: var(--brand-text);
-}
-.dt-scan-txt em { font-style: normal; font-size: 0.68rem; font-weight: 500; color: var(--text-2); }
-
 /* ── Ce qui a été convenu la dernière fois ────────────────────────────
    Un prix proposé doit dire d'où il vient, sinon c'est un chiffre tombé du
    ciel. Cliquable : un clic le reprend. */

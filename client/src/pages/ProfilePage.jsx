@@ -14,6 +14,7 @@ import { WilayaField } from '../components/WilayaField.jsx';
 import { RolePicker, RoleBadges, personToForm, personBody, personValid } from '../components/RolePicker.jsx';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
+import { DebtBanner } from '../components/DebtBanner.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const ENTRY_LABEL = {
@@ -42,7 +43,9 @@ const TYPE_LABEL = { regular: 'Régulier', auto: 'Auto-entrepreneur' };
 function balanceState(value) {
   const n = Number(value);
   if (n === 0) return { text: 'Soldé', cls: 'muted' };
-  return n > 0 ? { text: 'Vous lui devez', cls: 'pos' } : { text: 'Il vous doit', cls: 'neg' };
+  // Une dette se lit comme une dette : ce que VOUS devez est rouge (une sortie à
+  // venir), ce qu'on VOUS doit est or (une entrée attendue). Jamais vert, qui dirait « tout va bien ».
+  return n > 0 ? { text: 'Vous lui devez', cls: 'debt-out' } : { text: 'Il vous doit', cls: 'debt-in' };
 }
 
 // Le solde dans cette devise, signe compris : > 0 = on lui doit.
@@ -161,6 +164,22 @@ export default function ProfilePage() {
   const officeCaisses = incoming && person.is_fournisseur
     ? allOfficeCaisses.filter((c) => c.office === 'algeria')
     : allOfficeCaisses;
+  // Ce qui reste à régler, pièce par pièce : la dette ne se résume pas à un
+  // solde, on veut savoir QUEL bon la porte.
+  const openItems = [
+    ...bonList
+      .filter((b) => b.order_id == null && String(b.passager_id) === String(id) && b.pay && Number(b.pay.rest) > 0)
+      .map((b) => ({ key: `b${b.id}`, ref: b.reference, to: `/bons-passager/${b.id}`, what: 'à payer au passager', amount: b.pay.rest, code: b.transport_currency, out: true })),
+    ...orderList
+      .filter((o) => o.pay && Number(o.pay.rest) > 0)
+      .map((o) => ({ key: `o${o.id}`, ref: o.reference, to: `/bons-fournisseur/${o.id}`, what: 'à encaisser du fournisseur', amount: o.pay.rest, code: o.currency || 'DZD', out: false })),
+  ];
+  const openBalances = balances.filter((b) => Number(b.balance) !== 0);
+  // Saute au formulaire de règlement, sur la devise de la dette.
+  const goPay = (code) => {
+    setPay((p) => ({ ...p, currency: code, amount: owedIn(balances, code) }));
+    document.getElementById('reglement')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
   const totalFees = bonList.reduce((s, b) => s + Number(b.transport_fee || 0), 0);
   const activeBons = bonList.filter((b) => b.status !== 'regle').length;
 
@@ -278,6 +297,42 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {/* La dette de cette personne, en grand et par devise : c'est la première chose
+          qu'on veut savoir d'une fiche, avant son téléphone et avant ses bons. */}
+      <div className="person-debt">
+        {openBalances.map((b) => (
+          <DebtBanner
+            key={b.currency_code}
+            direction={Number(b.balance) > 0 ? 'out' : 'in'}
+            who={person.name}
+            due={Math.abs(Number(b.balance))}
+            currency={b.currency_code}
+            actLabel={Number(b.balance) > 0 ? 'Payer maintenant' : 'Encaisser maintenant'}
+            onAct={() => goPay(b.currency_code)}
+          />
+        ))}
+        {!openBalances.length && entries.length > 0 && (
+          <div className="debt-banner ok" role="status">
+            <span className="debt-ico"><IconEl name="check" /></span>
+            <div className="debt-main">
+              <div className="debt-title">Compte soldé</div>
+              <div className="debt-sub">Ni vous ne lui devez, ni il ne vous doit quoi que ce soit.</div>
+            </div>
+          </div>
+        )}
+        {openItems.length > 0 && (
+          <div className="panel person-debt-open">
+            <h3>Ce qui reste à régler</h3>
+            {openItems.map((it) => (
+              <button key={it.key} type="button" className="person-debt-row" onClick={() => navigate(it.to)}>
+                <span><span className="ref">{it.ref}</span><span className="what">{it.what}</span></span>
+                <strong className={it.out ? 'neg' : 'gold'}>{formatMoney(it.amount, it.code)}</strong>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {edit && (
         <form className="panel op-form" onSubmit={save}>
           <label className="field field-grow"><span>Nom</span>
@@ -393,10 +448,11 @@ export default function ProfilePage() {
                 {selBalance === 0
                   ? `Rien à régler en ${pay.currency}.`
                   : incoming
-                    ? <>Cette personne doit <strong className="neg">{formatMoney(Math.abs(selBalance))} {pay.currency}</strong>.</>
-                    : <>Vous lui devez <strong className="pos">{formatMoney(Math.abs(selBalance))} {pay.currency}</strong>.</>}
+                    ? <>Cette personne doit <strong className="debt-in">{formatMoney(Math.abs(selBalance))} {pay.currency}</strong>.</>
+                    : <>Vous lui devez <strong className="debt-out">{formatMoney(Math.abs(selBalance))} {pay.currency}</strong>.</>}
               </span>
             </div>
+            <div id="reglement" />
             <form className="op-form" onSubmit={submitPayment}>
               <div className="field field-grow"><span>{incoming ? 'Caisse qui reçoit' : 'Caisse qui paie'}</span>
                 <EntityPicker

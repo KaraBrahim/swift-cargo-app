@@ -12,7 +12,8 @@ import { SearchBar } from '../components/SearchBar.jsx';
 import DateRangePicker, { defaultRange } from '../components/DateRangePicker.jsx';
 import { formatDateFr } from '../lib/format.js';
 import { Who } from '../components/cells.jsx';
-import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
+import { ProgressBar } from '../components/ProgressBar.jsx';
+import { DebtCell } from '../components/DebtBanner.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
@@ -87,7 +88,7 @@ export default function OrdersPage() {
                 <thead>
                   <tr>
                     <th>Bon</th><th>Fournisseur</th><th>Statut</th><th>Retrait prévu</th>
-                    <th>Marchandise</th><th className="right">Facturé</th><th className="right" aria-label="Actions" />
+                    <th>Marchandise</th><th className="right">Facturé · dette du fournisseur</th><th className="right" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -105,8 +106,8 @@ export default function OrdersPage() {
                       <td className="bar-cell"><ProgressBar progress={o.progress} compact /></td>
                       <td className="right">
                         <span className="cell-stack">
-                          <span>{formatMoney(o.pay?.due ?? o.total_fee)}</span>
-                          <MoneyBar pay={o.pay} label="Encaissé" compact />
+                          <span>Facturé {formatMoney(o.pay?.due ?? o.total_fee, o.currency)}</span>
+                          <DebtCell pay={o.pay} code={o.currency} direction="in" />
                         </span>
                       </td>
                       <td className="right nowrap" onClick={(e) => e.stopPropagation()}>

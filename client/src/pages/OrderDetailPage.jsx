@@ -13,7 +13,7 @@ import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../com
 import { ORDER_STATUS, ORDER_ORDER } from '../components/orderStatus.js';
 import { BON_STATUS } from '../components/bonStatus.js';
 import { IconEl } from '../components/icons.jsx';
-import { DetailHead, Kpis, Kpi, Bar, Section, Footnote, ScanBanner, StepFlow } from '../components/DetailKit.jsx';
+import { DetailHead, Kpis, Kpi, Bar, Section, Footnote, StepFlow } from '../components/DetailKit.jsx';
 import { Who } from '../components/cells.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import AmountInput from '../components/AmountInput.jsx';
@@ -22,14 +22,13 @@ import { useIdempotent } from '../lib/useIdempotent.js';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { Journal } from '../components/Journal.jsx';
+import { DebtBanner } from '../components/DebtBanner.jsx';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { priceBasis, weightShare, priceUnit } from '../lib/lineMath.js';
 import { formatDateFr } from '../lib/format.js';
 import { orderManifestBody } from '../components/printDocument.js';
 import { orderTicket } from '../components/printTicket.js';
 import { formatQty } from '../lib/format.js';
-import { useQr } from '../lib/useQr.js';
-import { useScanHit, clearScanHit } from '../lib/scanSignal.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
 const unitOf = (l) => l.unit || 'u';
@@ -55,8 +54,6 @@ export default function OrderDetailPage() {
   const [cash, setCash] = useState({ caisseId: '', amount: '' });
   const caisses = useApi('/caisses');
   const idem = useIdempotent();
-  const qr = useQr('order', data?.order?.uuid);
-  const scanHit = useScanHit('order', id);
   useTabTitle(data?.order?.reference);
 
   if (loading) return <Spinner />;
@@ -227,8 +224,8 @@ export default function OrderDetailPage() {
               docTitle="Bon fournisseur — manifeste"
               paper="a5"
               subtitle={o.reference}
-              a4={() => orderManifestBody(o, qr)}
-              ticket={(societe) => orderTicket(o, societe, qr)}
+              a4={() => orderManifestBody(o)}
+              ticket={(societe) => orderTicket(o, societe)}
             />
             <button
               className="btn btn-gold"
@@ -267,14 +264,22 @@ export default function OrderDetailPage() {
         }
       />
 
-      <ScanBanner hit={scanHit} onDismiss={clearScanHit} />
-
       {/* Un indicateur, pas une commande. Le statut d'un ordre se DÉDUIT de
           cinq portes — marchandise confiée, partie, arrivée, remise, payée —
           et rien ici ne peut l'écrire. Le bouton cliquable d'avant ne
           déplaçait que le bon fournisseur enfant : l'écran ne bougeait pas,
           mais ses lignes devenaient silencieusement immodifiables. */}
       <StepFlow steps={steps} current={o.status} onJump={jumpTo} />
+
+      {/* Ce que le fournisseur doit encore : dit en grand, même quand « encaisser
+          plus tard » n'a fait bouger aucune caisse. */}
+      {Number(o.totals?.billed) > 0 && (
+        <DebtBanner
+          direction="in" who={o.fournisseur_name} due={o.pay.rest} paid={o.pay.paid} total={o.pay.due}
+          currency={cur} remise={o.pay.remise}
+          onAct={() => document.getElementById('argent')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+        />
+      )}
 
       <Kpis>
         <Kpi icon="fournisseur" label="Fournisseur" value={o.fournisseur_name} sub={o.fournisseur_phone} person to={`/personnes/${o.fournisseur_id}`} />
@@ -389,6 +394,7 @@ export default function OrderDetailPage() {
       {/* L'argent du fournisseur. Partiel permis : il paie ce qu'il veut, quand
           il veut — le reste dû suit. Rien n'oblige la marchandise à être
           entièrement livrée pour encaisser. */}
+      <div id="argent" />
       {goodsBonId && (
         <Section icon="coins" title="Argent" right={<span className="muted">Facturé {formatMoney(o.totals?.billed, cur)} · encaissé {formatMoney(collected, cur)}{Number(o.totals?.remise) !== 0 ? ` · remise ${formatMoney(o.totals.remise, cur)}` : ''}</span>}>
           {due > 0 ? (

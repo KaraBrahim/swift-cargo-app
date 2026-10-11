@@ -11,7 +11,8 @@ import { useApi, useDebounced } from '../api/useApi.js';
 import { Spinner, formatMoney, errorMessage, useToast, EmptyState } from '../components/ui.jsx';
 import { IconEl } from '../components/icons.jsx';
 import { Who, Sources } from '../components/cells.jsx';
-import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
+import { ProgressBar } from '../components/ProgressBar.jsx';
+import { DebtCell } from '../components/DebtBanner.jsx';
 import { SearchBar } from '../components/SearchBar.jsx';
 import DateRangePicker, { defaultRange } from '../components/DateRangePicker.jsx';
 import { ArrivalCell } from '../components/ArrivalBadge.jsx';
@@ -92,7 +93,7 @@ export default function BonsPage() {
                 <thead>
                   <tr>
                     <th>Bon</th><th>Passager</th><th>Fournisseurs</th><th>Statut</th><th>Arrivée promise</th>
-                    <th>Voyage</th><th className="right">À payer</th><th className="right" aria-label="Actions" />
+                    <th>Voyage</th><th className="right">Dette envers le passager</th><th className="right" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -110,10 +111,10 @@ export default function BonsPage() {
                       <td><ArrivalCell bon={b} /></td>
                       <td className="bar-cell"><ProgressBar progress={b.progress} compact /></td>
                       <td className="right">
-                        <span className="cell-stack">
-                          <span>{formatMoney(b.transport_fee, b.transport_currency)}</span>
-                          <MoneyBar pay={b.pay} code={b.transport_currency} label="Versé" compact />
-                        </span>
+                        <DebtCell
+                          pay={b.pay} code={b.transport_currency} direction="out"
+                          idle={`${formatMoney(b.transport_fee, b.transport_currency)} · fixé au règlement`}
+                        />
                       </td>
                       <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
                         {/* Supprimer definitivement : reserve au super-administrateur. */}

@@ -9,7 +9,6 @@ import {
   orderManifestBody, tableDocBody,
 } from '../components/printDocument.js';
 import { openTicketWindow, bonTicket, orderTicket, listTicket } from '../components/printTicket.js';
-import { qrDataUrl } from '../lib/useQr.js';
 import DateRangePicker, { defaultRange } from '../components/DateRangePicker.jsx';
 
 const ACCENT = 'var(--c-bon)';
@@ -40,7 +39,6 @@ const DOCS = {
     load: (id) => api(`/bons/${id}`).then((r) => r.bon),
     title: (b) => b.reference,
     docTitle: 'Bon passager',
-    scan: (b) => ['bon', b.uuid],
     paper: 'a5',
     a4: bonDocBody,
     ticket: bonTicket,
@@ -53,7 +51,6 @@ const DOCS = {
     load: (id) => api(`/orders/${id}`).then((r) => r.order),
     title: (o) => o.reference,
     docTitle: 'Bon fournisseur — manifeste',
-    scan: (o) => ['order', o.uuid],
     paper: 'a5',
     a4: orderManifestBody,
     ticket: orderTicket,
@@ -92,7 +89,6 @@ const DOCS = {
     load: (id) => api(`/reports/person/personne/${id}?currency=DZD`),
     title: (d) => `Relevé ${d.person.name}`,
     docTitle: 'Relevé de compte',
-    scan: (d) => ['person', d.person.uuid],
     a4: personStatementBody,
     ticket: (d, societe) => listTicket({
       societe, docLabel: 'Relevé de compte', subtitle: d.person.name,
@@ -223,15 +219,12 @@ export default function ImpressionsPage() {
       let ok;
       if (spec) {
         const data = await spec.load(target, { range, personType });
-        // Le code scannable, produit avant le document : les constructeurs sont
-        // synchrones et reçoivent l'image toute faite.
-        const qr = spec.scan ? await qrDataUrl(...spec.scan(data)) : null;
         ok = onPaper
           ? openPrintWindow({
               title: spec.title(data), societe, docTitle: spec.docTitle,
-              subtitle: spec.title(data), body: spec.a4(data, qr), paper: fmt,
+              subtitle: spec.title(data), body: spec.a4(data), paper: fmt,
             })
-          : openTicketWindow({ title: spec.title(data), mm: Number(fmt), body: spec.ticket(data, societe, qr) });
+          : openTicketWindow({ title: spec.title(data), mm: Number(fmt), body: spec.ticket(data, societe) });
       } else {
         const payload = await api(listSpec.endpoint);
         const rows = listSpec.pick(payload);

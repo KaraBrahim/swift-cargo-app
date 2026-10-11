@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi.js';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { PresenceCard } from '../components/PresenceCard.jsx';
+import { DebtSummary } from '../components/DebtSummary.jsx';
 import { ORDER_STATUS } from '../components/orderStatus.js';
 import { api } from '../api/client.js';
 import { Spinner, formatMoney, fitStyle } from '../components/ui.jsx';
@@ -182,6 +183,9 @@ export default function Dashboard() {
       </div>
 
       {/* ── faut-il être au bureau aujourd'hui, demain ? ── */}
+      {/* L'argent qui reste dû, dans les deux sens : ce qui compte le plus. */}
+      <DebtSummary />
+
       <PresenceCard />
 
       {/* ── pipeline + financial ── */}

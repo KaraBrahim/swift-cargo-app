@@ -49,9 +49,6 @@ export const ticketCss = (mm = 80) => `
   .sign { margin-top: 7mm; }
   .sign .line { border-top: 1px solid #000; margin-top: 8mm; padding-top: 1mm; font-weight: 400; font-size: 10px; }
   .foot { margin-top: 4mm; font-weight: 400; font-size: 10px; }
-  .qr { margin-top: 4mm; text-align: center; }
-  .qr img { width: 26mm; height: 26mm; image-rendering: pixelated; }
-  .qr .ref { font-size: 10px; letter-spacing: 1px; margin-top: 1mm; }
   @media print { .no-print { display: none !important; } }
 `;
 
@@ -86,11 +83,7 @@ const line = (k, v) =>
   `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(String(v))}</span></div>`;
 
 // ── Bon passager — the everyday counter ticket ───────────────────────
-// Le code scannable du rouleau. Même bloc que sur l'A4, à la taille du papier.
-const qrTicket = (qr, reference) =>
-  (qr ? `<div class="qr"><img src="${qr}" alt=""><div class="ref">${esc(reference || '')}</div></div>` : '');
-
-export function bonTicket(bon, societe, qr) {
+export function bonTicket(bon, societe) {
   const cur = bon.transport_currency;
   const items = (bon.lines || []).map((l) => {
     const missing = missingOf(l);
@@ -125,7 +118,6 @@ export function bonTicket(bon, societe, qr) {
     ${bon.passager_payment != null
       ? `<div class="row tot"><span>PAYÉ AU PASSAGER</span><span>${esc(money(bon.passager_payment, cur))}</span></div>`
       : ''}
-    ${qrTicket(qr, bon.reference)}
     <div class="sign">
       <div class="line">Signature fournisseur</div>
       <div class="line">Signature passager</div>
@@ -134,7 +126,7 @@ export function bonTicket(bon, societe, qr) {
 }
 
 // ── Bon fournisseur — le fournisseur n'a que faire du transport ───────
-export function orderTicket(order, societe, qr) {
+export function orderTicket(order, societe) {
   return `
     ${header(societe, 'Bon fournisseur', order.reference)}
     ${line('Fournisseur', order.fournisseur_name || '—')}
@@ -146,7 +138,6 @@ export function orderTicket(order, societe, qr) {
     ${Number(order.totals?.discount) ? line('Remise', `− ${money(order.totals.discount)}`) : ''}
     <div class="row tot"><span>À FACTURER</span><span>${esc(money(order.totals?.billed ?? order.totals?.transport_fee))}</span></div>
     ${Number(order.totals?.loss_total) ? line('Total pertes', money(order.totals.loss_total)) : ''}
-    ${qrTicket(qr, order.reference)}
     <div class="sign"><div class="line">Responsable</div></div>
     ${footer(societe)}`;
 }

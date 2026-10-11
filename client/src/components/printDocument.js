@@ -64,11 +64,6 @@ export const PRINT_CSS = `
   .foot { margin-top:26px; border-top:1px solid #ddd; padding-top:8px; font-size:11px; color:#666; }
   .sign { margin-top:44px; display:flex; justify-content:space-between; font-size:13px; }
   .sign div { border-top:1px solid #999; padding-top:6px; width:30%; text-align:center; }
-  /* Le code qui ramène ce papier dans le système, avec sa référence en clair
-     dessous : un QR abîmé doit rester retapable. */
-  .qr { margin-top:22px; text-align:center; }
-  .qr img { width:104px; height:104px; image-rendering:pixelated; }
-  .qr div { margin-top:4px; font-size:11px; letter-spacing:1px; color:#666; }
   /* La barre d'avancement : en couleur à l'écran et sur PDF, et dite en toutes
      lettres dessous pour qu'un tirage noir et blanc ne perde rien. */
   .pgbar { height:10px; border:1px solid #bbb; border-radius:6px; overflow:hidden; margin:8px 0 6px;
@@ -103,8 +98,6 @@ const A5_CSS = `
   .paper-a5 .small { font-size: 9.5px; }
   .paper-a5 .foot { margin-top: 14px; font-size: 9.5px; }
   .paper-a5 .sign { margin-top: 26px; font-size: 11px; }
-  .paper-a5 .qr { margin-top: 12px; }
-  .paper-a5 .qr img { width: 78px; height: 78px; }
   /* Une ligne de tableau ne se coupe pas entre deux pages. */
   .paper-a5 tr { page-break-inside: avoid; }
 `;
@@ -141,11 +134,6 @@ export function journalBlock(events, { title = 'Journal', describe = describeEve
       <tbody>${rows}</tbody>
     </table>`;
 }
-
-// Le bloc scannable. Rien si la page n'a pas (encore) produit l'image : un
-// document sans QR reste un document valide, il se retrouve à la référence.
-export const qrBlock = (qr, reference) =>
-  (qr ? `<div class="qr"><img src="${qr}" alt=""><div>${esc(reference || '')}</div></div>` : '');
 
 // Open a standalone window with a finished document and trigger the print dialog.
 export function printWindowHtml({ title, societe, docTitle, subtitle, body, paper = 'a4' }) {
@@ -214,7 +202,7 @@ const rolesLabel = (p) => {
   return r.length ? r.join(' · ') : 'Personne';
 };
 
-export function personStatementBody(d, qr) {
+export function personStatementBody(d) {
   const owed = Number(d.solde);
   return `
     <div class="meta">
@@ -235,7 +223,6 @@ export function personStatementBody(d, qr) {
         <td class="r">${formatMoney(e.balance_after)}</td>`)}
       </tbody>
     </table>
-    ${qrBlock(qr, d.person.name)}
     <div class="sign"><div>Signature</div><div>Cachet société</div></div>`;
 }
 
@@ -245,7 +232,7 @@ const ORDER_STATUS_FR = Object.fromEntries(Object.entries(ORDER_STATUS).map(([k,
 // laquelle on discute. Chaque marchandise y suit ses quatre états — reçue,
 // confiée à un passager, arrivée en Algérie, remise au fournisseur — et le
 // récapitulatif dit exactement ce qui est facturé et pourquoi.
-export function orderManifestBody(d, qr) {
+export function orderManifestBody(d) {
   const cur = d.bons?.[0]?.transport_currency || d.carriers?.[0]?.transport_currency || '';
   const money = (v) => formatMoney(v, cur);
   const dt = (v) => (v ? new Date(v).toLocaleString('fr-FR') : '—');
@@ -312,7 +299,6 @@ export function orderManifestBody(d, qr) {
       ${Number(t.collected) ? `Reste dû : <strong>${money(t.due)}</strong><br>` : ''}
       ${Number(t.loss_total) ? `Valeur des manquants (portée en avoir) : ${money(t.loss_total)}<br>` : ''}
     </div>
-    ${qrBlock(qr, d.reference)}
     <div class="sign"><div>Responsable Chine</div><div>Responsable Algérie</div><div>Le fournisseur</div></div>`;
 }
 
@@ -365,7 +351,7 @@ export const missingOf = (l) => Math.max(measureQty(l) - deliveredOf(l), 0);
 export const lineAmount = (l) => Number(l.unit_price || 0) * pricedPart(l, deliveredOf(l));
 
 // ── Bon passager (A4 body) ───────────────────────────────────────────
-export function bonDocBody(bon, qr) {
+export function bonDocBody(bon) {
   const cur = bon.transport_currency;
   const body = (bon.lines || []).map((l) => {
     const missing = missingOf(l);
@@ -402,6 +388,5 @@ export function bonDocBody(bon, qr) {
       ${bon.passager_payment != null ? `Payé au passager (livré) : <strong>${formatMoney(bon.passager_payment, cur)}</strong>` : ''}
       ${bon.pay && Number(bon.pay.paid) > 0 ? `<br>Versé : ${formatMoney(bon.pay.paid, cur)} (${num(bon.pay.pct)} %)${Number(bon.pay.remise) !== 0 ? ` · Remise de règlement : ${formatMoney(bon.pay.remise, cur)}` : ''} · Reste : <strong>${formatMoney(bon.pay.rest, cur)}</strong>` : ''}
     </div>
-    ${qrBlock(qr, bon.reference)}
     <div class="sign"><div>Signature Fournisseur</div><div>Signature Passager</div></div>`;
 }

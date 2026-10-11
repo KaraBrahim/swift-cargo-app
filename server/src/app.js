@@ -22,7 +22,6 @@ import { notificationsRouter } from './modules/notifications/notifications.route
 import { searchRouter } from './modules/search/search.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
-import { scanRouter } from './modules/scan/scan.routes.js';
 import { maintenanceRouter } from './modules/maintenance/maintenance.routes.js';
 import { employeesRouter } from './modules/employees/employees.routes.js';
 import { agendaRouter } from './modules/agenda/agenda.routes.js';
@@ -116,7 +115,6 @@ export function createApp() {
   app.use('/api', searchRouter);
   app.use('/api', reportsRouter);
   app.use('/api', settingsRouter);
-  app.use('/api', scanRouter);
   app.use('/api', maintenanceRouter);
   app.use('/api', employeesRouter);
   app.use('/api', agendaRouter);

@@ -242,6 +242,7 @@ export async function listOrders({ status, search, fournisseurId, dateBy, from, 
             COUNT(b.id) AS bon_count,
             COALESCE(SUM(b.transport_fee),0) AS total_fee,
             COALESCE(SUM(b.discount),0) AS total_discount,
+            (SELECT x.transport_currency FROM bons x WHERE x.order_id = o.id ORDER BY x.id LIMIT 1) AS currency,
             COALESCE(SUM(b.loss_total),0) AS total_loss
        FROM orders o
        JOIN people f ON f.id = o.fournisseur_id

@@ -121,32 +121,6 @@ export function Section({ icon, title, count, right, children, tone = '' }) {
   );
 }
 
-// « Ce bon vient d'être scanné. »
-//
-// La douchette a ouvert cette fiche ; le bandeau dit d'où elle vient et met en
-// avant la seule action qu'on attend à ce stade. Il ne fait rien tout seul : un
-// coup de douchette par erreur ne doit jamais déplacer un bon.
-export function ScanBanner({ hit, onAct, onDismiss }) {
-  if (!hit) return null;
-  return (
-    <div className="dt-scan">
-      <span className="dt-scan-ico"><IconEl name="scan" /></span>
-      <span className="dt-scan-txt">
-        Scanné à l'instant
-        {hit.subtitle && <em>{hit.subtitle}</em>}
-      </span>
-      {hit.next && (
-        <button type="button" className="btn btn-gold" onClick={onAct}>
-          <IconEl name="chevronRight" />{hit.next.label}
-        </button>
-      )}
-      <button type="button" className="icon-btn" onClick={onDismiss} aria-label="Fermer le bandeau">
-        <IconEl name="close" />
-      </button>
-    </div>
-  );
-}
-
 // Qui a créé la fiche et quand : utile, jamais urgent — donc en bas, en petit.
 // Une note de bas de section. Avec du texte à l'intérieur, elle le dit ; avec
 // `by` et `at`, elle dit qui a créé la pièce et quand.

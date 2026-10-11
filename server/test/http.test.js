@@ -98,7 +98,12 @@ test('le parcours complet par HTTP : personne, ordre, bon passager, voyage, agen
   assert.ok(sum.today.arrivals >= 1);
   const list = await ok('GET', '/bons?dateBy=arrival&from=2035-03-05&to=2035-03-05');
   assert.ok(list.bons.some((b) => b.id === bon.id));
-  assert.ok((await ok('GET', '/orders?dateBy=pickup&from=2035-03-12&to=2035-03-12')).orders.some((x) => x.id === order.id));
+  const pickups = (await ok('GET', '/orders?dateBy=pickup&from=2035-03-12&to=2035-03-12')).orders;
+  const listed = pickups.find((x) => x.id === order.id);
+  assert.ok(listed);
+  // La liste dit la dette dans SA monnaie : sans elle, un ordre en yuans s'afficherait en dinars.
+  assert.equal(listed.currency, 'DZD');
+  assert.equal(listed.pay.rest, '52340.00');
   const sug = await ok('GET', '/bons/travel-suggestions');
   assert.ok(sug.airports.some((a) => a.value === 'Houari Boumediene' && a.wilaya === 'Alger'));
   await ok('PATCH', `/orders/${order.id}/pickup`, { date: '2035-03-15' });

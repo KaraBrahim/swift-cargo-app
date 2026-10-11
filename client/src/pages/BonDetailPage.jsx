@@ -14,13 +14,14 @@ import { useTabTitle } from '../components/TabsContext.jsx';
 import { Spinner, formatMoney, errorMessage, useToast } from '../components/ui.jsx';
 import { BON_STATUS, STATUS_ORDER } from '../components/bonStatus.js';
 import { IconEl } from '../components/icons.jsx';
-import { DetailHead, Kpis, Kpi, Section, Footnote, ScanBanner, StepFlow } from '../components/DetailKit.jsx';
+import { DetailHead, Kpis, Kpi, Section, Footnote, StepFlow } from '../components/DetailKit.jsx';
 import { EntityPicker, OptionChips } from '../components/EntityPicker.jsx';
 import { PrintButton } from '../components/PrintButton.jsx';
 import { ProgressBar, MoneyBar } from '../components/ProgressBar.jsx';
 import { TravelFields, travelOf, travelBody } from '../components/TravelFields.jsx';
 import { ArrivalBadge } from '../components/ArrivalBadge.jsx';
 import { Journal } from '../components/Journal.jsx';
+import { DebtBanner } from '../components/DebtBanner.jsx';
 import { RemiseControl, RoundChips } from '../components/RemiseControl.jsx';
 import { bonDocBody, measureQty, measureUnit, declaredOf, priceUnit } from '../components/printDocument.js';
 import { pricedPart } from '../lib/lineMath.js';
@@ -30,8 +31,6 @@ import { GoodsPicker, pickedValid, pickedTotal, pickedToLine } from '../componen
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import AmountInput from '../components/AmountInput.jsx';
 import { formatQty, formatDateFr, todayIso } from '../lib/format.js';
-import { useQr } from '../lib/useQr.js';
-import { useScanHit, clearScanHit } from '../lib/scanSignal.js';
 import { useIdempotent } from '../lib/useIdempotent.js';
 import { useIsSuper } from '../auth/AuthContext.jsx';
 
@@ -119,10 +118,6 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   const [travel, setTravel] = useState(null);
   const [stepDate, setStepDate] = useState(todayIso());
 
-  // Le code imprimé sur le papier, préparé pendant que la fiche s'affiche.
-  const qr = useQr('bon', data?.bon?.uuid);
-  // La douchette vient-elle d'ouvrir CETTE fiche ?
-  const scanHit = useScanHit('bon', id);
   const goodsRef = useRef(null);
   const moneyRef = useRef(null);
 
@@ -236,24 +231,13 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
         paidNow: settleCaisse && settlePaid ? settlePaid : undefined,
         closeWithRemise: settleCaisse && closeSettle ? true : undefined,
       },
-    })), settleCaisse ? 'Bon réglé et passager payé.' : 'Bon réglé — passager à payer.');
+    })), settleCaisse ? 'Bon réglé. Le versement est enregistré — vérifiez le reste dû.' : 'Bon réglé. La DETTE envers le passager reste ouverte : rien n’est sorti de la caisse, il faut encore le payer.');
   const collectFee = () =>
     act(() => idem((key) => api(`/bons/${id}/collect-fee`, { method: 'POST', idem: key, body: { caisseId: Number(feeForm.caisseId), amount: feeForm.amount, settle: feeForm.settle || undefined } })), 'Frais encaissés.');
   const payPassager = () =>
     act(() => idem((key) => api(`/bons/${id}/pay-passager`, { method: 'POST', idem: key, body: { caisseId: Number(payForm.caisseId), amount: payForm.amount, settle: payForm.settle || undefined } })), 'Passager payé.');
 
   const isFournisseurBon = bon.order_id != null;
-  // L'action que le bandeau propose. Avancer d'un cran passe par le même chemin
-  // que le bouton ordinaire ; les deux autres ne font que porter le regard là où
-  // la saisie attend.
-  const runScanAction = () => {
-    const act = scanHit?.next?.action;
-    clearScanHit();
-    if (act === 'advance') advance();
-    else if (act === 'reconcile') goodsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    else if (act === 'pay') moneyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  };
-
   const toPickedLine = (l, index) => {
     const e = toEditLine(l);
     const src = index.get(String(l.source_line_id));
@@ -317,6 +301,13 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
   const caisseSub = (c) => `${formatMoney(c.balances?.[cur] ?? 0, cur)} disponible`;
 
   const reconciling = bon.status === 'arrive';
+
+  // L'argent qui reste dû sur CE bon : au passager (on lui doit) ou, pour le bon
+  // d'un ordre, par le fournisseur. Dit en grand tant qu'il en reste, même après
+  // « payer plus tard » : confirmer ne fait bouger aucune caisse, et ne doit
+  // surtout pas faire oublier la dette.
+  const payRest = !isFournisseurBon && bon.pay ? Number(bon.pay.rest) : 0;
+  const goToMoney = () => moneyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   // Un bon dont il manque quelque chose ne doit pas ressembler à un bon complet.
   // Marque MUETTE, pas dorée : le manquant est déjà constaté et porté en avoir
@@ -386,8 +377,8 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
               docTitle="Bon passager"
               paper="a5"
               subtitle={bon.reference}
-              a4={() => bonDocBody(bon, qr)}
-              ticket={(societe) => bonTicket(bon, societe, qr)}
+              a4={() => bonDocBody(bon)}
+              ticket={(societe) => bonTicket(bon, societe)}
             />
             {/* Supprimer definitivement : reserve au super-administrateur. */}
             {isSuper && (
@@ -399,11 +390,27 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
         }
       />
 
-      <ScanBanner hit={scanHit} onAct={runScanAction} onDismiss={clearScanHit} />
-
       {/* Cliquable, contrairement à celui d'un ordre : le statut d'un bon est
           réel — stocké, avancé à la main — pas déduit. */}
       <StepFlow steps={steps} current={bon.status} onJump={jumpStatus} busy={busy} />
+
+      {!isFournisseurBon && bon.passager_id && bon.status === 'regle' && bon.pay && (
+        <DebtBanner
+          direction="out" who={bon.passager_name} due={bon.pay.rest} paid={bon.pay.paid} total={bon.pay.due}
+          currency={cur} remise={bon.pay.remise} onAct={goToMoney}
+        />
+      )}
+      {!isFournisseurBon && bon.passager_id && bon.status === 'arrive' && (
+        <DebtBanner pending="Ce que vous devrez au passager sera fixé au règlement, une fois les manquants connus. Tant qu'il n'est pas réglé, aucune dette n'est encore écrite." />
+      )}
+      {isFournisseurBon && (
+        <DebtBanner
+          direction="in" who={bon.fournisseur_name}
+          due={dueAfter(bon.transport_fee, bon.payments, 'fee_payment')}
+          paid={(bon.payments ?? []).filter((p) => p.type === 'fee_payment').reduce((s, p) => s + Math.abs(Number(p.amount)), 0)}
+          total={Number(bon.transport_fee)} currency={cur} onAct={goToMoney}
+        />
+      )}
 
       {/* Un bon fournisseur n'a pas de passager : à sa place, ce qu'il contient.
           Une tuile qui dit « — » occupe la même surface qu'une qui informe. */}
@@ -417,8 +424,8 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
         <Kpi icon="fournisseur" label={fourns.length > 1 ? 'Fournisseurs' : 'Fournisseur'} value={fournValue}
           sub={fourns.length > 1 ? fourns.map((f) => f.name).join(', ') : null} to={fournTo || undefined} />
         <Kpi hero icon="coins" tone="gold"
-          label={isFournisseurBon ? 'Facturé' : bon.status === 'regle' ? 'Payé au passager' : 'À payer'}
-          value={formatMoney(bon.status === 'regle' && bon.passager_payment != null ? bon.passager_payment : bon.transport_fee, cur)}
+          label={isFournisseurBon ? 'Facturé' : bon.status === 'regle' ? (payRest > 0 ? 'Reste à payer' : 'Payé au passager') : 'À payer'}
+          value={formatMoney(bon.status === 'regle' && bon.pay ? (payRest > 0 ? bon.pay.rest : bon.pay.paid) : bon.transport_fee, cur)}
           sub={isFournisseurBon && Number(bon.commission) > 0
             ? `dont ${formatMoney(bon.commission, cur)} de commission`
             : null} />
@@ -671,7 +678,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
             </tbody>
             <tfoot>
               <tr className="total-row">
-                <td colSpan={(reconciling ? 5 : 4) + (isFournisseurBon ? 0 : 1)} className="right">Total {reconciling ? 'à payer (livré)' : bon.status === 'regle' ? 'payé' : 'commandé'}</td>
+                <td colSpan={(reconciling ? 5 : 4) + (isFournisseurBon ? 0 : 1)} className="right">Total {reconciling ? 'à payer (livré)' : bon.status === 'regle' ? (payRest > 0 ? 'dû au passager' : 'réglé') : 'commandé'}</td>
                 <td className="right gold"><strong>{formatMoney(reconciling ? recDeliveredTotal : (bon.status === 'regle' ? bon.passager_payment ?? 0 : bon.transport_fee), cur)}</strong></td>
                 {reconciling && <td />}
               </tr>
@@ -753,7 +760,7 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
                 <button className="btn btn-gold" disabled={busy || (payMode === 'manual' && !(Number(payment) >= 0))} onClick={settle}>
                   <IconEl name="check" />{settleCaisse
                     ? `Régler et verser ${formatMoney(Number(settlePaid || 0), cur)}`
-                    : 'Régler (payer plus tard)'}
+                    : 'Régler — la dette reste à payer plus tard'}
                 </button>
               </div>
             </div>
@@ -762,7 +769,13 @@ export default function BonDetailPage({ bonId, autoEdit = false }) {
       </Section>
 
       <div ref={moneyRef} />
-      <Section icon="caisse" title="Argent">
+      <Section
+        icon="caisse"
+        title="Argent"
+        right={payRest > 0
+          ? <strong className="neg">Reste dû {formatMoney(payRest, cur)}</strong>
+          : (!isFournisseurBon && bon.status === 'regle' && bon.pay ? <span className="pos">Soldé</span> : null)}
+      >
         {bon.payments?.length > 0 && (
           <div className="table-wrap" style={{ marginBottom: 12 }}>
             <table className="table table-tight">

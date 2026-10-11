@@ -7,8 +7,6 @@ import * as rates from '../src/modules/rates/rates.service.js';
 import * as accounts from '../src/modules/accounts/accounts.service.js';
 import * as bons from '../src/modules/bons/bons.service.js';
 import * as orders from '../src/modules/orders/orders.service.js';
-import { resolveScan } from '../src/modules/scan/scan.service.js';
-import { encodeScan } from '../src/lib/scanCode.js';
 import { getPool } from '../src/db/pool.js';
 
 let db, ctx;
@@ -463,45 +461,4 @@ test('un manquant qui dépasse le portage laisse une dette au passager', async (
   // Revenir en arrière la dénoue exactement, sans la compter deux fois.
   await bons.setBonStatus({ admin: ctx.admin, id: bon.id, target: 'arrive' });
   assert.equal(bal(await accounts.getAccount('personne', pas.id)) ?? '0.00', '0.00');
-});
-
-test('un code scanné retrouve sa pièce, et refuse ce qu’il ne connaît pas', async () => {
-  const pool = getPool();
-  const f = (await pool.query(
-    "INSERT INTO people (name, phone, is_fournisseur) VALUES ('Fourn. Scan', '+86 1', true) RETURNING *"
-  )).rows[0];
-  const o = await orders.createOrder({ admin: ctx.admin, data: { fournisseurId: f.id, bons: [{
-    transportCurrency: 'DZD',
-    lines: [{ designation: 'Scanné', measure: 'quantite', quantity: '2', weight_kg: '2', unitPrice: '100' }],
-  }] } });
-  const order = await orders.getOrderDetail(o.id);
-
-  const hitOrder = await resolveScan(encodeScan('order', order.uuid));
-  assert.equal(hitOrder.path, `/bons-fournisseur/${o.id}`);
-  assert.equal(hitOrder.reference, order.reference);
-
-  // Le bon fournisseur enfant renvoie vers son ordre, pas vers une fiche à lui.
-  const child = await bons.getBonDetail(order.bons[0].id);
-  assert.equal((await resolveScan(encodeScan('bon', child.uuid))).path, `/bons-fournisseur/${o.id}`);
-
-  const person = await resolveScan(encodeScan('person', f.uuid));
-  assert.equal(person.path, `/personnes/${f.id}`);
-
-  // Un bon passager en transit propose l'action attendue au comptoir.
-  const pas = (await pool.query(
-    "INSERT INTO people (name, is_passager) VALUES ('Passager Scan', true) RETURNING *"
-  )).rows[0];
-  const lot = (await bons.listAllocatable({ orderId: o.id }))[0];
-  const bp = await bons.createBon({ admin: ctx.admin, data: {
-    passagerId: pas.id, transportCurrency: 'DZD',
-    lines: [{ sourceLineId: lot.line_id, measure: 'quantite', quantity: '2', unitPrice: '40' }],
-  } });
-  await bons.advanceStatus({ admin: ctx.admin, id: bp.id });
-  const hit = await resolveScan(encodeScan('bon', bp.uuid));
-  assert.equal(hit.path, `/bons-passager/${bp.id}`);
-  assert.equal(hit.next.action, 'advance');
-  assert.match(hit.next.label, /Arriv/);
-
-  await assert.rejects(() => resolveScan('SC:B:00000000-0000-4000-8000-000000000000'), /aucune pièce/);
-  await assert.rejects(() => resolveScan('pas un code'), /illisible/);
 });

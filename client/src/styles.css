@@ -20,6 +20,7 @@
 @import './theme/flow.css';
 @import './theme/progress.css';
 @import './theme/travel.css';
+@import './theme/debt.css';
 @import './theme/notify.css';
 
 @theme inline {
