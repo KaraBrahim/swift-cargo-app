@@ -113,10 +113,13 @@ export function RemiseBlock({ due, amount, currency, onAmount, value: rm = NO_RE
       )}
 
       {rm.kind === 'settle' && (
-        <p className="muted rb-hint">
-          <strong>Total convenu</strong> : tapez dans « Montant » le total que la personne règle vraiment. La différence avec
-          le dû devient la remise, et le compte est soldé.
-        </p>
+        <div className="rb-row">
+          <label>
+            <span>Total convenu — ce que la personne règle vraiment</span>
+            <AmountInput autoFocus value={amount} onChange={onAmount} />
+          </label>
+          <p className="muted rb-hint">La différence avec le dû ({formatMoney(d, currency)}) devient la remise, et le compte est soldé.</p>
+        </div>
       )}
 
       {rm.kind !== 'none' && (
@@ -124,7 +127,7 @@ export function RemiseBlock({ due, amount, currency, onAmount, value: rm = NO_RE
           <div className="rb-sum" role="status">
             {figures.pending ? (
               <span className="muted">
-                {rm.kind === 'settle' ? 'Tapez le total convenu dans « Montant » : la remise s’en déduit.' : 'Indiquez la remise : le versement se recalcule.'}
+                {rm.kind === 'settle' ? 'Tapez le total convenu : la remise s’en déduit.' : 'Indiquez la remise : le versement se recalcule.'}
               </span>
             ) : (
               <>

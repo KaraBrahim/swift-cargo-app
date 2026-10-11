@@ -22,8 +22,18 @@ export function printHtml(html) {
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
   document.body.appendChild(frame);
   const w = frame.contentWindow;
-  const remove = () => setTimeout(() => frame.remove(), 500);
+  // Le clavier doit REVENIR à la page. Pendant l'impression le focus est dans
+  // l'iframe ; si on le retire sans le rendre, tous les champs de la page
+  // semblent morts — on clique, on tape, rien ne s'écrit — jusqu'à ce qu'on
+  // change de fenêtre. C'est le piège classique d'un print() dans un iframe.
+  const giveFocusBack = () => {
+    window.focus();
+    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur?.();
+  };
+  const remove = () => setTimeout(() => { frame.remove(); giveFocusBack(); }, 500);
   w.addEventListener('afterprint', remove, { once: true });
+  // Filet : si l'événement ne vient jamais (boîte fermée de force), on nettoie quand même.
+  setTimeout(() => { if (frame.isConnected) { frame.remove(); giveFocusBack(); } }, 5 * 60 * 1000);
   w.document.open();
   w.document.write(html);
   w.document.close();

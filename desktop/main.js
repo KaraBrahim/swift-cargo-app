@@ -266,6 +266,10 @@ function createWindow(port, site) {
   });
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
+  // Sous Windows, après une boîte système (impression, enregistrement d'un PDF),
+  // Chromium peut garder le clavier hors de la page : les champs ne reçoivent plus
+  // rien. Rendre le focus à la page à chaque retour de la fenêtre règle cela.
+  win.on('focus', () => win.webContents.focus());
   win.loadURL(`http://127.0.0.1:${port}/`);
 
   // Un lien externe s'ouvre dans le navigateur, pas dans la fenêtre de

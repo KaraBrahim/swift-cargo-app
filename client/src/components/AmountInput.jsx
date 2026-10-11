@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { NumericFormat } from 'react-number-format';
 import { GROUP_SEPARATOR, DECIMAL_SEPARATOR } from '../lib/format.js';
 
@@ -48,6 +49,8 @@ export default function AmountInput({
   onKeyDown,
   ...rest
 }) {
+  // Voir onFocus : le relâchement de la souris défait la sélection qu'on vient de faire.
+  const fresh = useRef(false);
   const empty = value === '' || value == null;
   const size = Number(step);
   const stepped = Number.isFinite(size) && size > 0;
@@ -94,7 +97,14 @@ export default function AmountInput({
       // caret after the zero and produces 0.005. Selecting on focus makes the
       // first keystroke replace the amount, which is what everyone expects of a
       // field that is already filled in.
-      onFocus={(e) => e.target.select()}
+      //
+      // Attention : un clic à la souris pose le curseur au relâchement (mouseup), APRÈS
+      // le focus, et défait ce select(). On tapait alors dans les décimales déjà
+      // pleines (« 17 701.56 ») et chaque chiffre était refusé : le champ semblait
+      // mort. D'où la sélection différée d'un tour, et le mouseup neutralisé une fois.
+      onFocus={(e) => { fresh.current = true; const el = e.target; setTimeout(() => el.select(), 0); }}
+      onMouseUp={(e) => { if (fresh.current) { fresh.current = false; e.preventDefault(); } }}
+      onBlur={() => { fresh.current = false; }}
       onValueChange={(v, info) => {
         // Fires on programmatic changes too — reacting to those would fight the
         // parent's own state (a reset to '' would bounce straight back).
