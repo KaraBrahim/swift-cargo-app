@@ -22,6 +22,7 @@
 @import './theme/travel.css';
 @import './theme/debt.css';
 @import './theme/money.css';
+@import './theme/combo.css';
 @import './theme/notify.css';
 
 @theme inline {

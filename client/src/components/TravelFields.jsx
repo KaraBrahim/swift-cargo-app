@@ -5,9 +5,10 @@
 // organisent leur venue au bureau. Les aéroports et les compagnies se proposent
 // à partir de ce qui a déjà été saisi (plus fréquent d'abord) — mais le champ
 // reste libre : un nouvel aéroport, une nouvelle compagnie, se tapent.
-import { useId } from 'react';
+import { useMemo } from 'react';
 import { useApi } from '../api/useApi.js';
 import { WilayaField } from './WilayaField.jsx';
+import { ComboInput } from './ComboInput.jsx';
 import { formatDateFr } from '../lib/format.js';
 
 export const emptyTravel = () => ({
@@ -42,8 +43,8 @@ export function TravelFields({ value, onChange, showActual = false }) {
   const sugg = useApi('/bons/travel-suggestions');
   const airports = sugg.data?.airports ?? [];
   const airlines = sugg.data?.airlines ?? [];
-  const airportList = useId();
-  const airlineList = useId();
+  const airportOptions = useMemo(() => airports.map((a) => ({ value: a.value, hint: a.wilaya || undefined })), [airports]);
+  const airlineOptions = useMemo(() => airlines.map((a) => ({ value: a.value })), [airlines]);
 
   // Un aéroport connu ramène sa wilaya habituelle — sans écraser une saisie.
   const pickAirport = (name) => {
@@ -77,30 +78,12 @@ export function TravelFields({ value, onChange, showActual = false }) {
       <div className="travel-row">
         <label className="field field-grow">
           <span>Aéroport d’arrivée</span>
-          <input
-            list={airportList}
-            value={value.airport || ''}
-            onChange={(e) => pickAirport(e.target.value)}
-            placeholder="Houari Boumediene, Es Senia…"
-            autoComplete="off"
-          />
-          <datalist id={airportList}>
-            {airports.map((a) => <option key={a.value} value={a.value}>{a.wilaya || ''}</option>)}
-          </datalist>
+          <ComboInput value={value.airport} onChange={pickAirport} options={airportOptions} placeholder="Houari Boumediene, Es Senia…" />
         </label>
         <WilayaField value={value.airportWilaya} onChange={(v) => set({ airportWilaya: v })} />
         <label className="field field-grow">
           <span>Compagnie</span>
-          <input
-            list={airlineList}
-            value={value.airline || ''}
-            onChange={(e) => set({ airline: e.target.value })}
-            placeholder="Air China, Turkish Airlines…"
-            autoComplete="off"
-          />
-          <datalist id={airlineList}>
-            {airlines.map((a) => <option key={a.value} value={a.value} />)}
-          </datalist>
+          <ComboInput value={value.airline} onChange={(v) => set({ airline: v })} options={airlineOptions} placeholder="Air China, Turkish Airlines…" />
         </label>
       </div>
     </div>

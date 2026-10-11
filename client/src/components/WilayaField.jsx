@@ -1,22 +1,15 @@
 // La wilaya d'une personne : une liste d'Algérie proposée, un texte libre accepté.
-import { useId } from 'react';
+import { useMemo } from 'react';
 import { WILAYAS } from '../lib/wilayas.js';
+import { ComboInput } from './ComboInput.jsx';
 
 export function WilayaField({ value, onChange, label = 'Wilaya' }) {
-  const listId = useId();
+  // Le numéro officiel à droite de chaque nom : 01 Adrar, 31 Oran…
+  const options = useMemo(() => WILAYAS.map((w, i) => ({ value: w, hint: String(i + 1).padStart(2, '0') })), []);
   return (
     <label className="field">
       <span>{label}</span>
-      <input
-        list={listId}
-        value={value || ''}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Oran, Alger… ou une ville"
-        autoComplete="off"
-      />
-      <datalist id={listId}>
-        {WILAYAS.map((w, i) => <option key={w} value={w}>{String(i + 1).padStart(2, '0')}</option>)}
-      </datalist>
+      <ComboInput value={value} onChange={onChange} options={options} placeholder="Oran, Alger… ou une ville" maxShown={60} />
     </label>
   );
 }
